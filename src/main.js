@@ -10,8 +10,10 @@ import { AmbientAudio } from './audio.js';
 import { bindInput } from './input.js';
 import { createUI } from './ui.js';
 import { engineSettings } from './settings.js';
+import { reviewSettings } from './debug.js';
 
 const look = engineSettings(art.default ?? art.LOOK ?? art.look ?? art, window.innerHeight > window.innerWidth);
+look.debug = reviewSettings(location.search, location.hostname);
 let storage;
 try { storage = window.localStorage; } catch { storage = null; }
 const memory = loadMemory(storage);
@@ -83,20 +85,33 @@ function tick(now) {
   }
   camera.update(flight, dt); renderer.render(flight);
   document.body.dataset.ready = 'true';
+  ui.ready();
   if (flying && now - lastSave > 5000) { persist(); lastSave = now; }
-  if (!universe.pending.length) ui.ready();
   if (flying || universe.pending.length || (started && !camera.settled())) schedule();
 }
 
 try {
   renderer = new SpaceRenderer(ui.elements.canvas, seed, look, quality);
   camera = new CameraRig(renderer.camera, look.camera, memory?.framing);
+  if (Object.keys(look.debug).length) window.__flightReview = {
+    get time() { return flight.time; },
+    advance(seconds) {
+      const target = flight.time + Math.max(0, Math.min(3600, seconds));
+      while (flight.time < target - 1e-6) {
+        universe.update(flight.position, { onLoad: (cell) => renderer.loadCell(cell), onUnload: (cell) => renderer.unloadCell(cell) });
+        stepFlight(flight, Math.min(1 / 30, target - flight.time), universe.pointsOfInterest(), universe.obstacles(flight.position), look.pacing);
+      }
+      renderer.updateStars(universe, flight.position); camera.update(flight, 1); persist(); last = 0; schedule();
+    },
+  };
   input = bindInput(ui.elements.canvas, {
     orbit: (x, y) => camera.orbit(x, y), steer: (yaw, pitch) => steerFlight(flight, yaw, pitch), zoom: (amount) => camera.zoom(amount),
     pause: togglePause, wake: ui.wake, active: () => started,
     change: () => { if (paused) schedule(); },
   });
   ui.elements.canvas.tabIndex = 0;
+  // Keyboard focus must keep the full viewport rectangular.
+  ui.elements.canvas.style.borderRadius = '0';
   ui.elements.canvas.setAttribute('aria-label', 'A spacecraft gliding through a generated universe. Drag to orbit; arrow keys steer.');
   ui.elements.canvas.addEventListener('webglcontextlost', (event) => {
     event.preventDefault(); paused = true; sync(); ui.announce('The view was interrupted. Reload to resume your journey.'); persist();
@@ -119,7 +134,8 @@ try {
   });
   window.addEventListener('pageshow', (event) => { if (event.persisted) { last = 0; sync(); schedule(); } });
   sync(); schedule();
-} catch {
+} catch (error) {
+  console.error(error);
   renderer?.dispose();
   ui.error('This view needs WebGL 2. Try another browser.');
 }

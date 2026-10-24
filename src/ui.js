@@ -85,14 +85,14 @@ export function createUI(actions, timings = {}) {
       document.body.classList.toggle('is-paused', paused); document.body.dataset.paused = String(paused);
       if (elements.pause) {
         elements.pause.setAttribute('aria-pressed', String(paused));
-        elements.pause.setAttribute('aria-label', paused ? 'Resume flight' : 'Pause flight');
+        elements.pause.setAttribute('aria-label', 'Pause');
         elements.pause.title = paused ? 'Resume (space)' : 'Pause (space)';
         elements.pause.dataset.paused = String(paused);
         const label = elements.pause.querySelector('[data-label], .label, .control-label');
         if (label) label.textContent = paused ? 'Resume' : 'Pause';
         else if (!elements.pause.querySelector('svg')) elements.pause.textContent = paused ? 'Resume' : 'Pause';
       }
-      if (elements.sound) { elements.sound.setAttribute('aria-pressed', String(sound)); elements.sound.setAttribute('aria-label', sound ? 'Turn sound off' : 'Turn sound on'); }
+      if (elements.sound) { elements.sound.setAttribute('aria-pressed', String(sound)); elements.sound.setAttribute('aria-label', 'Sound'); }
       if (elements.volume) elements.volume.value = String(volume * (Number(elements.volume.max) || 1));
       if (elements.seed) elements.seed.textContent = String(seed);
       if (elements.share?.tagName === 'A') elements.share.href = actions.share();

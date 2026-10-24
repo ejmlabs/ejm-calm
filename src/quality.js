@@ -5,14 +5,15 @@ export function createQuality({ mobile = false, dpr = 1, maxDpr, minDpr, targetF
 }
 
 export function updateQuality(state, milliseconds) {
-  if (!Number.isFinite(milliseconds) || milliseconds <= 0 || milliseconds > 250) return false;
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0 || milliseconds > 2000) return false;
   state.average += (milliseconds - state.average) * 0.035;
-  if (state.cooldown > 0) { state.cooldown--; return false; }
-  if (++state.samples < 90) return false;
+  if (state.cooldown > 0) { state.cooldown -= milliseconds; return false; }
+  state.samples += milliseconds;
+  if (state.samples < 3000) return false;
   state.samples = 0;
   const previous = state.ratio;
   if (state.average > state.target * 1.3) state.ratio = Math.max(state.minimum, state.ratio - 0.15);
   else if (state.average < state.target * 1.08) state.ratio = Math.min(state.maximum, state.ratio + 0.05);
-  if (previous !== state.ratio) { state.cooldown = 150; return true; }
+  if (previous !== state.ratio) { state.cooldown = 3000; return true; }
   return false;
 }

@@ -1,7 +1,9 @@
 import { cellRandom, hash } from './rng.js';
 import { noise3 } from './noise.js';
+import art from './look.js';
+import { planetAppearance } from './planet-data.js';
 
-export const CELL_SIZE = 1200;
+export const CELL_SIZE = art.stars.field.cellSize;
 export const cellOf = (position) => position.map((n) => Math.floor((n + CELL_SIZE / 2) / CELL_SIZE));
 export const cellKey = (x, y, z) => `${x},${y},${z}`;
 
@@ -10,18 +12,22 @@ export function generateCell(seed, x, y, z) {
   const point = (rng, margin = 0) => origin.map((n) => n + (rng() - 0.5) * (CELL_SIZE - margin * 2));
   const stars = [], planets = [], asteroids = [], nebulae = [], galaxies = [], events = [];
   const starRng = cellRandom(seed, x, y, z, 1);
-  const count = 32 + Math.floor(starRng() * 29);
+  const count = art.stars.field.perCell.high;
   for (let i = 0; i < count; i++) {
-    stars.push({ position: point(starRng), size: 0.7 + starRng() ** 6 * 4, warmth: starRng(), brightness: 0.3 + starRng() * 0.7 });
+    stars.push({ position: point(starRng), size: art.stars.field.sizePx[0] + starRng() ** 3 * (art.stars.field.sizePx[1] - art.stars.field.sizePx[0]),
+      warmth: starRng(), brightness: 0.25 + starRng() ** 2 * 0.75, halo: starRng() < art.stars.field.halo.chance });
   }
   const planetRng = cellRandom(seed, x, y, z, 2);
   const opening = x === 0 && y === 0 && z === 0;
-  if (opening || planetRng() < 0.065) {
-    const radius = opening ? 108 + planetRng() * 25 : 46 + planetRng() * 113;
-    const position = opening ? [280 + planetRng() * 80, 90 + planetRng() * 70, -460] : point(planetRng, 190);
-    planets.push({ id: `${x}:${y}:${z}:planet`, position, radius, palette: Math.floor(planetRng() * 3),
-      rings: opening || planetRng() < 0.37, tilt: 0.18 + planetRng() * 0.7, phase: planetRng() * Math.PI * 2,
-      moon: planetRng() < 0.5, seed: hash(seed, x, y, z, 23) });
+  if (opening || planetRng() < 0.025) {
+    const radius = art.planets.radius[0] + planetRng() ** (opening ? 12 : 2) * (art.planets.radius[1] - art.planets.radius[0]);
+    const position = opening ? [510 + planetRng() * 100, 155 + planetRng() * 70, -1100] : point(planetRng, 190);
+    const appearanceSeed = hash(seed, x, y, z, 32);
+    const appearance = planetAppearance(appearanceSeed, regionWeights(seed, position, art.regionField));
+    if (opening || Math.hypot(position[0], position[1], position[2] - 350) > radius * 2.8 + 300) {
+      planets.push({ id: `${x}:${y}:${z}:planet`, position, radius, ...appearance,
+        tilt: (planetRng() - 0.5) * 0.8, seed: appearanceSeed });
+    }
   }
   const rockRng = cellRandom(seed, x, y, z, 3);
   if (!opening && rockRng() < 0.075) {
@@ -34,7 +40,7 @@ export function generateCell(seed, x, y, z) {
   }
   const cloudRng = cellRandom(seed, x, y, z, 4);
   if (cloudRng() < 0.085 || (x === 0 && y === 0 && z === -1)) {
-    nebulae.push({ position: point(cloudRng, 250), radius: 320 + cloudRng() * 240,
+    nebulae.push({ position: point(cloudRng, 250), radius: art.nebula.radius[0] + cloudRng() * (art.nebula.radius[1] - art.nebula.radius[0]),
       palette: Math.floor(cloudRng() * 3), rotation: cloudRng() * 6.28, seed: hash(seed, x, y, z, 4) });
   }
   const galaxyRng = cellRandom(seed, x, y, z, 5);

@@ -417,4 +417,287 @@ export const ui = {
   defaultVolume: 0.5,
 };
 
-export default { UNIT, REGIONS, regionField, stars, sky, nebula, planets, asteroids, galaxies, rare, ship, camera, flight, grade, quality, ui };
+// ---------------------------------------------------------------------------------------------
+// Realism targets (phase 3). See .orch/REALISM.md. Everything above stays valid; these are
+// additions the engine adopts as it moves to physically based, HDR rendering.
+// ---------------------------------------------------------------------------------------------
+
+// Blackbody color ramp, sRGB, normalised to the brightest channel. Interpolate in linear space.
+export const blackbody = [
+  [2500, '#ffa148'],
+  [3000, '#ffb46b'],
+  [3500, '#ffc489'],
+  [4000, '#ffd1a3'],
+  [4500, '#ffdbba'],
+  [5000, '#ffe4ce'],
+  [5500, '#ffecdf'],
+  [6000, '#fff3ef'],
+  [6500, '#fff9fd'],
+  [7000, '#f5f3ff'],
+  [8000, '#e3e9ff'],
+  [9000, '#d6e1ff'],
+  [10000, '#ccdbff'],
+  [12000, '#bfd3ff'],
+  [15000, '#b3ccff'],
+  [20000, '#a8c5ff'],
+  [30000, '#9fbfff'],
+];
+
+export const realism = {
+  // Spectral classes. `volume` = share by count in a volume (3D field stars, system stars before
+  // bias); `apparent` = share among visible stars on the sky shell (luminous classes over-represented).
+  starClasses: {
+    O: { tempK: [30000, 30000], volume: 0.00003, apparent: 0.002, luminosity: [30000, 200000] },
+    B: { tempK: [10000, 30000], volume: 0.0013, apparent: 0.1, luminosity: [25, 30000] },
+    A: { tempK: [7500, 10000], volume: 0.006, apparent: 0.22, luminosity: [5, 25] },
+    F: { tempK: [6000, 7500], volume: 0.03, apparent: 0.19, luminosity: [1.5, 5] },
+    G: { tempK: [5200, 6000], volume: 0.076, apparent: 0.14, luminosity: [0.6, 1.5] },
+    K: { tempK: [3700, 5200], volume: 0.121, apparent: 0.31, luminosity: [0.08, 0.6] },
+    M: { tempK: [2500, 3700], volume: 0.765, apparent: 0.038, luminosity: [0.0001, 0.08] },
+  },
+  // Apparent magnitude on the shell: N(<m) ∝ 10^(slope·m). Flux = 10^(−0.4·(m − mRef)).
+  magnitudes: {
+    range: [-1.0, 7.5],
+    slope: 0.48, // ≈ 3× more stars per magnitude fainter
+    mRef: 2.0, // a magnitude-2 star maps to linear intensity 1.0 before exposure
+    countByTier: { high: 9000, medium: 6000, low: 3500 },
+  },
+  // Point spread: Gaussian core + faint wide halo, no diffraction spikes.
+  starPsf: {
+    coreSigmaPx: 0.55, // at DPR 1; scale with DPR
+    minFootprintPx: 1.0, // faint stars never shrink below one pixel; dim by intensity instead
+    halo: { fromMagnitude: 1.5, radiusPx: [6, 14], peak: 0.03 }, // only m < 1.5 get a halo
+    glare: { fromMagnitude: 0.0, radiusPx: 22, peak: 0.012 }, // brightest few only; circular, soft
+    hdrPeak: 6.0, // linear intensity cap for the brightest core, so bloom catches it
+  },
+  // Depth layers that give parallax and scale.
+  depthLayers: {
+    shell: { distance: 'infinity', parallax: 0 },
+    field: { cellSize: 2400, viewRadius: 9000, perCell: { high: 220, medium: 140, low: 80 } },
+    near: { box: 90, dustApparentSpeedCap: 10 }, // dust flow never faster than this (u/s) on screen
+  },
+
+  // Nebulae: raymarched impostors over a bounding sphere, drawn into a reduced-resolution buffer.
+  nebula: {
+    density: {
+      warpStrength: 0.65, // domain warp: p += warp · fbm(p · 0.5)
+      warpOctaves: 2,
+      ridgedOctaves: 5, // ridged multifractal for filaments: 1 − |noise|
+      ridgeSharpness: 2.2,
+      baseFrequency: 1.8, // per nebula radius
+      erosion: 0.42, // subtract before clamping so edges break up into wisps
+      shape: 'ellipsoid', // falloff envelope, axes 1 : [0.5, 0.9] : [0.3, 0.7]
+    },
+    // Emission lines in display sRGB (artistic, readable versions of the real lines).
+    emission: {
+      hAlpha: '#e8466a', // 656 nm, rendered rose rather than deep red so it reads on screens
+      oIII: '#4fd8d0', // 501 nm teal
+      sII: '#b3222f', // 672 nm deep red, sits at the outskirts
+      hBeta: '#5a7dff',
+      reflection: '#6c8cff', // blue scattered starlight near embedded stars
+    },
+    // Mix per region (weights for the emission channels above).
+    regionMix: {
+      tidepool: { oIII: 0.55, hAlpha: 0.15, reflection: 0.3 },
+      ember: { hAlpha: 0.6, sII: 0.25, oIII: 0.15 },
+      hollow: { reflection: 0.6, oIII: 0.2, hAlpha: 0.2, intensityScale: 0.35 },
+    },
+    // Structure: OIII sits in the hot core, H-alpha in the shell, SII at the edge.
+    layering: { oIII: [0.0, 0.45], hAlpha: [0.25, 0.85], sII: [0.6, 1.0] }, // normalised radius bands
+    dust: {
+      color: '#2a1a12', // absorbs and slightly reddens what is behind it
+      extinction: 1.6, // per unit density, Beer–Lambert
+      reddening: [1.0, 0.85, 0.65], // per-channel extinction multipliers (blue lost first)
+      laneFrequency: 3.4,
+      coverage: 0.35,
+    },
+    embeddedStars: { count: [1, 4], tempK: [12000, 30000], lightRadius: 0.35, intensity: 1.4 },
+    emissionScale: 0.9, // linear HDR emission at density 1; nebulae stay below the bloom threshold
+    steps: { high: 48, medium: 32, low: 16 },
+    resolution: { high: 0.5, medium: 0.5, low: 0.35 }, // of the drawing buffer
+    jitter: 'blueNoise', // per-pixel ray offset, rotated per frame
+    history: { high: 0.85, medium: 0.8, low: 0 }, // temporal blend; 0 = off
+    lowTierFallback: { slices: 6 }, // if raymarching misses budget: 6 camera-facing slices sampling the same 3D density
+  },
+
+  // Planet surfaces, baked once per planet into equirect maps (albedo+height, specular mask, clouds)
+  // and shaded per pixel. Names match planets.types; `lava` is the type keyed `ember` above.
+  planets: {
+    bake: { size: { high: [1024, 512], medium: [512, 256], low: [512, 256] }, framesToBake: 6 },
+    rocky: {
+      albedo: ['#5e544c', '#8a7a6a', '#b39c82', '#d6c2a4'],
+      continents: { frequency: 1.6, octaves: 6 },
+      craters: { layers: 3, density: [40, 220, 900], radius: [0.08, 0.025, 0.006], rimHeight: 0.35 },
+      reliefStrength: 0.9,
+    },
+    oceanic: {
+      deep: '#0b2a4a',
+      shallow: '#1f6a8f',
+      land: ['#4f6b3a', '#7d7a4e', '#b8a47a'],
+      ice: '#e8f1f6',
+      seaLevel: 0.52,
+      continents: { frequency: 1.3, octaves: 7, warp: 0.4 },
+      polarCaps: 0.12, // latitude fraction
+      glint: { roughness: 0.08, strength: 1.6 }, // sun glint on water (specular mask = ocean)
+      clouds: { coverage: 0.48, frequency: 2.4, octaves: 6, warp: 0.6, color: '#f4f7fa', drift: 0.0004, shadow: 0.35 },
+      reliefStrength: 0.5,
+    },
+    gas: {
+      bands: [8, 16],
+      bandWarp: 0.18, // fraction of one band width
+      turbulence: { octaves: 5, alongLongitude: 3.0 }, // stretch noise east–west
+      storms: { count: [1, 3], size: [0.04, 0.12], color: '#c9653a' },
+      palettes: [
+        ['#d9b38c', '#a8714e', '#f1e1c6', '#7a5643'],
+        ['#9fb6d9', '#5d7bb0', '#e4ecf6', '#3d4f7a'],
+        ['#cdbf9e', '#9a8f72', '#ece4cf', '#6c6450'],
+      ],
+      reliefStrength: 0.0,
+      limbDarkening: 0.55,
+    },
+    ice: {
+      albedo: ['#cfe3ee', '#9cc0d6', '#f4fbff', '#6f93ad'],
+      cracks: { frequency: 6, width: 0.012, color: '#7a5a48', octaves: 3 }, // Europa-like lineae
+      reliefStrength: 0.35,
+      specular: { roughness: 0.3, strength: 0.4 },
+    },
+    lava: {
+      crust: ['#1a1412', '#2a1d1a', '#4a2c22'],
+      seams: { frequency: 4.5, width: 0.02, color: '#ff6a2a', hdrIntensity: 3.0 }, // emissive, night side + faintly on day side
+      reliefStrength: 1.0,
+    },
+    normals: { tapsByTier: { high: 4, medium: 3, low: 0 }, strength: 1.0 }, // 0 taps = baked normal only
+    terminator: { softness: 0.08, sunsetBand: { color: '#ff9a5a', width: 0.06, strength: 0.5 } },
+    nightSide: { ambient: 0.015, earthshine: 0.0 }, // no city lights, ever
+  },
+
+  // Atmosphere: analytic single-scattering approximation on a shell 1 + thickness.
+  atmosphere: {
+    rayleigh: { rocky: '#c9b8a4', oceanic: '#5fa8ff', gas: '#f2d6b0', ice: '#bfe6ff', lava: '#ff9a6a' },
+    thickness: { rocky: 0.012, oceanic: 0.03, gas: 0.035, ice: 0.02, lava: 0.018 },
+    density: { rocky: 0.3, oceanic: 1.0, gas: 0.8, ice: 0.6, lava: 0.5 },
+    limbExponent: 3.0,
+    forwardScatterG: 0.6, // Henyey–Greenstein; bright crescent when backlit
+    backlitBoost: 2.5,
+  },
+
+  // Light comes from the nearest system star; between systems a faint region key remains.
+  lighting: {
+    systemStarClasses: { M: 0.3, K: 0.3, G: 0.22, F: 0.12, A: 0.05, B: 0.01 },
+    illuminance: { clamp: [0.6, 1.6], falloff: 'inverseSquare', referenceDistance: 20000 },
+    interstellarKey: 0.25, // fraction of region key light when no system star is in range
+    ambient: { source: 'skyAndNebula', intensity: [0.03, 0.06] },
+    starDisk: { hdrIntensity: 40, coronaRadius: 3.5, coronaPeak: 0.25 },
+    keepClear: 8, // × star radius, autopilot never closer
+  },
+
+  starSystems: {
+    cellSize: 30000,
+    chancePerCell: 0.3,
+    starRadius: [300, 1400], // by class; M small, B large
+    planets: [1, 6],
+    orbitSpacing: [1.6, 2.0], // geometric ratio between consecutive orbits
+    firstOrbit: [4000, 9000],
+    inclinationDeg: [-5, 5],
+    frostLine: 'luminosity', // inner: rocky/lava/oceanic, outer: gas/ice
+    binaryChance: 0.04,
+  },
+
+  rings: {
+    densityNoise: { octaves: 3, frequency: 40 },
+    gaps: { count: [1, 3], width: [0.015, 0.04], density: 0.05 }, // fraction of ring span
+    opticalDepth: [0.2, 1.4],
+    forwardScatterG: 0.7,
+    backlitBoost: 1.8,
+    particleColor: ['#d8c9b0', '#a89a86', '#efe6d6', '#7d7466'],
+    planetShadow: true, // analytic, all tiers
+    ringShadowOnPlanet: true, // analytic, all tiers
+    radialTexture: 1024,
+  },
+
+  moons: { lockedRotation: true, recipe: 'rocky', craterDensityScale: 1.4 },
+
+  asteroids: {
+    classes: {
+      C: { weight: 0.75, albedo: ['#3b3733', '#47423c'], roughness: 0.92, metalness: 0.0 },
+      S: { weight: 0.17, albedo: ['#7a6a58', '#8d7b66'], roughness: 0.85, metalness: 0.0 },
+      M: { weight: 0.08, albedo: ['#8a8580', '#9a948c'], roughness: 0.55, metalness: 0.6 },
+    },
+    sizePowerLaw: 2.5, // N(>D) ∝ D^−2.5
+    detailByTier: { high: 2, medium: 1, low: 1 }, // icosahedron subdivisions
+    displacementOctaves: 3,
+    craterNormals: { high: true, medium: true, low: false },
+  },
+
+  galaxies: {
+    bakeSize: { high: 256, medium: 192, low: 128 },
+    spiral: { arms: [2, 4], pitchDeg: [10, 25], bulgeTempK: 4500, armTempK: [9000, 15000], hiiKnots: { count: [20, 60], color: '#e8466a' } },
+    elliptical: { sersicN: 4, axisRatio: [0.4, 1.0], tempK: 4300 },
+    edgeOn: { thickness: [0.04, 0.09], dustLane: { color: '#1a100a', opacity: 0.7, width: 0.25 } },
+    inclinationDeg: [0, 80],
+  },
+
+  comets: {
+    coma: { radius: [30, 80], color: '#eaf6ff', hdrIntensity: 4 },
+    ionTail: { color: '#7fb8ff', length: [3000, 7000], width: [40, 120], striations: 6 },
+    dustTail: { color: '#ffe6c8', length: [2000, 5000], curvature: 0.25, width: [150, 400] },
+    onlyInSystems: true, // tails point away from that system's star
+  },
+
+  // Image pipeline.
+  pipeline: {
+    target: 'HalfFloat', // linear HDR
+    toneMapping: 'AgX', // gentle highlight roll-off; ACES as fallback
+    exposure: { base: 1.0, adapt: true, upSeconds: 4, downSeconds: 8, rangeEV: [-1.0, 1.0], meterRes: 1 / 16, centerWeight: 0.6 },
+    bloom: {
+      threshold: 1.0,
+      knee: 0.5,
+      intensity: 0.08,
+      mips: { high: 5, medium: 4, low: 3 },
+      resolution: { high: 0.5, medium: 0.5, low: 0.25 },
+    },
+    lens: {
+      chromaticAberration: { high: 0.0015, medium: 0, low: 0 }, // at the corners, radial, as UV offset
+      vignette: { amount: 0.18, softness: 0.55 },
+      grain: { amount: 0.012, fps: 24, luminanceOnly: true },
+    },
+  },
+
+  // Ship materials (physically based).
+  shipMaterials: {
+    hull: { color: '#e6e0d3', roughness: 0.38, metalness: 0.0, clearcoat: 0.6, clearcoatRoughness: 0.12 },
+    graphite: { color: '#3a3f47', roughness: 0.45, metalness: 0.85, anisotropy: { high: 0.5, medium: 0, low: 0 } },
+    copper: { color: '#b8734a', roughness: 0.32, metalness: 1.0 },
+    canopy: { color: '#0e1822', roughness: 0.05, metalness: 0.0, clearcoat: 1.0, interiorGlow: '#ffcf8a', interiorIntensity: 0.15 },
+    panelLines: { spacing: 0.06, width: 0.004, albedoDarken: 0.25, roughnessAdd: 0.2, normalDepth: 0.4 },
+    engine: { core: '#9fe3ff', outer: '#4f8cff', hdrIntensity: 6.0 },
+    navLights: { hdrIntensity: 3.0 },
+    environment: { cubeSize: 32, intensity: 0.25, refreshWhenRegionShifts: 0.05 },
+  },
+
+  // Cinematic drift: summed slow sines on top of the viewer's framing. Never persisted.
+  cameraDrift: {
+    yaw: { amplitudeDeg: 2.5, periodSeconds: 71 },
+    pitch: { amplitudeDeg: 1.2, periodSeconds: 53 },
+    dolly: { amplitude: 0.03, periodSeconds: 89 }, // fraction of distance
+    fovBreath: { amplitudeDeg: 0.6, periodSeconds: 41 },
+    fadeOutOnInputSeconds: 0.4,
+    resumeAfterSeconds: 6,
+    fadeInSeconds: 10,
+    reducedMotion: false, // off under prefers-reduced-motion
+  },
+
+  // Per-pass GPU budgets in ms (desktop target 8 ms total, phone 16 ms total).
+  budgets: {
+    desktop: { sky: 0.3, stars: 0.4, nebula: 2.5, planets: 1.5, rings: 0.3, rocks: 0.6, ship: 0.4, bloom: 0.8, composite: 0.4, headroom: 0.8 },
+    phone: { sky: 0.6, stars: 0.8, nebula: 4.5, planets: 3.0, rings: 0.5, rocks: 1.2, ship: 0.8, bloom: 1.6, composite: 0.8, headroom: 2.2 },
+  },
+
+  qualityTiers: {
+    high: { dprCap: 2.0, hdr: true, bloom: true, lens: true, nebulaSteps: 48, normalTaps: 4, anisotropy: true, msaa: 4 },
+    medium: { dprCap: 1.5, hdr: true, bloom: true, lens: false, nebulaSteps: 32, normalTaps: 3, anisotropy: false, msaa: 4 },
+    low: { dprCap: 1.25, hdr: true, bloom: true, lens: false, nebulaSteps: 16, normalTaps: 0, anisotropy: false, msaa: 2 },
+  },
+};
+
+export default { UNIT, REGIONS, regionField, stars, sky, nebula, planets, asteroids, galaxies, rare, ship, camera, flight, grade, quality, ui, blackbody, realism };

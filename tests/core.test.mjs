@@ -7,6 +7,7 @@ import { CELL_SIZE, Universe, cellOf, generateCell, regionAt, regionWeights } fr
 import { createFlight, stepFlight, steerFlight } from '../src/flight.js';
 import { STORAGE_KEY, VERSION, loadMemory, saveMemory, validateMemory } from '../src/persistence.js';
 import { createQuality, updateQuality } from '../src/quality.js';
+import art from '../src/look.js';
 
 const memory = () => ({ version: VERSION, seed: 42, sound: { enabled: true, volume: 0.5 },
   framing: { yaw: 0, pitch: 0.22, distance: 21 }, flight: createFlight() });
@@ -47,12 +48,12 @@ test('cells are seed-stable, bounded, and independent of visiting order', () => 
     const cell = generateCell(seed, x, 0, z);
     generateCell(seed, z, 1, x);
     assert.deepEqual(cell, generateCell(seed, x, 0, z));
-    assert.ok(cell.stars.length >= 32 && cell.stars.length <= 60);
+    assert.equal(cell.stars.length, art.stars.field.perCell.high);
     assert.ok(cell.planets.length <= 1 && cell.asteroids.length <= 36 && cell.nebulae.length <= 1 && cell.galaxies.length <= 1 && cell.events.length <= 1);
     for (const kind of ['stars', ...Object.keys(counts)]) for (const body of cell[kind]) {
       assert.equal(body.position.length, 3);
       body.position.forEach((n, i) => assert.ok(Number.isFinite(n) && Math.abs(n - cell.coordinates[i] * CELL_SIZE) <= CELL_SIZE / 2));
-      if (body.radius) assert.ok(body.radius > 0 && body.radius <= 560);
+      if (body.radius) assert.ok(body.radius > 0 && body.radius <= (kind === 'nebulae' ? art.nebula.radius[1] : kind === 'planets' ? art.planets.radius[1] : 560));
     }
     for (const kind of Object.keys(counts)) counts[kind] += cell[kind].length;
   }
@@ -60,7 +61,7 @@ test('cells are seed-stable, bounded, and independent of visiting order', () => 
   // Rare events need a larger fixed sample than everyday scenery.
   for (let x = 5; x < 505 && counts.events === 0; x++) counts.events += generateCell(42, x, 0, 0).events.length;
   for (const [kind, count] of Object.entries(counts)) assert.ok(count > 0, `${kind} occurs in a representative sample`);
-  assert.deepEqual(cellOf([-601, 600, -600]), [-1, 1, 0]);
+  assert.deepEqual(cellOf([-CELL_SIZE / 2 - 1, CELL_SIZE / 2, -CELL_SIZE / 2]), [-1, 1, 0]);
   assert.ok(regionAt(42, [0, 0, 0]) >= 0 && regionAt(42, [0, 0, 0]) <= 2);
   const weights = regionWeights(42, [0, 0, 0]);
   assert.ok(weights.every((n) => n > 0 && n <= 1));
@@ -129,7 +130,7 @@ test('adaptive resolution reacts to sustained cost, respects caps, and ignores s
   assert.equal(quality.ratio, 1.25);
   for (let i = 0; i < 2000; i++) updateQuality(quality, 70);
   assert.equal(quality.ratio, quality.minimum);
-  for (let i = 0; i < 4000; i++) updateQuality(quality, 15);
+  for (let i = 0; i < 6000; i++) updateQuality(quality, 15);
   assert.equal(quality.ratio, quality.maximum);
   const before = structuredClone(quality);
   for (const n of [NaN, 0, -1, Infinity, 5000]) updateQuality(quality, n);

@@ -41,8 +41,14 @@ There is no bundler or build step. The browser needs WebGL 2.
 `npm run test:browser` checks desktop and mobile rendering and controls.
 `npm run shots` captures desktop and mobile views in `shots/`, including a
 390×844 mobile viewport at DPR 3. Browser checks use the already installed
-browser automation dependency and `/usr/bin/google-chrome`; the browser may
+browser automation dependency and the system browser executable; the browser may
 need permission to run outside a restricted environment.
+
+The full capture includes the about panel, a one-minute flight, both alternate
+regions, every planet surface, and the three rare events. `npm run shots -- --quick`
+captures only the short reference views. Local review URLs accept
+`?seed=42&debug=1&debugRegion=ember` (or `hollow`), `debugPlanet=ice`, and
+`debugEvent=comet` (or `binary` / `pulsar`). Review flags are ignored on public hosts.
 
 ## Static deployment
 
