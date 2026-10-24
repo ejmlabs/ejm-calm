@@ -103,7 +103,9 @@ a {
   justify-content: center;
   gap: 1.6rem;
   padding: 0 var(--gutter);
-  background: radial-gradient(120% 90% at 50% 40%, #0b1530 0%, var(--ink) 70%);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(120% 90% at 50% 40%, #0b1530 0%, var(--ink) 70%);
   color: rgba(207, 224, 255, 0.72);
   transition: opacity 2s ease;
 }
@@ -201,10 +203,12 @@ a {
     border-color 0.3s,
     box-shadow 0.3s;
 }
-#beginBtn:hover {
-  background: rgba(220, 228, 245, 0.12);
-  border-color: rgba(220, 228, 245, 0.95);
-  box-shadow: 0 0 28px rgba(159, 227, 255, 0.16);
+@media (hover: hover) {
+  #beginBtn:hover {
+    background: rgba(220, 228, 245, 0.12);
+    border-color: rgba(220, 228, 245, 0.95);
+    box-shadow: 0 0 28px rgba(159, 227, 255, 0.16);
+  }
 }
 #beginBtn[disabled] {
   opacity: 0.35;
@@ -215,7 +219,7 @@ a {
   position: absolute;
   left: var(--safe-l);
   right: var(--safe-r);
-  bottom: max(9vh, calc(var(--safe-b) + 4rem));
+  bottom: max(5vh, calc(var(--safe-b) + 2.5rem));
   margin: 0;
   font-size: 0.8rem;
   line-height: 1.9;
@@ -284,8 +288,15 @@ a {
   cursor: pointer;
   transition: background 0.2s;
 }
-#hud button:hover {
-  background: rgba(220, 228, 245, 0.1);
+@media (hover: hover) {
+  #hud button:hover,
+  #aboutClose:hover {
+    background: rgba(220, 228, 245, 0.1);
+  }
+}
+/* Inside the pill the ring sits inset, so it never spills past the bar. */
+#hud button:focus-visible {
+  outline-offset: -3px;
 }
 #hud button[disabled] {
   opacity: 0.4;
@@ -444,9 +455,6 @@ svg .fill {
   background: transparent;
   cursor: pointer;
 }
-#aboutClose:hover {
-  background: rgba(220, 228, 245, 0.1);
-}
 
 /* ---------- Toast ("link copied") ---------- */
 
@@ -454,7 +462,7 @@ svg .fill {
   position: fixed;
   z-index: 6;
   left: 50%;
-  bottom: calc(var(--safe-b) + 66px);
+  top: max(16px, env(safe-area-inset-top));
   margin: 0;
   padding: 0.5rem 1rem;
   border-radius: 999px;
@@ -462,7 +470,7 @@ svg .fill {
   font-size: 0.78rem;
   letter-spacing: 0.1em;
   opacity: 0;
-  transform: translate(-50%, 6px);
+  transform: translate(-50%, -6px);
   pointer-events: none;
   transition:
     opacity 0.4s ease,
