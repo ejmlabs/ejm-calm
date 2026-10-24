@@ -16,28 +16,29 @@ export function steerFlight(state, yaw, pitch) {
 export function stepFlight(state, elapsed, interests = [], obstacles = [], settings = {}) {
   const dt = clamp(Number.isFinite(elapsed) ? elapsed : 0, 0, 0.1);
   const cruise = clamp(settings.speed ?? 22, 4, 90);
+  const interestRange = settings.interest?.nebulaCore?.falloff ?? 16000;
   state.time += dt; state.targetTime -= dt; state.manual = Math.max(0, state.manual - dt);
   const facing = forward(state.yaw, state.pitch);
   if (state.targetTime <= 0 || !state.target || distance(state.position, state.target) < 280) {
     let best = null, score = -Infinity;
     for (const interest of interests) {
       const gap = distance(state.position, interest.position);
-      if (gap < (interest.radius ?? 0) + 280 || gap > 3600) continue;
+      if (gap < (interest.radius ?? 0) + 280 || gap > interestRange) continue;
       const direction = normalize(interest.position.map((n, i) => n - state.position[i]));
       const alignment = direction.reduce((sum, n, i) => sum + n * facing[i], 0);
-      const value = alignment * 3 - gap / 3600;
+      const value = alignment * 3 - gap / interestRange;
       if (alignment > 0.15 && value > score) { score = value; best = interest; }
     }
     state.target = best ? best.position.map((n, i) => n + (i === 0 ? (best.rings ? best.radius * best.ring.outer : best.radius ?? 100) * 2.4 + 180 : i === 1 ? 80 : 0)) :
       state.position.map((n, i) => n + facing[i] * 2200 + (i === 1 ? Math.sin(state.time * 0.017) * 150 : 0));
-    state.targetTime = 28;
+    state.targetTime = settings.retarget?.everySeconds?.[0] ?? 28;
   }
   const direction = normalize(state.target.map((n, i) => n - state.position[i]));
   let avoiding = false;
   for (const body of obstacles) {
     const offset = state.position.map((n, i) => n - body.position[i]);
     const gap = Math.hypot(...offset);
-    const extent = body.rings ? body.radius * body.ring.outer : body.radius;
+    const extent = body.clearanceRadius ?? (body.rings ? body.radius * body.ring.outer : body.radius);
     const safe = extent * (body.type ? (settings.passClearance ?? 1.7) : 1) + 70;
     const lookAhead = safe + cruise * 14;
     if (gap > lookAhead) continue;
@@ -64,7 +65,7 @@ export function stepFlight(state, elapsed, interests = [], obstacles = [], setti
   const travel = forward(state.yaw, state.pitch);
   state.position = state.position.map((n, i) => n + travel[i] * state.speed * dt);
   for (const body of obstacles) {
-    const gap = distance(state.position, body.position), minimum = (body.rings ? body.radius * body.ring.outer : body.radius) + 18;
+    const gap = distance(state.position, body.position), minimum = (body.clearanceRadius ?? (body.rings ? body.radius * body.ring.outer : body.radius)) + 18;
     if (gap < minimum) {
       const away = gap > 1e-6 ? state.position.map((n, i) => (n - body.position[i]) / gap) : [1, 0, 0];
       state.position = body.position.map((n, i) => n + away[i] * minimum);

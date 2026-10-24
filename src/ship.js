@@ -1,4 +1,6 @@
 import * as THREE from '../vendor/three/three.module.js';
+import art from './look.js';
+import { panelMaterial } from './ship-materials.js';
 
 const radians = (value) => value * Math.PI / 180;
 const position = ([x, y, z]) => [x, y, -z];
@@ -14,11 +16,12 @@ function lightSprite(map, tint, size, opacity) {
   sprite.scale.setScalar(size); return sprite;
 }
 
-export function createShip(settings, glow, mobile) {
+export function createShip(settings, glow, mobile, physical = art.realism, tier = mobile ? 'low' : 'high') {
   const ship = new THREE.Group();
-  const hull = new THREE.MeshStandardMaterial({ color: settings.hull.color, roughness: settings.hull.roughness, metalness: settings.hull.metalness });
-  const panels = new THREE.MeshStandardMaterial(settings.panels);
-  const accent = new THREE.MeshStandardMaterial({ color: settings.accent.color, roughness: 0.6, metalness: 0.2 });
+  const materials = physical.shipMaterials;
+  const hull = panelMaterial(materials.hull, materials.panelLines);
+  const panels = panelMaterial({ color: materials.graphite.color, metalness: materials.graphite.metalness, roughness: materials.graphite.roughness, anisotropy: materials.graphite.anisotropy[tier] }, materials.panelLines);
+  const accent = new THREE.MeshPhysicalMaterial(materials.copper);
   const profile = [...settings.hull.profile].reverse().map(([z, radius]) => new THREE.Vector2(radius, z));
   const body = new THREE.Mesh(new THREE.LatheGeometry(profile, settings.hull.segments[mobile ? 'low' : 'high']), hull);
   body.name = 'hull'; body.rotation.x = -Math.PI / 2; body.scale.set(settings.hull.squash[0], 1, settings.hull.squash[1]); ship.add(body);
@@ -26,8 +29,9 @@ export function createShip(settings, glow, mobile) {
   cap.scale.y = settings.hull.squash[1]; cap.position.z = -settings.hull.profile.at(-1)[0]; ship.add(cap);
   const belly = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 8), panels);
   belly.scale.set(0.082, 0.045, 0.35); belly.position.set(0, -0.038, 0.08); ship.add(belly);
-  const canopy = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), new THREE.MeshStandardMaterial({
-    color: settings.canopy.color, roughness: 0.18, metalness: 0.4, emissive: settings.canopy.glow, emissiveIntensity: settings.canopy.glowIntensity,
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), new THREE.MeshPhysicalMaterial({
+    color: materials.canopy.color, roughness: materials.canopy.roughness, metalness: materials.canopy.metalness, clearcoat: materials.canopy.clearcoat,
+    emissive: materials.canopy.interiorGlow, emissiveIntensity: materials.canopy.interiorIntensity,
   }));
   canopy.scale.fromArray(settings.canopy.size); canopy.position.fromArray(position(settings.canopy.center)); ship.add(canopy);
   const band = new THREE.Mesh(new THREE.CylinderGeometry(0.102, 0.105, settings.accent.stripeZ[1] - settings.accent.stripeZ[0], 24, 1, true), accent);
@@ -42,19 +46,19 @@ export function createShip(settings, glow, mobile) {
     const pods = settings.nacelles, length = pods.z[1] - pods.z[0];
     const engine = new THREE.Mesh(new THREE.CylinderGeometry(pods.radius * 0.85, pods.radius, length, mobile ? 10 : 16), panels);
     engine.rotation.x = Math.PI / 2; engine.position.set(side * pods.x, pods.y, -(pods.z[0] + pods.z[1]) / 2); ship.add(engine);
-    const nozzle = new THREE.Mesh(new THREE.CircleGeometry(settings.engine.nozzleRadius, 16), new THREE.MeshBasicMaterial({ color: settings.engine.color, transparent: true, opacity: 0.85, toneMapped: false }));
+    const nozzle = new THREE.Mesh(new THREE.CircleGeometry(settings.engine.nozzleRadius, 16), new THREE.MeshBasicMaterial({ color: new THREE.Color(materials.engine.core).multiplyScalar(materials.engine.hdrIntensity), transparent: true, opacity: 0.85 }));
     nozzle.position.set(side * pods.x, pods.y, -pods.z[0] + 0.001); ship.add(nozzle);
     const plumeGeometry = new THREE.ConeGeometry(settings.engine.nozzleRadius, 1, 16, 1, true);
     const plume = new THREE.Mesh(plumeGeometry, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending, toneMapped: false,
-      uniforms: { core: { value: new THREE.Color(settings.engine.color) }, outer: { value: new THREE.Color(settings.engine.outer) }, intensity: { value: 1 } },
+      uniforms: { core: { value: new THREE.Color(materials.engine.core).multiplyScalar(materials.engine.hdrIntensity) }, outer: { value: new THREE.Color(materials.engine.outer).multiplyScalar(materials.engine.hdrIntensity) }, intensity: { value: 1 } },
       vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
       fragmentShader: 'uniform vec3 core;uniform vec3 outer;uniform float intensity;varying vec2 vUv;void main(){float a=pow(1.0-vUv.y,1.8)*0.6;gl_FragColor=vec4(mix(outer,core,1.0-vUv.y),a*intensity);\n#include <colorspace_fragment>\n}',
     }));
     plume.rotation.x = Math.PI / 2; plume.scale.y = settings.engine.plumeLength[0];
     plume.position.set(side * pods.x, pods.y, -pods.z[0] + settings.engine.plumeLength[0] / 2); ship.add(plume);
     const halo = lightSprite(glow, settings.engine.outer, 0.17, 0.55);
-    halo.position.copy(nozzle.position); ship.add(halo); engines.push({ plume, halo, nozzle });
+    halo.position.copy(nozzle.position); halo.visible = false; ship.add(halo); engines.push({ plume, halo, nozzle });
   }
   const finGeometry = extruded(settings.fin.outline, settings.fin.thickness);
   finGeometry.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0)));
@@ -64,12 +68,12 @@ export function createShip(settings, glow, mobile) {
   const navigation = [];
   for (const [kind, spec] of Object.entries(settings.navLights)) {
     if (!spec.pos) continue;
-    const material = new THREE.MeshBasicMaterial({ color: spec.color, toneMapped: false });
+    const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(spec.color).multiplyScalar(materials.navLights.hdrIntensity) });
     const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 6), material); lamp.position.fromArray(position(spec.pos)); ship.add(lamp);
     const halo = lightSprite(glow, spec.color, 0.08, settings.navLights.intensity); halo.position.copy(lamp.position); ship.add(halo);
-    navigation.push({ kind, lamp, halo, spec });
+    halo.visible = false; navigation.push({ kind, lamp, halo, spec });
   }
-  ship.userData = { engines, navigation, settings, pitch: 0, roll: 0 };
+  ship.userData = { engines, navigation, settings, pitch: 0, roll: 0, panels };
   return ship;
 }
 
@@ -89,7 +93,7 @@ export function animateShip(ship, flight, dt, camera, viewportHeight) {
   const unitsPerPixel = 2 * camera.position.length() * Math.tan(camera.fov * Math.PI / 360) / viewportHeight;
   for (const light of navigation) {
     const visible = light.kind !== 'tail' || flight.time % light.spec.blinkPeriod < light.spec.blinkOn;
-    light.lamp.visible = visible; light.halo.visible = visible;
+    light.lamp.visible = visible; light.halo.visible = false;
     light.halo.scale.setScalar(Math.max(0.018, unitsPerPixel * settings.navLights.spriteSizePx));
   }
 }

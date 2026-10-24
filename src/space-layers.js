@@ -1,8 +1,10 @@
 import * as THREE from '../vendor/three/three.module.js';
 import { random, hash } from './rng.js';
 import { fractalNoise } from './noise.js';
-import { weightedChoice } from './planet-data.js';
+import { GalaxySky } from './galaxies.js';
 import * as shaders from './shaders.js';
+import * as starShaders from './star-shaders.js';
+import { sampleStar, sampleMagnitude, magnitudeFlux, blackbodyColor } from './astrophysics.js';
 
 export function glowTexture() {
   const size = 64, data = new Uint8Array(size * size * 4);
@@ -28,32 +30,21 @@ export function densityTexture(seed, mobile, settings) {
   texture.generateMipmaps = true; texture.needsUpdate = true; return texture;
 }
 
-function galaxyTexture(kind) {
-  const size = 256, pixels = new Uint8Array(size * size * 4);
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const u = x / 255 * 2 - 1, v = y / 255 * 2 - 1, radius = Math.hypot(u, v);
-    const angle = Math.atan2(v, u), arms = Math.pow(Math.cos(angle * 2 - radius * 12) * 0.5 + 0.5, 3);
-    let density = Math.exp(-radius * radius * 6) * (0.12 + arms * 0.58) + Math.exp(-radius * radius * 75) * 0.9;
-    if (kind === 'elliptical') density = Math.exp(-radius * radius * 10) * 0.75;
-    if (kind === 'edgeOn') density = Math.exp(-u * u * 6 - v * v * 45) * (1 - Math.exp(-v * v * 900) * 0.65);
-    const index = (y * size + x) * 4; pixels[index] = pixels[index + 1] = pixels[index + 2] = 255;
-    pixels[index + 3] = Math.round(Math.min(1, density) * Math.max(0, 1 - radius * radius) ** 2 * 255);
-  }
-  const texture = new THREE.DataTexture(pixels, size, size); texture.needsUpdate = true;
-  texture.magFilter = texture.minFilter = THREE.LinearFilter; return texture;
-}
-
 export function starMaterial(look, ratio, shell = false) {
-  return new THREE.ShaderMaterial({ vertexShader: shaders.starVertex, fragmentShader: shaders.starFragment, transparent: true,
+  return new THREE.ShaderMaterial({ vertexShader: starShaders.vertex, fragmentShader: starShaders.fragment, transparent: true,
     depthWrite: false, depthTest: !shell, blending: THREE.AdditiveBlending,
     uniforms: { pixelRatio: { value: ratio }, shell: { value: Number(shell) }, palette: { value: look.REGIONS.tidepool.starTint.map((c) => new THREE.Color(c)) },
-      fadeNear: { value: look.stars.field.fadeNear }, viewRadius: { value: look.stars.field.viewRadius } } });
+      fadeNear: { value: look.stars.field.fadeNear }, viewRadius: { value: look.stars.field.viewRadius },
+      referenceDistance: { value: look.realism.lighting.illuminance.referenceDistance * 0.01 }, minFlux: { value: magnitudeFlux(look.realism.magnitudes.range[1]) },
+      peak: { value: look.realism.starPsf.hdrPeak }, regionTint: { value: new THREE.Color(1, 1, 1) } } });
 }
 
-export function starsGeometry(positions, sizes, tints, halos) {
+export function starsGeometry(positions, sizes, tints, halos, physical = {}) {
   const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1)); geometry.setAttribute('tint', new THREE.Float32BufferAttribute(tints, 3));
-  geometry.setAttribute('halo', new THREE.Float32BufferAttribute(halos, 1)); return geometry;
+  geometry.setAttribute('halo', new THREE.Float32BufferAttribute(halos, 1));
+  geometry.setAttribute('stellarColor', new THREE.Float32BufferAttribute(physical.colors ?? positions.map(() => 1), 3));
+  geometry.setAttribute('flux', new THREE.Float32BufferAttribute(physical.fluxes ?? sizes.map(() => 0.1), 1)); return geometry;
 }
 
 export class Sky {
@@ -66,47 +57,31 @@ export class Sky {
       uniforms: { inverseProjection: { value: new THREE.Matrix4() }, cameraRotation: { value: new THREE.Matrix3() },
         baseColor: { value: new THREE.Color() }, horizonColor: { value: new THREE.Color() }, mistColor: { value: new THREE.Color() },
         bandNormal: { value: this.bandNormal }, bandOpacity: { value: look.sky.bandOpacity }, seedPhase: { value: seed % 997 },
-        grain: { value: look.grade.grainAmount ?? look.sky.grainAmount }, vignette: { value: look.grade.vignette.amount }, softness: { value: look.grade.vignette.softness } } });
+        grain: { value: 0 }, vignette: { value: 0 }, softness: { value: look.grade.vignette.softness } } });
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material); plane.frustumCulled = false; plane.renderOrder = -1000; this.scene.add(plane);
-    const positions = [], sizes = [], tints = [], halos = [], direction = new THREE.Vector3();
-    for (let i = 0; i < settings.count[mobile ? 'low' : 'high']; i++) {
+    const positions = [], sizes = [], tints = [], halos = [], colors = [], fluxes = [], direction = new THREE.Vector3();
+    for (let i = 0; i < look.realism.magnitudes.countByTier.high; i++) {
       do {
         const angle = rng() * Math.PI * 2, height = rng() * 2 - 1, radius = Math.sqrt(1 - height * height);
         direction.set(Math.sin(angle) * radius, height, Math.cos(angle) * radius);
       } while (rng() > (Math.abs(direction.dot(this.bandNormal)) < Math.sin(settings.bandWidthDeg * Math.PI / 180) ? 1 : 1 / settings.bandBoost));
       positions.push(...direction.clone().multiplyScalar(30000).toArray());
-      const bright = rng() < 0.03, size = bright ? 2 + rng() * 1.5 : 0.9 + rng() * 0.3;
-      sizes.push(size); tints.push(rng(), settings.brightness[0] + rng() ** 2 * (settings.brightness[1] - settings.brightness[0]), 0);
-      halos.push(bright ? 8 + rng() * 6 : 0);
+      const stellar = sampleStar(rng, 'apparent'), magnitude = sampleMagnitude(rng);
+      sizes.push(1); tints.push(0, 1, 0); halos.push(0); colors.push(...stellar.color); fluxes.push(magnitudeFlux(magnitude));
     }
-    this.stars = new THREE.Points(starsGeometry(positions, sizes, tints, halos), starMaterial(look, ratio, true));
+    const order = fluxes.map((_, index) => index).sort((a, b) => fluxes[b] - fluxes[a]);
+    const sorted = (values, stride) => order.flatMap((index) => values.slice(index * stride, (index + 1) * stride));
+    this.stars = new THREE.Points(starsGeometry(sorted(positions, 3), sorted(sizes, 1), sorted(tints, 3), sorted(halos, 1), { colors: sorted(colors, 3), fluxes: sorted(fluxes, 1) }), starMaterial(look, ratio, true));
     this.stars.frustumCulled = false; this.stars.renderOrder = -900; this.scene.add(this.stars);
-    const kinds = ['spiral', 'elliptical', 'edgeOn'];
-    const textures = Object.fromEntries(kinds.map((kind) => [kind, galaxyTexture(kind)])); this.textures.push(...Object.values(textures));
-    const count = look.galaxies.visible[0] + Math.floor(rng() * (look.galaxies.visible[1] - look.galaxies.visible[0] + 1));
-    for (let i = 0; i < count + look.galaxies.hollowBonus; i++) {
-      const kind = weightedChoice(Object.entries(look.galaxies.kinds), rng);
-      const angle = (look.galaxies.angularSizeDeg[0] + rng() * (look.galaxies.angularSizeDeg[1] - look.galaxies.angularSizeDeg[0])) * Math.PI / 180;
-      const material = new THREE.ShaderMaterial({ vertexShader: shaders.nebulaVertex, depthTest: false, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending,
-        uniforms: { map: { value: textures[kind] }, core: { value: new THREE.Color(look.galaxies.core[i % 2]) }, arms: { value: new THREE.Color(look.galaxies.arms[i % 3]) }, opacity: { value: 0.6 } },
-        fragmentShader: 'uniform sampler2D map;uniform vec3 core;uniform vec3 arms;uniform float opacity;varying vec2 vUv;void main(){float r=length(vUv*2.0-1.0);gl_FragColor=vec4(mix(arms,core,exp(-r*r*35.0)),texture2D(map,vUv).a*opacity);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}' });
-      const galaxy = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
-      const directions = [[-0.34, 0.22, -1], [0.30, 0.36, -1], [-0.48, -0.18, -1], [0.45, -0.23, -1], [0.08, 0.48, -1], [-0.7, 0.1, -1]];
-      galaxy.userData.direction = new THREE.Vector3(...directions[i]).normalize().multiplyScalar(28000);
-      galaxy.userData.bonus = i >= count; galaxy.userData.roll = rng() * Math.PI;
-      galaxy.scale.setScalar(2 * Math.tan(angle / 2) * 28000); galaxy.frustumCulled = false; galaxy.renderOrder = -800;
-      this.galaxies.push(galaxy); this.scene.add(galaxy);
-    }
+    this.catalog = new GalaxySky(this.scene, seed, look);
   }
 
-  update(camera, palette, hollow) {
+  update(camera, palette, hollow, dt = 0) {
     this.material.uniforms.inverseProjection.value.copy(camera.projectionMatrixInverse);
     this.material.uniforms.cameraRotation.value.setFromMatrix4(camera.matrixWorld);
     this.material.uniforms.baseColor.value.copy(palette.deep); this.material.uniforms.horizonColor.value.copy(palette.horizon); this.material.uniforms.mistColor.value.copy(palette.band);
     this.stars.position.copy(camera.position); this.stars.material.uniforms.palette.value = palette.stars;
-    for (const galaxy of this.galaxies) {
-      galaxy.position.copy(galaxy.userData.direction).add(camera.position); galaxy.quaternion.copy(camera.quaternion); galaxy.rotateZ(galaxy.userData.roll);
-      galaxy.visible = !galaxy.userData.bonus || hollow > 0.5;
-    }
+    this.stars.material.uniforms.regionTint.value.copy(palette.stars[0]);
+    this.catalog.update(camera, hollow, dt);
   }
 }

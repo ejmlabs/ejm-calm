@@ -8,6 +8,7 @@ import { createFlight, stepFlight, steerFlight } from '../src/flight.js';
 import { STORAGE_KEY, VERSION, loadMemory, saveMemory, validateMemory } from '../src/persistence.js';
 import { createQuality, updateQuality } from '../src/quality.js';
 import art from '../src/look.js';
+import { generateSystem, generateNebula } from '../src/systems.js';
 
 const memory = () => ({ version: VERSION, seed: 42, sound: { enabled: true, volume: 0.5 },
   framing: { yaw: 0, pitch: 0.22, distance: 21 }, flight: createFlight() });
@@ -48,8 +49,8 @@ test('cells are seed-stable, bounded, and independent of visiting order', () => 
     const cell = generateCell(seed, x, 0, z);
     generateCell(seed, z, 1, x);
     assert.deepEqual(cell, generateCell(seed, x, 0, z));
-    assert.equal(cell.stars.length, art.stars.field.perCell.high);
-    assert.ok(cell.planets.length <= 1 && cell.asteroids.length <= 36 && cell.nebulae.length <= 1 && cell.galaxies.length <= 1 && cell.events.length <= 1);
+    assert.equal(cell.stars.length, art.realism.depthLayers.field.perCell.high);
+    assert.ok(cell.planets.length <= 1 && cell.asteroids.length <= art.asteroids.count.high && cell.nebulae.length <= 1 && cell.galaxies.length <= 1 && cell.events.length <= 1);
     for (const kind of ['stars', ...Object.keys(counts)]) for (const body of cell[kind]) {
       assert.equal(body.position.length, 3);
       body.position.forEach((n, i) => assert.ok(Number.isFinite(n) && Math.abs(n - cell.coordinates[i] * CELL_SIZE) <= CELL_SIZE / 2));
@@ -60,6 +61,8 @@ test('cells are seed-stable, bounded, and independent of visiting order', () => 
   assert.notDeepEqual(generateCell(41, 0, 0, 0), generateCell(42, 0, 0, 0));
   // Rare events need a larger fixed sample than everyday scenery.
   for (let x = 5; x < 505 && counts.events === 0; x++) counts.events += generateCell(42, x, 0, 0).events.length;
+  // Systems and volumes now occupy their own coarse cells, independent of stellar cells.
+  for (let x = -5; x <= 5; x++) { counts.planets += generateSystem(42, x, 0, 0)?.planets.length ?? 0; counts.nebulae += Number(Boolean(generateNebula(42, x, 0, 0))); }
   for (const [kind, count] of Object.entries(counts)) assert.ok(count > 0, `${kind} occurs in a representative sample`);
   assert.deepEqual(cellOf([-CELL_SIZE / 2 - 1, CELL_SIZE / 2, -CELL_SIZE / 2]), [-1, 1, 0]);
   assert.ok(regionAt(42, [0, 0, 0]) >= 0 && regionAt(42, [0, 0, 0]) <= 2);
