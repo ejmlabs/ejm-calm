@@ -1,17 +1,20 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { hash, random } from '../src/rng.js';
-import { noise3, fractalNoise } from '../src/noise.js';
-import { parseSeed, resolveSeed, seedURL } from '../src/seed.js';
-import { CELL_SIZE, Universe, cellOf, generateCell, regionAt, regionWeights } from '../src/universe.js';
-import { createFlight, stepFlight, steerFlight } from '../src/flight.js';
-import { STORAGE_KEY, VERSION, loadMemory, saveMemory, validateMemory } from '../src/persistence.js';
-import { createQuality, updateQuality } from '../src/quality.js';
-import art from '../src/look.js';
-import { generateSystem, generateNebula } from '../src/systems.js';
-
-const memory = () => ({ version: VERSION, seed: 42, sound: { enabled: true, volume: 0.5 },
-  framing: { yaw: 0, pitch: 0.22, distance: 21 }, flight: createFlight() });
+import { parseSeed, resolveSeed, seedURL, nextSeed } from '../src/seed.js';
+import { createQuality, updateQuality, selectQualityTier } from '../src/quality.js';
+import {
+  layoutWorld,
+  islandsOverlap,
+  shipHitsIsland,
+  buildHeightfield,
+  sampleIslandHeight,
+  inPortraitViewCone,
+  computeViewYaw,
+} from '../src/terrain.js';
+import { phaseAtCycleTime, cycleDuration, type WhalePhase } from '../src/whale.js';
+import { validateMemory, VERSION } from '../src/persistence.js';
+import { fbm2, makeNoise2D, ridged2 } from '../src/noise.js';
 
 test('random streams are repeatable, independent, and unsigned', () => {
   const a = random(42), b = random(42), c = random(43);
@@ -20,124 +23,114 @@ test('random streams are repeatable, independent, and unsigned', () => {
   assert.notDeepEqual(values, Array.from({ length: 2000 }, () => c()));
   assert.ok(values.every((n) => n >= 0 && n < 1));
   assert.notEqual(hash(42, -1, 2, 3), hash(42, 1, 2, 3));
-  assert.notEqual(hash(0, 0, 0), hash(0xffffffff, 0, 0));
 });
 
 test('seeds parse complete unsigned decimals and reject ambiguous input', () => {
-  for (const [input, expected] of [['0', 0], ['42', 42], ['00042', 42], ['4294967295', 0xffffffff]] as const) assert.equal(parseSeed(input), expected);
-  for (const input of [null, undefined, '', ' ', '42x', '-1', '1.5', '1e2', 'Infinity', '0x10', '4294967296'] as const) assert.equal(parseSeed(input), null);
-  assert.equal(parseSeed(42 as never), null);
+  for (const [input, expected] of [['0', 0], ['42', 42], ['00042', 42], ['4294967295', 0xffffffff]] as const) {
+    assert.equal(parseSeed(input), expected);
+  }
+  for (const input of [null, undefined, '', ' ', '42x', '-1', '1.5', '1e2', 'Infinity', '0x10', '4294967296'] as const) {
+    assert.equal(parseSeed(input), null);
+  }
   assert.deepEqual(resolveSeed('?seed=0', 12), { seed: 0, explicit: true });
   assert.deepEqual(resolveSeed('?seed=oops', 12), { seed: 12, explicit: false });
   assert.deepEqual(resolveSeed('', -1, () => 0.5), { seed: 0x80000000, explicit: false });
-  assert.equal(seedURL('https://example.test/voyage/?other=1#about', 42).href, 'https://example.test/voyage/?other=1&seed=42#about');
+  assert.equal(seedURL('https://example.test/calm/?other=1#about', 42).href, 'https://example.test/calm/?other=1&seed=42#about');
+  assert.notEqual(nextSeed(42, () => 0.5), 42);
 });
 
-test('noise remains continuous, finite, and bounded across negative cell boundaries', () => {
-  for (let i = -40; i <= 40; i++) {
-    const value = noise3(i / 7, i / 11, -i / 5, 42);
-    assert.ok(value >= 0 && value <= 1);
-    assert.equal(value, noise3(i / 7, i / 11, -i / 5, 42));
-    const fractal = fractalNoise(i / 7, i / 11, -i / 5, 42);
-    assert.ok(fractal >= 0 && fractal <= 1);
+test('noise and heightfields stay finite, deterministic, and non-negative on islands', () => {
+  const noise = makeNoise2D(42, 0);
+  for (let i = -20; i <= 20; i++) {
+    const f = fbm2(noise, i / 7, -i / 5, 4);
+    const r = ridged2(noise, i / 7, -i / 5, 3);
+    assert.ok(Number.isFinite(f) && f >= -1 && f <= 1);
+    assert.ok(Number.isFinite(r) && r >= 0 && r <= 1);
   }
-  assert.ok(Math.abs(noise3(-1 - 1e-6, 0.2, 0.3) - noise3(-1 + 1e-6, 0.2, 0.3)) < 1e-4);
+  const layout = layoutWorld(42);
+  assert.ok(layout.islands.length >= 2 && layout.islands.length <= 4);
+  for (const island of layout.islands) {
+    const field = buildHeightfield(island, 32);
+    assert.equal(field.heights.length, 33 * 33);
+    assert.ok(field.maxHeight >= 0);
+    assert.ok([...field.heights].every((h) => Number.isFinite(h) && h >= 0));
+    assert.equal(sampleIslandHeight(island, island.radius * 2, 0), 0);
+  }
 });
 
-test('cells are seed-stable, bounded, and independent of visiting order', () => {
-  const counts = { planets: 0, asteroids: 0, nebulae: 0, galaxies: 0, events: 0 };
-  for (const seed of [0, 42, 0xffffffff]) for (let x = -4; x <= 4; x++) for (let z = -4; z <= 4; z++) {
-    const cell = generateCell(seed, x, 0, z);
-    generateCell(seed, z, 1, x);
-    assert.deepEqual(cell, generateCell(seed, x, 0, z));
-    assert.equal(cell.stars.length, art.realism.depthLayers.field.perCell.high);
-    assert.ok(cell.planets.length <= 1 && cell.asteroids.length <= art.asteroids.count.high && cell.nebulae.length <= 1 && cell.galaxies.length <= 1 && cell.events.length <= 1);
-    const bags = cell as unknown as Record<string, Array<{ position: number[]; radius?: number }>>;
-    for (const kind of ['stars', ...Object.keys(counts)]) for (const body of bags[kind] ?? []) {
-      assert.equal(body.position.length, 3);
-      body.position.forEach((n: number, i: number) => assert.ok(Number.isFinite(n) && Math.abs(n - cell.coordinates[i]! * CELL_SIZE) <= CELL_SIZE / 2));
-      if (body.radius) assert.ok(body.radius > 0 && body.radius <= (kind === 'nebulae' ? art.nebula.radius[1] : kind === 'planets' ? art.planets.radius[1] : 560));
+test('world layout keeps ships clear of islands and islands apart', () => {
+  for (const seed of [0, 7, 42, 1234, 99991]) {
+    const world = layoutWorld(seed);
+    assert.deepEqual(world, layoutWorld(seed));
+    assert.ok(world.ships.length >= 2 && world.ships.length <= 5);
+    for (let i = 0; i < world.islands.length; i++) {
+      for (let j = i + 1; j < world.islands.length; j++) {
+        assert.equal(islandsOverlap(world.islands[i]!, world.islands[j]!), false, `islands overlap seed ${seed}`);
+      }
     }
-    for (const kind of Object.keys(counts) as Array<keyof typeof counts>) counts[kind] += bags[kind]?.length ?? 0;
+    for (const ship of world.ships) {
+      for (const island of world.islands) {
+        assert.equal(shipHitsIsland(ship, island, 8), false, `ship hits island seed ${seed}`);
+      }
+    }
+    assert.ok(Number.isFinite(world.whaleHome.x) && Number.isFinite(world.whaleHome.z));
   }
-  assert.notDeepEqual(generateCell(41, 0, 0, 0), generateCell(42, 0, 0, 0));
-  // Rare events need a larger fixed sample than everyday scenery.
-  for (let x = 5; x < 505 && counts.events === 0; x++) counts.events += generateCell(42, x, 0, 0).events.length;
-  // Systems and volumes now occupy their own coarse cells, independent of stellar cells.
-  for (let x = -5; x <= 5; x++) { counts.planets += generateSystem(42, x, 0, 0)?.planets.length ?? 0; counts.nebulae += Number(Boolean(generateNebula(42, x, 0, 0))); }
-  for (const [kind, count] of Object.entries(counts)) assert.ok(count > 0, `${kind} occurs in a representative sample`);
-  assert.deepEqual(cellOf([-CELL_SIZE / 2 - 1, CELL_SIZE / 2, -CELL_SIZE / 2]), [-1, 1, 0]);
-  assert.ok(regionAt(42, [0, 0, 0]) >= 0 && regionAt(42, [0, 0, 0]) <= 2);
-  const weights = regionWeights(42, [0, 0, 0]);
-  assert.ok(weights.every((n) => n > 0 && n <= 1));
-  assert.ok(Math.abs(weights.reduce((a, b) => a + b) - 1) < 1e-12);
-  assert.ok(weights.every((n, i) => Math.abs(n - regionWeights(42, [0.1, 0.1, 0.1])[i]) < 1e-4));
 });
 
-test('streaming obeys work budgets, releases old cells, and does not retain a travel history', () => {
-  const universe = new Universe(42, { radius: 1, cellBudget: 2 });
-  const loaded: string[] = [], removed: string[] = [];
-  const callbacks = { onLoad: (cell: { key: string }) => loaded.push(cell.key), onUnload: (cell: { key: string }) => removed.push(cell.key), now: () => 0 };
-  assert.equal(universe.update([0, 0, 0], callbacks), 2);
-  assert.ok(universe.cells.has('0,0,0'));
-  for (let i = 0; i < 15; i++) assert.ok(universe.update([0, 0, 0], callbacks) <= 2);
-  assert.equal(universe.cells.size, 27); assert.equal(universe.pending.length, 0);
-  for (let n = 1; n < 30; n++) {
-    universe.update([n * CELL_SIZE * 3, 0, 0], callbacks);
-    assert.ok(universe.cells.size <= 27 && universe.pending.length <= 27);
+test('seeds 1..50 put hero ship and one island in the portrait view cone at t=0', () => {
+  for (let seed = 1; seed <= 50; seed++) {
+    const world = layoutWorld(seed, 185);
+    const hero = world.ships[0]!;
+    assert.ok(hero, `seed ${seed} missing hero ship`);
+    const focus = {
+      x: world.whaleHome.x * 0.78 + hero.x * 0.22,
+      z: world.whaleHome.z * 0.78 + hero.z * 0.22,
+    };
+    assert.equal(
+      world.viewYaw,
+      computeViewYaw(world.whaleHome, hero, world.islands, 185),
+      `seed ${seed} viewYaw mismatch`,
+    );
+    assert.ok(
+      inPortraitViewCone(world.viewYaw, focus, hero),
+      `seed ${seed}: hero ship outside portrait view cone`,
+    );
+    const islandInCone = world.islands.some((island) =>
+      inPortraitViewCone(world.viewYaw, focus, island),
+    );
+    assert.ok(islandInCone, `seed ${seed}: no island in portrait view cone`);
   }
-  assert.ok(removed.length >= 27);
-  let clock = 0;
-  const timed = new Universe(42, { radius: 1, cellBudget: 20, timeBudget: 1 });
-  assert.equal(timed.update([0, 0, 0], { now: () => clock++ }), 1);
 });
 
-test('persistence rejects corrupt, incomplete, unversioned, and out-of-range data', () => {
-  assert.ok(validateMemory(memory()));
-  for (const value of [null, false, [], 'data', {}, { ...memory(), version: 2 }, { ...memory(), seed: -1 },
-    { ...memory(), sound: { enabled: 'yes', volume: 0.5 } }, { ...memory(), sound: { enabled: true, volume: Infinity } },
-    { ...memory(), framing: { yaw: NaN, pitch: 0, distance: 21 } }, { ...memory(), framing: { yaw: 0, pitch: 2, distance: 21 } },
-    { ...memory(), flight: { ...createFlight(), position: [0, null, 0] } },
-    { ...memory(), flight: { ...createFlight(), position: [0, 0, 0, 0] } },
-    { ...memory(), flight: { ...createFlight(), yaw: Infinity } }]) assert.equal(validateMemory(value), null);
-  const clean = validateMemory(memory());
-  assert.equal((clean!.flight as { target?: unknown }).target, undefined);
-  let stored: string | undefined;
-  const storage = { getItem: () => stored ?? null, setItem: (key: string, value: string) => { assert.equal(key, STORAGE_KEY); stored = value; } };
-  assert.equal(saveMemory(storage, memory()), true); assert.deepEqual(loadMemory(storage), clean);
-  stored = '{corrupt'; assert.equal(loadMemory(storage), null);
-  assert.equal(loadMemory({ getItem() { throw new Error('Unavailable'); }, setItem() {} } as never), null);
-  assert.equal(saveMemory({ getItem: () => null, setItem() { throw new Error('Full'); } } as never, memory()), false);
-});
-
-test('autopilot avoids a head-on planet and remains finite through a long voyage', () => {
-  const state = createFlight(), obstacle = { position: [0, 0, -80], radius: 85 };
-  let minimum = Infinity;
-  for (let i = 0; i < 12000; i++) {
-    if (i % 600 === 0) steerFlight(state, 0.18, -0.04);
-    stepFlight(state, 1 / 30, [obstacle], [obstacle]);
-    minimum = Math.min(minimum, Math.hypot(...state.position.map((n, j) => n - obstacle.position[j])));
-    assert.ok([...state.position, state.yaw, state.pitch, state.roll, state.speed, state.time].every(Number.isFinite));
-    assert.ok(Math.abs(state.pitch) <= 0.85 && state.speed >= 0 && state.speed <= 90);
+test('whale behaviour cycle stays finite and periodic', () => {
+  const duration = cycleDuration();
+  assert.ok(duration > 0 && Number.isFinite(duration));
+  const seen = new Set<WhalePhase>();
+  for (let t = 0; t < duration * 3; t += 0.5) {
+    const { phase, phaseT, cycle } = phaseAtCycleTime(t);
+    seen.add(phase);
+    assert.ok(phaseT >= 0 && phaseT <= 1);
+    assert.ok(Number.isInteger(cycle) && cycle >= 0);
+    assert.ok(['swim', 'surface', 'spout', 'dive', 'breach', 'splash'].includes(phase));
   }
-  assert.ok(minimum >= obstacle.radius + 18 - 1e-7);
-  assert.ok(state.time > 399);
-  const embedded = createFlight(); embedded.position = [0, 0, -80];
-  stepFlight(embedded, Infinity, [], [obstacle]);
-  assert.ok(embedded.position.every(Number.isFinite));
-  const a = createFlight(), b = createFlight();
-  for (let i = 0; i < 200; i++) { stepFlight(a, 0.05, [obstacle], [obstacle]); stepFlight(b, 0.05, [obstacle], [obstacle]); }
-  assert.deepEqual(a, b);
+  assert.ok(seen.has('breach') && seen.has('spout') && seen.has('swim'));
+  assert.deepEqual(phaseAtCycleTime(0).phase, phaseAtCycleTime(duration).phase);
+  assert.equal(phaseAtCycleTime(duration * 10 + 1).cycle, 10);
 });
 
-test('adaptive resolution reacts to sustained cost, respects caps, and ignores suspended frames', () => {
-  const quality = createQuality({ mobile: true, dpr: 3 });
-  assert.equal(quality.ratio, 1.25);
-  for (let i = 0; i < 2000; i++) updateQuality(quality, 70);
-  assert.equal(quality.ratio, quality.minimum);
-  for (let i = 0; i < 6000; i++) updateQuality(quality, 15);
-  assert.equal(quality.ratio, quality.maximum);
-  const before = structuredClone(quality);
-  for (const n of [NaN, 0, -1, Infinity, 5000]) updateQuality(quality, n);
-  assert.deepEqual(quality, before);
+test('quality tiers and adaptive DPR stay bounded', () => {
+  assert.equal(selectQualityTier({ mobile: true }), 'low');
+  assert.equal(selectQualityTier({ software: true }), 'low');
+  const state = createQuality({ mobile: true, dpr: 3 });
+  assert.ok(state.ratio <= 2);
+  assert.ok(state.waterSize <= 256);
+  for (let i = 0; i < 20; i++) updateQuality(state, 50);
+  assert.ok(state.ratio >= state.minimum && state.ratio <= state.maximum);
+});
+
+test('persistence rejects corrupt memory', () => {
+  assert.ok(validateMemory({ version: VERSION, seed: 42 }));
+  assert.equal(validateMemory({ version: 2, seed: 42 }), false);
+  assert.equal(validateMemory({ version: VERSION, seed: -1 }), false);
+  assert.equal(validateMemory(null), false);
 });

@@ -1,8 +1,8 @@
 {
-  "name": "ejm-fly",
+  "name": "ejm-calm",
   "version": "0.1.0",
   "private": true,
-  "description": "Watch a ship glide through an endless, generated space.",
+  "description": "A calm, procedurally generated ocean with a whale, ships and islands.",
   "license": "MIT",
   "type": "module",
   "scripts": {

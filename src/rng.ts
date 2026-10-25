@@ -18,4 +18,6 @@ export function random(seed: number): Rng {
   return () => hash(seed, counter++) / 0x100000000;
 }
 
-export const cellRandom = (seed: number, x: number, y: number, z: number, channel = 0): Rng => random(hash(seed, x, y, z, channel));
+export function fork(seed: number, channel: number | string): Rng {
+  return random(hash(seed, channel));
+}

@@ -20,3 +20,9 @@ export function seedURL(address: string | URL, seed: number): URL {
   url.searchParams.set('seed', String(seed >>> 0));
   return url;
 }
+
+export function nextSeed(current: number, entropy: () => number = Math.random): number {
+  let candidate = Math.floor(entropy() * 0x100000000) >>> 0;
+  if (candidate === (current >>> 0)) candidate = (candidate + 1) >>> 0;
+  return candidate;
+}

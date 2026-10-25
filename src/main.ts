@@ -1,266 +1,390 @@
-import art from './look.js';
-import { resolveSeed, seedURL } from './seed.js';
-import { createFlight, stepFlight, steerFlight } from './flight.js';
-import { Universe } from './universe.js';
-import { loadMemory, saveMemory, VERSION } from './persistence.js';
+import * as THREE from 'three';
+import { resolveSeed, seedURL, nextSeed } from './seed.js';
 import { createQuality, updateQuality } from './quality.js';
-import { CameraRig } from './camera.js';
-import { SpaceRenderer } from './renderer.js';
-import { AmbientAudio } from './audio.js';
-import { bindInput } from './input.js';
+import { layoutWorld } from './terrain.js';
+import { createOcean } from './ocean.js';
+import { createSky } from './sky.js';
+import { createWhale } from './whale.js';
+import { createShips } from './ships.js';
+import { createIslands } from './islands.js';
+import { createBirds } from './birds.js';
+import { CalmCamera } from './camera.js';
 import { createUI } from './ui.js';
-import { engineSettings, type EngineLook } from './settings.js';
-import { reviewSettings } from './debug.js';
-import { findSpawn } from './systems.js';
+import { OceanAudio } from './audio.js';
+import { loadMemory, saveMemory, VERSION } from './persistence.js';
+import { cycleDuration } from './whale.js';
 
-const look = engineSettings(art, window.innerHeight > window.innerWidth) as EngineLook;
-look.debug = reviewSettings(location.search, location.hostname);
+type CalmReview = {
+  time: number;
+  advance: (seconds: number) => void;
+  forceBreach: () => void;
+  forceSpout: () => void;
+  frameWhale: (kind?: 'breach' | 'spout') => void;
+  frame: (yaw: number, pitch: number, distance: number) => void;
+  setWaterVisible: (visible: boolean) => void;
+  setWhaleVisible: (visible: boolean) => void;
+  setIslandsVisible: (visible: boolean) => void;
+  setShipsVisible: (visible: boolean) => void;
+  stats: () => Record<string, number | string | boolean | number[]>;
+};
+
+const params = new URLSearchParams(location.search);
+const debug = params.get('debug') === '1';
+
 let storage: Storage | null;
-try { storage = window.localStorage; } catch { storage = null; }
-const memory = loadMemory(storage as never);
+try {
+  storage = window.localStorage;
+} catch {
+  storage = null;
+}
+
+const memory = loadMemory(storage);
 const resolved = resolveSeed(location.search, memory?.seed, () => {
   const word = new Uint32Array(1);
   crypto.getRandomValues(word);
   return word[0]! / 0x100000000;
 });
-const seed = resolved.seed;
+let seed = resolved.seed;
 history.replaceState(null, '', seedURL(location.href, seed));
-const flight = createFlight(!resolved.explicit && memory?.seed === seed ? memory.flight : null);
-const spawn = findSpawn(seed, {
-  preferType: look.debug?.planet,
-  preferRings: Boolean(look.debug?.planet) || Boolean(look.debug?.ring),
-  fill: look.debug?.ring ? 0.17 : look.debug?.planet ? 0.3 : 0.26,
-  ringOpenDeg: look.debug?.ring ? 22 : 18,
-});
-if (look.debug?.planet) {
-  spawn.planet.type = look.debug.planet;
-  look.focusPlanetId = spawn.planet.id;
-} else look.focusPlanetId = spawn.planet.id;
-if (resolved.explicit || !memory || look.debug?.planet || look.debug?.event || look.debug?.region || look.debug?.ring) {
-  flight.speed = look.pacing?.speed ?? look.flight.cruise;
-  flight.position = [...spawn.position];
-  flight.yaw = spawn.yaw;
-  flight.pitch = spawn.pitch;
-}
-const audio = new AmbientAudio(memory?.sound ?? { enabled: true, volume: look.ui?.defaultVolume ?? 0.5 });
+
 const mobile = matchMedia('(pointer: coarse)').matches || window.innerWidth < 700;
 const quality = createQuality({
   mobile,
   dpr: window.devicePixelRatio || 1,
-  maxDpr: look.quality?.tiers?.[mobile ? 'low' : 'high']?.dprCap,
+  maxDpr: mobile ? 2 : 2,
+  cores: navigator.hardwareConcurrency || 8,
+  memory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 8,
 });
-const universe = new Universe(seed, { radius: 2, cellBudget: mobile ? 1 : 2, timeBudget: mobile ? 2 : 3 });
-universe.systems.set(spawn.system.key, spawn.system);
-const motion = matchMedia('(prefers-reduced-motion: reduce)');
-let started = false, paused = motion.matches, disposed = false, frame: number | null = null, last = 0, renderedAt = 0, lastSave = 0;
-let renderer: SpaceRenderer | undefined, camera: CameraRig | undefined, input: ReturnType<typeof bindInput> | undefined;
-let starRevision = -1, steps = 0;
 
+const audio = new OceanAudio(memory?.sound ?? { enabled: false, volume: 0.35 });
 const ui = createUI({
-  begin() {
-    if (started || !renderer) return;
-    started = true; ui.begin(); sync(); schedule();
-  },
-  pause: togglePause,
-  sound() { audio.enabled = !audio.enabled; sync(); persist(); ui.announce(audio.enabled ? 'sound on' : 'sound off'); },
-  volume(value) { audio.volume = Math.max(0, Math.min(1, value)); sync(); persist(); },
   share: () => `${location.origin}${location.pathname}?seed=${seed >>> 0}`,
-}, look.ui);
+  newSeed() {
+    const next = nextSeed(seed);
+    location.href = seedURL(location.href, next).href;
+  },
+  sound() {
+    audio.enabled = !audio.enabled;
+    sync();
+    persist();
+    ui.announce(audio.enabled ? 'sound on' : 'sound off');
+  },
+});
+
+const canvasEl = document.getElementById('space') as HTMLCanvasElement | null;
+if (!canvasEl) {
+  ui.error('canvas missing');
+  throw new Error('canvas missing');
+}
+const canvas = canvasEl;
+
+const renderer = new THREE.WebGLRenderer({
+  canvas,
+  antialias: false,
+  alpha: false,
+  powerPreference: 'low-power',
+});
+renderer.setClearColor(0x7a9bb0, 1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setPixelRatio(quality.ratio);
+renderer.autoClear = true;
+
+const scene = new THREE.Scene();
+const portrait = window.innerHeight > window.innerWidth;
+const camera = new THREE.PerspectiveCamera(portrait ? 62 : 48, 1, 0.5, 12000);
+
+let sky: ReturnType<typeof createSky>;
+let ocean: ReturnType<typeof createOcean>;
+let whale: ReturnType<typeof createWhale>;
+let ships: ReturnType<typeof createShips>;
+let islands: ReturnType<typeof createIslands>;
+let birds: ReturnType<typeof createBirds>;
+let layout: ReturnType<typeof layoutWorld>;
+let rig: CalmCamera;
+
+try {
+  sky = createSky(seed, renderer, scene);
+  layout = layoutWorld(seed, sky.sunAzimuthDeg);
+  const savedFraming = memory?.framing;
+  // Subject-derived yaw always; keep saved pitch/distance when present.
+  const framing = {
+    yaw: layout.viewYaw,
+    pitch: savedFraming?.pitch ?? (portrait ? 0.08 : 0.12),
+    distance: savedFraming?.distance ?? (portrait ? 42 : 40),
+  };
+  rig = new CalmCamera(camera, {
+    initialYaw: layout.viewYaw,
+    sunAzimuthDeg: sky.sunAzimuthDeg,
+    portrait,
+    saved: framing,
+  });
+  ocean = createOcean(seed, sky.sunDirection, { textureSize: quality.waterSize, waterColor: 0x1c5470 });
+  scene.add(ocean.mesh);
+  islands = createIslands(layout.islands, quality.islandSegments, sky.horizonColor);
+  for (const island of islands) scene.add(island.group);
+  ships = createShips(layout.ships);
+  for (const ship of ships) scene.add(ship.group);
+  whale = createWhale(seed, layout.whaleHome);
+  scene.add(whale.group);
+  birds = createBirds(seed, mobile ? 3 : 6);
+  scene.add(birds.group);
+} catch (error) {
+  const message = error instanceof Error ? error.message : 'failed to build the scene';
+  ui.error(message);
+  throw error;
+}
+
+function resize(): void {
+  const width = canvas.clientWidth || window.innerWidth;
+  const height = canvas.clientHeight || window.innerHeight;
+  const isPortrait = height > width;
+  renderer.setPixelRatio(quality.ratio);
+  renderer.setSize(width, height, false);
+  camera.aspect = width / Math.max(1, height);
+  camera.fov = isPortrait ? 62 : 48;
+  camera.far = 12000;
+  camera.updateProjectionMatrix();
+  rig.setPortrait(isPortrait);
+}
+
+resize();
+window.addEventListener('resize', resize);
+
+// Pointer look-around.
+let dragging = false;
+let lastX = 0;
+let lastY = 0;
+canvas.addEventListener('pointerdown', (event) => {
+  dragging = true;
+  lastX = event.clientX;
+  lastY = event.clientY;
+  canvas.setPointerCapture(event.pointerId);
+});
+canvas.addEventListener('pointermove', (event) => {
+  if (!dragging) return;
+  const dx = event.clientX - lastX;
+  const dy = event.clientY - lastY;
+  lastX = event.clientX;
+  lastY = event.clientY;
+  rig.orbit(dx, dy);
+});
+const endDrag = (event: PointerEvent) => {
+  dragging = false;
+  try {
+    canvas.releasePointerCapture(event.pointerId);
+  } catch {
+    /* already released */
+  }
+};
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+const motion = matchMedia('(prefers-reduced-motion: reduce)');
+let time = 0;
+let last = performance.now();
+let frame: number | null = null;
+let disposed = false;
+let lastSave = 0;
 
 function sync(): void {
-  ui.sync({ paused, sound: audio.enabled, volume: audio.volume, seed });
-  audio.sync(started && !paused && !document.hidden).catch(() => {});
+  ui.sync({ seed, sound: audio.enabled });
+  audio.sync(!document.hidden).catch(() => {});
 }
 
 function persist(): void {
-  if (!camera) return;
-  saveMemory(storage as never, { version: VERSION, seed, sound: audio.settings(), framing: camera.framing, flight });
+  saveMemory(storage, {
+    version: VERSION,
+    seed,
+    sound: audio.settings(),
+    framing: { ...rig.framing },
+  });
 }
 
-function togglePause(): void {
-  if (!started) return;
-  paused = !paused; last = 0; sync(); persist(); ui.wake();
-  ui.announce(paused ? 'paused' : 'resumed');
-  if (paused && frame !== null) { cancelAnimationFrame(frame); frame = null; }
-  else schedule();
+/** When set, camera locks onto the whale for spout/breach review framing. */
+let eventFrame: 'breach' | 'spout' | null = null;
+
+function focusPoint(): THREE.Vector3 {
+  const w = whale.state;
+  if (eventFrame) {
+    // Whale-only focus at the body centre (triggers camera event-orbit when y > 1.8).
+    const lift =
+      eventFrame === 'breach'
+        ? Math.max(2.5, w.y * 0.7 + 1.4)
+        : Math.max(1.9, Math.max(0.8, w.y) + 1.6);
+    return new THREE.Vector3(w.x, lift, w.z);
+  }
+  // Keep the whale centred (≥0.75 weight); glance toward the hero ship.
+  const focus = new THREE.Vector3(w.x, Math.max(0.4, Math.min(2.2, w.y * 0.2 + 0.5)), w.z);
+  const hero = ships[0];
+  if (hero) {
+    const pull = 0.22;
+    focus.x = focus.x * (1 - pull) + hero.group.position.x * pull;
+    focus.z = focus.z * (1 - pull) + hero.group.position.z * pull;
+  }
+  return focus;
 }
 
-function schedule(): void {
-  if (!disposed && !document.hidden && frame === null) frame = requestAnimationFrame(tick);
+/** Side-on, close framing so the whale fills ~35–50% of screen width. */
+function frameWhaleEvent(kind: 'breach' | 'spout'): void {
+  eventFrame = kind;
+  const w = whale.state;
+  // Prefer a clear broadside; fall back to sun-biased yaw if heading is unstable.
+  const yaw = Number.isFinite(w.heading) ? w.heading + Math.PI * 0.55 : layout.viewYaw;
+  // Close enough that a ~12 m whale fills ~35–50% of portrait width.
+  const dist = kind === 'breach' ? 16 : 14;
+  const pitch = kind === 'breach' ? 0.12 : 0.02;
+  rig.framing.yaw = yaw;
+  rig.framing.pitch = pitch;
+  rig.framing.distance = dist;
+  rig.current.yaw = yaw;
+  rig.current.pitch = pitch;
+  rig.current.distance = dist;
+  rig.baseYaw = yaw;
+  rig.driftWeight = 0;
+  rig.lastInput = Infinity; // keep drift off for the whole review shot
+  const focus = focusPoint();
+  rig.setFocus(focus.x, focus.y, focus.z);
+  // Snap camera (large dt) so the first screenshot is already framed.
+  rig.update(8, time, true);
 }
 
 function tick(now: number): void {
-  frame = null;
-  if (disposed || document.hidden || !renderer || !camera || !input) return;
-  const interval = 1000 / (quality.tier === 'low' ? 30 : 60);
-  if (started && !paused && now - renderedAt < interval - 1) { schedule(); return; }
-  const elapsed = last ? now - last : interval;
-  const dt = Math.min(0.05, elapsed / 1000); last = now; renderedAt = now;
-  const flying = started && !paused;
-  if (flying) {
-    input.update(dt);
-    stepFlight(flight, dt, universe.pointsOfInterest() as never, universe.obstacles(flight.position) as never, {
-      ...(look.pacing ?? {}),
-      lightDirection: renderer.lightWorld.toArray() as number[],
-    });
-    if (renderer.observeQuality(elapsed) || updateQuality(quality, elapsed)) renderer.applyQuality(quality);
+  if (disposed) return;
+  frame = requestAnimationFrame(tick);
+  if (document.hidden) {
+    last = now;
+    return;
   }
-  stream();
-  renderer.nearestSystem = universe.nearestSystem(flight.position) as never;
-  if (starRevision !== universe.revision && (++steps % 5 === 0 || starRevision < 0 || !universe.pending.length)) {
-    renderer.updateStars(universe as never, flight.position); starRevision = universe.revision;
+  const raw = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  const dt = motion.matches ? 0 : raw;
+  if (!motion.matches) time += dt;
+
+  if (updateQuality(quality, raw * 1000)) {
+    renderer.setPixelRatio(quality.ratio);
+    resize();
   }
-  camera.update(flight, dt, { active: flying, reducedMotion: motion.matches });
-  renderer.render(flight);
-  document.body.dataset.ready = 'true';
-  if (renderer.ready) ui.ready();
-  if (flying && now - lastSave > 5000) { persist(); lastSave = now; }
-  if (flying || universe.pending.length || universe.coarseQueue.length || (!started && renderer.needsWork) || (started && !camera.settled())) schedule();
+
+  sky.update(dt);
+  ocean.update(dt, sky.sunDirection);
+  whale.update(dt, time, layout.islands);
+  for (const ship of ships) ship.update(dt, time, layout.islands);
+  birds.update(time);
+
+  const focus = focusPoint();
+  rig.setFocus(focus.x, focus.y, focus.z);
+  rig.update(dt || 1 / 60, time, motion.matches);
+
+  renderer.render(scene, camera);
+
+  if (now - lastSave > 4000) {
+    lastSave = now;
+    persist();
+  }
 }
 
-function stream(): number {
-  if (!renderer) return 0;
-  return universe.update(flight.position, {
-    time: flight.time,
-    onLoad: (cell) => renderer!.loadCell(cell as never),
-    onUnload: (cell) => renderer!.unloadCell(cell as never),
-    onLoadSystem: (system) => renderer!.loadSystem(system as never),
-    onUnloadSystem: (system) => renderer!.unloadSystem(system as never),
-    onLoadNebula: (nebula) => renderer!.loadNebula(nebula as never),
-    onUnloadNebula: (nebula) => renderer!.unloadNebula(nebula as never),
-  });
+function start(): void {
+  ui.ready();
+  sync();
+  persist();
+  last = performance.now();
+  frame = requestAnimationFrame(tick);
 }
 
-try {
-  const canvas = ui.elements.canvas as HTMLCanvasElement;
-  renderer = new SpaceRenderer(canvas, seed, look, quality);
-  renderer.loadSystem(spawn.system as never);
-  renderer.bakes.onReady = () => { if (!started || !paused) schedule(); };
-  camera = new CameraRig(renderer.camera, look.camera, memory?.framing);
-  if (look.debug && Object.keys(look.debug).length) {
-    (window as unknown as { __flightReview?: unknown }).__flightReview = {
-      get time() { return flight.time; },
-      stats() { return renderer!.report(); },
-      advance(seconds: number) {
-        const target = flight.time + Math.max(0, Math.min(3600, seconds));
-        while (flight.time < target - 1e-6) {
-          stream();
-          stepFlight(flight, Math.min(1 / 30, target - flight.time), universe.pointsOfInterest() as never, universe.obstacles(flight.position) as never, {
-            ...(look.pacing ?? {}),
-            lightDirection: renderer!.lightWorld.toArray() as number[],
-          });
-        }
-        renderer!.updateStars(universe as never, flight.position);
-        camera!.update(flight, 1);
-        persist(); last = 0; schedule();
-      },
-      place(position: number[], yaw = flight.yaw, pitch = flight.pitch) {
-        flight.position = position.map(Number);
-        flight.yaw = yaw; flight.pitch = pitch; flight.target = null; flight.targetTime = 0;
-        for (let i = 0; i < 24; i++) stream();
-        renderer!.nearestSystem = universe.nearestSystem(flight.position) as never;
-        renderer!.updateStars(universe as never, flight.position);
-        camera!.update(flight, 1); last = 0; schedule();
-      },
-      nebulae() {
-        return [...universe.nebulae.values()].map((nebula) => ({ key: nebula.key, position: [...nebula.position], radius: nebula.radius }));
-      },
-      rings() {
-        const out: unknown[] = [];
-        for (const group of renderer!.planetGroups) {
-          const record = group.userData.planet;
-          if (!record?.ring) continue;
-          out.push({
-            id: record.data.id,
-            visible: record.ring.visible,
-            radius: record.data.radius,
-            inner: record.appearance.ring?.inner,
-            outer: record.appearance.ring?.outer,
-            pos: group.position.toArray(),
-          });
-        }
-        return out;
-      },
-      systems() {
-        return [...universe.systems.values()].map((system) => ({
-          key: system.key,
-          position: [...system.position],
-          planets: system.planets.map((planet) => ({
-            id: planet.id, type: planet.type, rings: Boolean(planet.rings),
-            position: [...planet.position], radius: planet.radius,
-            tilt: planet.tilt, ringTilt: planet.ring?.tilt ?? 0,
-          })),
-          stars: system.stars.map((star) => ({ position: [...star.position], radius: star.radius })),
-        }));
-      },
-      frameRing(openDeg = 20) {
-        // Simplified framing helper for shots.
-        let best: { planet: { position: number[]; radius: number; rings?: boolean }; yaw: number; pitch: number } | null = null;
-        let bestScore = Infinity;
-        for (const system of universe.systems.values()) {
-          for (const planet of system.planets) {
-            if (!planet.rings) continue;
-            const dist = Math.hypot(
-              planet.position[0]! - flight.position[0]!,
-              planet.position[1]! - flight.position[1]!,
-              planet.position[2]! - flight.position[2]!,
-            );
-            if (dist < bestScore) {
-              bestScore = dist;
-              const dir = planet.position.map((n, i) => n - flight.position[i]!);
-              const len = Math.hypot(...dir) || 1;
-              best = {
-                planet,
-                yaw: Math.atan2(dir[0]! / len, -dir[2]! / len),
-                pitch: Math.asin(Math.max(-1, Math.min(1, dir[1]! / len))),
-              };
-            }
-          }
-        }
-        if (!best) return false;
-        const range = best.planet.radius / Math.tan((0.17 * 52 * Math.PI / 180) / 2);
-        const position = best.planet.position.map((n, i) => n - (best!.planet.position[i]! - flight.position[i]!) / bestScore * range);
-        (window as unknown as { __flightReview: { place: (p: number[], y: number, pitch: number) => void } }).__flightReview.place(position, best.yaw, best.pitch + openDeg * 0.01);
-        return true;
-      },
-    };
+document.addEventListener('visibilitychange', () => {
+  sync();
+  if (!document.hidden) last = performance.now();
+});
+
+if (debug) {
+  const review: CalmReview = {
+    get time() {
+      return time;
+    },
+    advance(seconds: number) {
+      if (Number.isFinite(seconds)) time += Math.max(0, seconds);
+    },
+    forceBreach() {
+      whale.forcePhase('breach');
+      frameWhaleEvent('breach');
+    },
+    forceSpout() {
+      whale.forcePhase('spout');
+      frameWhaleEvent('spout');
+    },
+    frameWhale(kind: 'breach' | 'spout' = 'breach') {
+      frameWhaleEvent(kind);
+    },
+    setWaterVisible(visible: boolean) {
+      ocean.mesh.visible = visible;
+    },
+    setWhaleVisible(visible: boolean) {
+      whale.group.visible = visible;
+    },
+    setIslandsVisible(visible: boolean) {
+      for (const island of islands) island.group.visible = visible;
+    },
+    setShipsVisible(visible: boolean) {
+      for (const ship of ships) ship.group.visible = visible;
+    },
+    frame(yaw: number, pitch: number, distance: number) {
+      eventFrame = null;
+      rig.framing.yaw = yaw;
+      rig.framing.pitch = pitch;
+      rig.framing.distance = distance;
+      rig.current.yaw = yaw;
+      rig.current.pitch = pitch;
+      rig.current.distance = distance;
+      rig.baseYaw = yaw;
+      rig.driftWeight = 0;
+      rig.noteInput();
+    },
+    stats() {
+      const box = new THREE.Box3().setFromObject(whale.group);
+      const size = box.getSize(new THREE.Vector3());
+      return {
+        seed,
+        time,
+        tier: quality.tier,
+        dpr: quality.ratio,
+        phase: whale.state.phase,
+        whale: [whale.state.x, whale.state.y, whale.state.z],
+        whaleSize: [size.x, size.y, size.z],
+        cam: [camera.position.x, camera.position.y, camera.position.z],
+        focus: [rig.lookAt.x, rig.lookAt.y, rig.lookAt.z],
+        dist: rig.current.distance,
+        islands: layout.islands.length,
+        ships: layout.ships.length,
+        cycle: cycleDuration(),
+        exposure: renderer.toneMappingExposure,
+      };
+    },
+  };
+  (window as unknown as { __calmReview: CalmReview }).__calmReview = review;
+  const at = params.get('at');
+  if (at === 'breach') {
+    time = 0;
+    whale.forcePhase('breach');
+    frameWhaleEvent('breach');
+  } else if (at === 'spout') {
+    time = 0;
+    whale.forcePhase('spout');
+    frameWhaleEvent('spout');
   }
-  input = bindInput(canvas, {
-    orbit: (x, y) => camera!.orbit(x, y),
-    steer: (yaw, pitch) => { camera!.noteInput(); steerFlight(flight, yaw, pitch); },
-    zoom: (amount) => camera!.zoom(amount),
-    pause: togglePause, wake: ui.wake, active: () => started,
-    change: () => { if (paused) schedule(); },
-  });
-  canvas.tabIndex = 0;
-  canvas.style.borderRadius = '0';
-  canvas.setAttribute('aria-label', 'A spacecraft gliding through a generated universe. Drag to orbit; arrow keys steer.');
-  canvas.addEventListener('webglcontextlost', (event) => {
-    event.preventDefault();
-    paused = true; sync();
-    ui.announce('The view was interrupted. Reload to resume your journey.');
-    persist();
-  });
-  window.addEventListener('resize', () => { renderer?.resize(quality.ratio); schedule(); });
-  document.addEventListener('visibilitychange', () => {
-    last = 0;
-    if (document.hidden) {
-      if (frame !== null) cancelAnimationFrame(frame);
-      frame = null; persist();
-    } else if (started && !paused) schedule();
-    sync();
-  });
-  motion.addEventListener('change', (event) => { if (event.matches && started && !paused) togglePause(); });
-  window.addEventListener('pagehide', (event) => {
-    persist();
-    if (frame !== null) cancelAnimationFrame(frame);
-    frame = null; audio.sync(false).catch(() => {});
-    if (!event.persisted) { disposed = true; input?.dispose(); ui.dispose(); renderer?.dispose(); audio.dispose(); }
-  });
-  window.addEventListener('pageshow', (event) => { if (event.persisted) { last = 0; sync(); schedule(); } });
-  sync(); schedule();
-} catch (error) {
-  console.error(error);
-  renderer?.dispose();
-  ui.error('This view needs WebGL 2. Try another browser.');
 }
+
+start();
+
+window.addEventListener('pagehide', () => {
+  disposed = true;
+  if (frame !== null) cancelAnimationFrame(frame);
+  persist();
+  ui.dispose();
+  ocean.dispose();
+  sky.dispose();
+  whale.dispose();
+  for (const ship of ships) ship.dispose();
+  for (const island of islands) island.dispose();
+  birds.dispose();
+  renderer.dispose();
+});

@@ -1,100 +1,121 @@
 import * as THREE from 'three';
 import { clamp, damp } from './math.js';
-import type { FlightState } from './flight.js';
 
 export type CameraFraming = { yaw: number; pitch: number; distance: number };
 
-export type CameraDriftChannel = {
-  periodSeconds: number;
-  amplitude?: number;
-  amplitudeDeg?: number;
+export type CalmCameraOptions = {
+  /** Preferred initial yaw from subjects (radians). Sun is only a tiebreak upstream. */
+  initialYaw?: number;
+  sunAzimuthDeg?: number;
+  portrait?: boolean;
+  saved?: CameraFraming | null;
 };
 
-export type CameraDrift = {
-  yaw: CameraDriftChannel;
-  pitch: CameraDriftChannel;
-  dolly: CameraDriftChannel;
-  fovBreath: CameraDriftChannel;
-  fadeOutOnInputSeconds: number;
-  resumeAfterSeconds: number;
-  fadeInSeconds: number;
-};
-
-export type CameraSettings = {
-  distance: number;
-  pitch: number;
-  minDistance: number;
-  maxDistance: number;
-  damping: number;
-  lookAhead: number;
-  height: number;
-  fov?: number;
-  drift?: CameraDrift | false | null;
-};
-
-export class CameraRig {
+export class CalmCamera {
   camera: THREE.PerspectiveCamera;
-  settings: CameraSettings;
   framing: CameraFraming;
   current: CameraFraming;
-  initialized: boolean;
-  target: THREE.Vector3;
-  time: number;
-  lastInput: number;
-  driftWeight: number;
-  driftSettling: boolean;
+  lookAt = new THREE.Vector3();
+  time = 0;
+  lastInput = -Infinity;
+  driftWeight = 1;
+  baseYaw: number;
+  portrait: boolean;
+  private focus = new THREE.Vector3();
+  private initialized = false;
 
-  constructor(camera: THREE.PerspectiveCamera, settings: Partial<CameraSettings> = {}, saved?: CameraFraming | null) {
+  constructor(camera: THREE.PerspectiveCamera, options: CalmCameraOptions = {}) {
     this.camera = camera;
-    this.settings = { distance: 21, pitch: 0.22, minDistance: 9, maxDistance: 55, damping: 7, lookAhead: 9, height: 1.2, ...settings };
-    this.framing = saved ? { ...saved } : { yaw: 0, pitch: this.settings.pitch, distance: this.settings.distance };
-    this.framing.distance = clamp(this.framing.distance, this.settings.minDistance, this.settings.maxDistance);
-    this.current = { ...this.framing }; this.initialized = false;
-    this.target = new THREE.Vector3();
-    this.time = 0; this.lastInput = -Infinity; this.driftWeight = this.settings.drift ? 1 : 0; this.driftSettling = false;
+    this.portrait = Boolean(options.portrait);
+    const fallbackYaw = options.initialYaw ?? (
+      options.sunAzimuthDeg !== undefined
+        ? THREE.MathUtils.degToRad(options.sunAzimuthDeg)
+        : 0.85
+    );
+    const defaultDist = this.portrait ? 42 : 40;
+    this.framing = options.saved
+      ? { ...options.saved }
+      : { yaw: fallbackYaw, pitch: this.portrait ? 0.08 : 0.12, distance: defaultDist };
+    this.baseYaw = this.framing.yaw;
+    this.framing.pitch = clamp(this.framing.pitch, 0.02, 0.55);
+    this.framing.distance = clamp(this.framing.distance, 16, 80);
+    this.current = { ...this.framing };
   }
 
-  orbit(x: number, y: number): void {
+  orbit(dx: number, dy: number): void {
     this.noteInput();
-    this.framing.yaw = Math.atan2(Math.sin(this.framing.yaw - x * 0.004), Math.cos(this.framing.yaw - x * 0.004));
-    this.framing.pitch = clamp(this.framing.pitch + y * 0.003, -0.65, 1.15);
+    this.framing.yaw -= dx * 0.004;
+    this.baseYaw = this.framing.yaw;
+    this.framing.pitch = clamp(this.framing.pitch + dy * 0.003, 0.02, 0.62);
   }
 
-  zoom(amount: number): void {
-    this.noteInput();
-    this.framing.distance = clamp(this.framing.distance * Math.exp(amount), this.settings.minDistance, this.settings.maxDistance);
+  noteInput(): void {
+    this.lastInput = this.time;
   }
 
-  settled(): boolean {
-    const yaw = Math.atan2(Math.sin(this.current.yaw - this.framing.yaw), Math.cos(this.current.yaw - this.framing.yaw));
-    return !this.driftSettling && Math.abs(yaw) < 0.0005 && (['pitch', 'distance'] as const).every((key) => Math.abs(this.current[key] - this.framing[key]) < 0.0005);
+  setFocus(x: number, y: number, z: number): void {
+    this.focus.set(x, y, z);
   }
-  noteInput(): void { this.lastInput = this.time; }
 
-  update(flight: FlightState, dt: number, { active = false, reducedMotion = false }: { active?: boolean; reducedMotion?: boolean } = {}): void {
-    this.time = flight.time; const drift = this.settings.drift;
+  setPortrait(portrait: boolean): void {
+    this.portrait = portrait;
+  }
+
+  update(dt: number, time: number, reducedMotion = false): void {
+    this.time = time;
     if (reducedMotion) this.driftWeight = 0;
-    else if (drift && this.time - this.lastInput < drift.resumeAfterSeconds) this.driftWeight = Math.max(0, this.driftWeight - dt / drift.fadeOutOnInputSeconds);
-    else if (drift && active) this.driftWeight = Math.min(1, this.driftWeight + dt / drift.fadeInSeconds);
-    this.driftSettling = Boolean(drift && this.time - this.lastInput < drift.resumeAfterSeconds && this.driftWeight > 0);
-    const factor = this.initialized ? dt : 10;
-    for (const key of ['yaw', 'pitch', 'distance'] as const) {
-      const target = key === 'yaw' ? this.current.yaw + Math.atan2(Math.sin(this.framing.yaw - this.current.yaw), Math.cos(this.framing.yaw - this.current.yaw)) : this.framing[key];
-      this.current[key] = damp(this.current[key], target, this.settings.damping, factor);
+    else if (time - this.lastInput < 4) this.driftWeight = Math.max(0, this.driftWeight - dt / 1.2);
+    else this.driftWeight = Math.min(1, this.driftWeight + dt / 5);
+
+    // Swing ±40° around the sun-biased heading instead of a full 360° orbit.
+    if (this.driftWeight > 0.01) {
+      const swing = Math.sin(time * 0.02) * 0.7;
+      const targetYaw = this.baseYaw + swing;
+      const yawRate = this.portrait ? 0.018 : 0.028;
+      const delta = Math.atan2(Math.sin(targetYaw - this.framing.yaw), Math.cos(targetYaw - this.framing.yaw));
+      this.framing.yaw += delta * Math.min(1, yawRate * this.driftWeight * 8 * dt);
+      const targetDist = this.portrait ? 42 + Math.sin(time * 0.05) * 2 : 40 + Math.sin(time * 0.05) * 3;
+      this.framing.pitch = damp(this.framing.pitch, 0.08 + Math.sin(time * 0.07) * 0.02, 0.4, dt);
+      this.framing.distance = damp(this.framing.distance, targetDist, 0.3, dt);
     }
-    const offset = (key: keyof CameraDrift) => {
-      if (!drift || key === 'fadeOutOnInputSeconds' || key === 'resumeAfterSeconds' || key === 'fadeInSeconds') return 0;
-      const channel = drift[key];
-      return Math.sin(this.time * Math.PI * 2 / channel.periodSeconds) * this.driftWeight * (channel.amplitude ?? channel.amplitudeDeg! * Math.PI / 180);
-    };
-    const bearing = flight.yaw + this.current.yaw + offset('yaw'), elevation = this.current.pitch + offset('pitch');
-    const range = this.current.distance * (1 + offset('dolly'));
-    const fov = ((this.camera.userData as { baseFov?: number }).baseFov ?? this.settings.fov ?? 52) + offset('fovBreath') * 180 / Math.PI;
-    if (Math.abs(this.camera.fov - fov) > 0.001) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
-    this.camera.position.set(-Math.sin(bearing) * Math.cos(elevation) * range,
-      Math.sin(elevation) * range + this.settings.height, Math.cos(bearing) * Math.cos(elevation) * range);
-    const ahead = this.settings.lookAhead;
-    this.target.set(Math.sin(flight.yaw) * ahead, 1.4 + Math.sin(flight.pitch) * ahead, -Math.cos(flight.yaw) * ahead);
-    this.camera.lookAt(this.target); this.initialized = true;
+
+    const factor = this.initialized ? dt : 8;
+    for (const key of ['yaw', 'pitch', 'distance'] as const) {
+      if (key === 'yaw') {
+        const delta = Math.atan2(Math.sin(this.framing.yaw - this.current.yaw), Math.cos(this.framing.yaw - this.current.yaw));
+        this.current.yaw = damp(this.current.yaw, this.current.yaw + delta, 3.2, factor);
+      } else {
+        this.current[key] = damp(this.current[key], this.framing[key], 3.2, factor);
+      }
+    }
+
+    const yaw = this.current.yaw;
+    const pitch = this.current.pitch;
+    const dist = this.current.distance;
+    // When focus.y is elevated (breach/spout event framing), orbit in 3D around the
+    // focus point so the subject stays centred — do not pin eyeY to a waterline height.
+    const eventOrbit = this.focus.y > 1.8;
+    if (eventOrbit) {
+      const eyeHeight = this.focus.y + Math.sin(pitch) * dist * 0.35 + 1.2;
+      this.camera.position.set(
+        this.focus.x + Math.sin(yaw) * Math.cos(pitch) * dist,
+        eyeHeight,
+        this.focus.z + Math.cos(yaw) * Math.cos(pitch) * dist,
+      );
+      this.lookAt.copy(this.focus);
+    } else {
+      const eyeY = this.portrait
+        ? clamp(3.8 + pitch * 3.5, 3.4, 5.5)
+        : clamp(3.2 + pitch * 5, 2.6, 7);
+      this.camera.position.set(
+        this.focus.x + Math.sin(yaw) * Math.cos(pitch) * dist,
+        eyeY,
+        this.focus.z + Math.cos(yaw) * Math.cos(pitch) * dist,
+      );
+      // Horizon ~55–60% down; keep look low enough that the whale back reads.
+      this.lookAt.set(this.focus.x, clamp(this.focus.y + 2.2, 1.6, 4.5), this.focus.z);
+    }
+    this.camera.lookAt(this.lookAt);
+    this.initialized = true;
   }
 }

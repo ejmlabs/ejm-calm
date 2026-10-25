@@ -1,24 +1,82 @@
-import { hash } from './rng.js';
+import { createNoise2D, createNoise4D, type NoiseFunction2D, type NoiseFunction4D } from 'simplex-noise';
+import { random, hash } from './rng.js';
 
-const ease = (t: number): number => t * t * (3 - 2 * t);
-const mix = (a: number, b: number, t: number): number => a + (b - a) * t;
-
-export function noise3(x: number, y: number, z: number, seed = 0): number {
-  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
-  const u = ease(x - ix), v = ease(y - iy), w = ease(z - iz);
-  const at = (dx: number, dy: number, dz: number): number => hash(seed, ix + dx, iy + dy, iz + dz) / 0xffffffff;
-  return mix(
-    mix(mix(at(0, 0, 0), at(1, 0, 0), u), mix(at(0, 1, 0), at(1, 1, 0), u), v),
-    mix(mix(at(0, 0, 1), at(1, 0, 1), u), mix(at(0, 1, 1), at(1, 1, 1), u), v), w,
-  );
+export function makeNoise2D(seed: number, channel = 0): NoiseFunction2D {
+  const rng = random(hash(seed, channel, 'noise'));
+  return createNoise2D(rng);
 }
 
-export function fractalNoise(x: number, y: number, z: number, seed = 0, octaves = 3): number {
-  let sum = 0, weight = 0, amplitude = 1;
+export function makeNoise4D(seed: number, channel = 0): NoiseFunction4D {
+  const rng = random(hash(seed, channel, 'noise4'));
+  return createNoise4D(rng);
+}
+
+/** Fractal Brownian motion in [-1, 1]. */
+export function fbm2(
+  noise: NoiseFunction2D,
+  x: number,
+  z: number,
+  octaves = 5,
+  lacunarity = 2.02,
+  gain = 0.5,
+): number {
+  let sum = 0;
+  let amp = 1;
+  let freq = 1;
+  let norm = 0;
   for (let i = 0; i < octaves; i++) {
-    sum += noise3(x, y, z, seed + i) * amplitude;
-    weight += amplitude;
-    x *= 2.03; y *= 2.03; z *= 2.03; amplitude *= 0.5;
+    sum += noise(x * freq, z * freq) * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= lacunarity;
   }
-  return weight ? sum / weight : 0;
+  return norm > 0 ? sum / norm : 0;
+}
+
+/** 4D fbm for seamlessly tiling 2D domains via a torus embedding. */
+export function fbm4(
+  noise: NoiseFunction4D,
+  x: number,
+  y: number,
+  z: number,
+  w: number,
+  octaves = 5,
+  lacunarity = 2.02,
+  gain = 0.5,
+): number {
+  let sum = 0;
+  let amp = 1;
+  let freq = 1;
+  let norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    sum += noise(x * freq, y * freq, z * freq, w * freq) * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return norm > 0 ? sum / norm : 0;
+}
+
+/** Ridged multifractal in [0, 1]. */
+export function ridged2(
+  noise: NoiseFunction2D,
+  x: number,
+  z: number,
+  octaves = 4,
+  lacunarity = 2.1,
+  gain = 0.5,
+): number {
+  let sum = 0;
+  let amp = 1;
+  let freq = 1;
+  let norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    const n = 1 - Math.abs(noise(x * freq, z * freq));
+    const ridge = n * n;
+    sum += ridge * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return norm > 0 ? sum / norm : 0;
 }

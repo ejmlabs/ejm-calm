@@ -36,7 +36,7 @@ export async function withBrowser<T>(run: (browser: Browser, url: string) => Pro
   }
 }
 
-export type OpenFlightOptions = {
+export type OpenCalmOptions = {
   seed?: number | null;
   reducedMotion?: 'no-preference' | 'reduce';
   storage?: unknown;
@@ -44,24 +44,24 @@ export type OpenFlightOptions = {
   instrument?: boolean;
 };
 
-export type OpenFlightResult = {
+export type OpenCalmResult = {
   page: Page;
   context: BrowserContext;
   errors: string[];
   external: string[];
 };
 
-export async function openFlight(
+export async function openCalm(
   browser: Browser,
   base: string,
   device: DeviceProfile,
-  { seed = 42, reducedMotion = 'no-preference', storage, query = {}, instrument = false }: OpenFlightOptions = {},
-): Promise<OpenFlightResult> {
+  { seed = 42, reducedMotion = 'no-preference', storage, query = {}, instrument = false }: OpenCalmOptions = {},
+): Promise<OpenCalmResult> {
   const { name: _name, ...options } = device;
   const context = await browser.newContext({ ...options, reducedMotion });
   if (storage) {
     await context.addInitScript((value) => {
-      localStorage.setItem('ejm-fly:v1', JSON.stringify(value));
+      localStorage.setItem('ejm-calm:v1', JSON.stringify(value));
     }, storage);
   }
   if (instrument) {
@@ -112,3 +112,6 @@ export async function openFlight(
   }
   return { page, context, errors, external };
 }
+
+/** @deprecated Use openCalm */
+export const openFlight = openCalm;

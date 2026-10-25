@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { CSP, CSP_HEADER } from '../tools/serve.js';
 
 const root = resolve(import.meta.dirname, '..');
-const ALLOWED_TOP = new Set(['LICENSE', 'THIRD_PARTY_NOTICES', '_headers', 'index.html', 'styles.css', 'assets']);
+const ALLOWED_TOP = new Set(['LICENSE', 'THIRD_PARTY_NOTICES', '_headers', 'index.html', 'assets']);
 
 async function walk(directory: string): Promise<string[]> {
   const result: string[] = [];

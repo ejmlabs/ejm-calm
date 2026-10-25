@@ -9,15 +9,15 @@
     />
     <meta name="referrer" content="no-referrer" />
     <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#060a17" />
-    <title>Fly</title>
+    <meta name="theme-color" content="#1a3a52" />
+    <title>calm</title>
     <meta
       name="description"
-      content="A small ship gliding through an endless, procedurally generated universe. It flies itself; leave it open beside your work."
+      content="A calm, procedurally generated ocean with a whale, ships and islands. Sit and watch."
     />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23060a17'/%3E%3Ccircle cx='46' cy='18' r='2' fill='%23cfe0ff'/%3E%3Ccircle cx='14' cy='46' r='1.4' fill='%23cfe0ff'/%3E%3Cpath d='M32 12 L40 44 L32 40 L24 44 Z' fill='%23e6e0d3'/%3E%3Ccircle cx='32' cy='48' r='4' fill='%239fe3ff'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a3a52'/%3E%3Cpath d='M8 40c8-6 16-6 24 0s16 6 24 0' fill='none' stroke='%239ec5d8' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='46' cy='18' r='5' fill='%23f0d9a8'/%3E%3C/svg%3E"
     />
     <link rel="stylesheet" href="styles.css" />
     <script type="module" src="/src/main.ts"></script>
@@ -27,62 +27,46 @@
       id="space"
       tabindex="0"
       role="img"
-      inert
-      aria-label="A small ship flying itself through an endless universe. Drag to look around, right-drag to steer, arrow keys nudge, space pauses or resumes."
+      aria-label="A calm ocean scene with a whale, ships and islands. Drag to look around."
     ></canvas>
 
-    <!-- The gate: the universe stands still behind one button and one line of help. -->
-    <div id="gate">
-      <button id="beginBtn" type="button" disabled>begin</button>
-      <p id="gateHint" class="hint">
-        <span>A small ship crossing an endless universe. It flies itself; there is nothing to do.</span>
-        <span class="mouse">Drag to look around &middot; right-drag steers &middot; the wheel zooms &middot; space pauses</span>
-        <span class="touch">Drag to steer &middot; two fingers look around &middot; pinch to zoom</span>
-      </p>
-    </div>
-
-    <!-- The veil: deep ink and one small line, until the first frame is on screen. -->
     <div id="veil">
-      <p id="veilText" role="status">gathering the stars</p>
+      <p id="veilText" role="status">gathering the sea</p>
       <a id="veilRetry" href="./" hidden>try again</a>
-      <noscript><p class="noscript">JavaScript is needed to make this universe.</p></noscript>
+      <noscript><p class="noscript">JavaScript is needed for this scene.</p></noscript>
     </div>
 
-    <!-- About: a quiet card above the corner of the controls line. -->
+    <p id="title" aria-hidden="true">calm</p>
+
     <aside id="about" role="dialog" aria-modal="false" aria-labelledby="aboutTitle" inert>
       <button id="aboutClose" type="button" class="icon" aria-label="Close" title="Close">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" /></svg>
       </button>
-      <h2 id="aboutTitle">Fly</h2>
+      <h2 id="aboutTitle">calm</h2>
       <p>
-        A small ship drifting through a universe that goes on forever. Every star, cloud, planet and stone is
-        procedurally generated on your device from one number, the seed; the same seed opens the same universe for
-        anyone.
+        A quiet ocean generated on your device from one number, the seed. The same seed opens the same
+        sea for anyone: whale, ships, islands, light and weather.
       </p>
-      <p>It flies itself. Leave it open beside your work and glance over now and then.</p>
+      <p>Sit and watch. Drag to look around; the view eases back on its own.</p>
       <p class="keys">
-        <span class="mouse">Drag looks around, right-drag steers, the wheel zooms, arrow keys nudge, space pauses.</span>
-        <span class="touch">Drag steers, two fingers look around, pinch zooms.</span>
+        <span class="mouse">Drag looks around. Share copies a link. New seed opens another sea.</span>
+        <span class="touch">Drag looks around. Share copies a link. New seed opens another sea.</span>
       </p>
       <p>
-        Nothing is collected: no accounts, no tracking, no analytics, and nothing is sent anywhere. Your sound settings
-        and where you were are kept only in this browser.
+        Nothing is collected: no accounts, no tracking, no analytics, and nothing is sent anywhere.
+        Sound, when enabled, and your last seed stay only in this browser.
       </p>
       <p class="fine">
         Made by ejmlabs, an open source lab. MIT license.
-        <a id="sourceLink" href="https://github.com/ejmlabs/ejm-fly" rel="noopener noreferrer" target="_blank">Source</a>
+        <a id="sourceLink" href="https://github.com/ejmlabs/ejm-calm" rel="noopener noreferrer" target="_blank">Source</a>
       </p>
-      <p class="fine">Inspired by <span class="nowrap">fly-with-me</span> by Kun Chen (MIT).</p>
       <p class="fine seed">seed <span id="seedLabel"></span></p>
     </aside>
 
-    <!-- The controls line. -->
-    <div id="hud" role="toolbar" aria-label="Flight controls" inert>
-      <button id="pauseBtn" type="button" class="icon" aria-pressed="false" aria-label="Pause" title="Pause or resume (space)" disabled>
-        <svg class="when-off" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6v12M15 6v12" /></svg>
-        <svg class="when-on" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="fill" d="M8 5.5v13l11-6.5z" /></svg>
-      </button>
-      <button id="soundBtn" type="button" class="icon" aria-pressed="true" aria-label="Sound" title="Sound on or off">
+    <div id="hud" role="toolbar" aria-label="Scene controls" inert>
+      <button id="seedBtn" type="button" class="text" title="Open another seeded sea">new seed</button>
+      <button id="shareBtn" type="button" class="text" title="Copy a link to this sea">share</button>
+      <button id="soundBtn" type="button" class="icon" aria-pressed="false" aria-label="Sound" title="Sound off">
         <svg class="when-on" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path class="fill" d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" /><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
         </svg>
@@ -90,9 +74,7 @@
           <path class="fill" d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" /><path d="M16 9.5l5 5M21 9.5l-5 5" />
         </svg>
       </button>
-      <input id="volume" type="range" min="0" max="1" step="0.01" value="0.5" aria-label="Volume" title="Volume" />
       <span class="sep" aria-hidden="true"></span>
-      <button id="shareBtn" type="button" class="text" title="Copy a link to this exact universe">share</button>
       <button
         id="aboutBtn"
         type="button"

@@ -40,13 +40,13 @@ test('static server provides module MIME types and rejects traversal and unsuppo
     assert.doesNotMatch(csp, /unsafe-inline/);
     assert.equal((await fetchRaw(app.url, scriptPath, 'HEAD')).body, '');
     assert.equal((await fetchRaw(app.url, '/')).status, 200);
-    assert.equal((await fetchRaw(app.url, '/styles.css')).status, 200);
+    assert.equal((await fetchRaw(app.url, '/styles.css')).status, 404);
     assert.equal((await fetchRaw(app.url, '/LICENSE')).status, 200);
     assert.equal((await fetchRaw(app.url, '/THIRD_PARTY_NOTICES')).status, 200);
     for (const path of ['/../package.json', '/%2e%2e/package.json', '/.git/config', '/.orch/BRIEF.md', '/assets/%00', '/assets%5cmain.js']) {
       assert.equal((await fetchRaw(app.url, path)).status, 403, path);
     }
-    for (const path of ['/README.md', '/package.json', '/AGENTS.md', '/shots/desktop.png', '/shots/', '/node_modules/playwright-core/package.json', '/tools/serve.ts', '/tests/server.test.ts', '/missing.js', '/src/rng.js', '/vendor/three/three.module.js']) {
+    for (const path of ['/README.md', '/package.json', '/notes.md', '/secret.md', '/shots/desktop.png', '/shots/', '/node_modules/playwright-core/package.json', '/tools/serve.ts', '/tests/server.test.ts', '/missing.js', '/src/rng.js', '/vendor/three/three.module.js']) {
       assert.equal((await fetchRaw(app.url, path)).status, 404, path);
     }
     assert.equal((await fetchRaw(app.url, '/%not-valid')).status, 400);

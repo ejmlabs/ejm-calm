@@ -32,7 +32,7 @@ const HEADERS: Record<string, string> = {
   'Content-Security-Policy': CSP_HEADER,
 };
 
-const ALLOWED = new Set(['index.html', 'styles.css', 'LICENSE', 'THIRD_PARTY_NOTICES', 'favicon.ico', 'favicon.svg', 'favicon.png']);
+const ALLOWED = new Set(['index.html', 'LICENSE', 'THIRD_PARTY_NOTICES', 'favicon.ico', 'favicon.svg', 'favicon.png']);
 
 function allowed(relative: string): boolean {
   if (ALLOWED.has(relative)) return true;
