@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createSpring, springStep, springStepAngle } from '../src/spring.js';
-import { DIVE_BELOW, EYE_CLEARANCE, FollowCamera, PEEK_IDLE, RISE_ABOVE } from '../src/camera.js';
+import { DIVE_BELOW, DIVE_DWELL, EYE_CLEARANCE, FollowCamera, MIN_DISTANCE, PEEK_IDLE, RISE_ABOVE, WHALE_HALF } from '../src/camera.js';
 import { WATER_LEVEL, type FollowTarget } from '../src/seams.js';
 
 const fwd = (h: number) => ({ x: -Math.cos(h), z: Math.sin(h) });
@@ -211,4 +211,142 @@ test('reduced motion with dt = 0 freezes the pose', () => {
   const p = camera.position.clone();
   r.update(0, 0, true);
   assert.ok(camera.position.distanceTo(p) < 1e-12);
+});
+
+// ---- Synthetic journeys: the whale must stay framed in every frame. ----
+
+type Ground = (x: number, z: number) => number;
+type Path = (time: number) => { speed: number; heading: number; y: number };
+
+const SCREENS = [
+  { name: 'landscape', fov: 48, aspect: 1.6, portrait: false },
+  { name: 'portrait', fov: 62, aspect: 0.46, portrait: true },
+];
+
+/** Integrate a path (speed along heading) and drive a rig, checking every frame. */
+function journey(path: Path, seconds: number, opts: { fps?: number; ground?: Ground; screen?: (typeof SCREENS)[number] } = {}) {
+  const fps = opts.fps ?? 60;
+  const screen = opts.screen ?? SCREENS[0]!;
+  const camera = new THREE.PerspectiveCamera(screen.fov, screen.aspect, 0.5, 12000);
+  const r = new FollowCamera(camera, { portrait: screen.portrait, groundAt: opts.ground });
+  const t: FollowTarget = { x: 0, y: 0, z: 0, heading: 0 };
+  const frames: Array<{ eye: THREE.Vector3; target: FollowTarget; worst: number; gap: number; yaw: number }> = [];
+  const point = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  for (let i = 0; i <= seconds * fps; i++) {
+    const time = i / fps;
+    const p = path(time);
+    if (i > 0) {
+      t.x += -Math.cos(p.heading) * p.speed / fps;
+      t.z += Math.sin(p.heading) * p.speed / fps;
+    }
+    t.heading = p.heading;
+    t.y = p.y;
+    r.setTarget(t);
+    r.update(i === 0 ? 0 : 1 / fps, time);
+    camera.updateMatrixWorld();
+    let worst = 0;
+    let gap = Infinity;
+    for (const k of [-1, 0, 1]) {
+      point.set(t.x - Math.cos(t.heading) * WHALE_HALF * k, t.y, t.z + Math.sin(t.heading) * WHALE_HALF * k);
+      gap = Math.min(gap, point.distanceTo(camera.position));
+      point.project(camera);
+      worst = Math.max(worst, point.z > 1 ? Infinity : Math.max(Math.abs(point.x), Math.abs(point.y)));
+    }
+    camera.getWorldDirection(dir);
+    frames.push({ eye: camera.position.clone(), target: { ...t }, worst, gap, yaw: Math.atan2(dir.z, -dir.x) });
+  }
+  return { frames, rig: r, camera };
+}
+
+function assertFramed(frames: ReturnType<typeof journey>['frames'], ground?: Ground, label = '') {
+  let inBand = 0;
+  frames.forEach((f, i) => {
+    assert.ok(f.worst <= 0.9, `${label} frame ${i}: whale at NDC ${f.worst.toFixed(3)}`);
+    assert.ok(f.gap >= MIN_DISTANCE - 1e-6, `${label} frame ${i}: ${f.gap.toFixed(2)} m from the whale`);
+    inBand = Math.abs(f.eye.y - WATER_LEVEL) < EYE_CLEARANCE ? inBand + 1 : 0;
+    assert.ok(inBand < 20, `${label} frame ${i}: resting in the surface band`);
+    if (ground && inBand === 0) {
+      const clear = f.eye.y - ground(f.eye.x, f.eye.z);
+      assert.ok(clear >= 1.5 - 1e-6, `${label} frame ${i}: ${clear.toFixed(2)} m above ground`);
+    }
+  });
+}
+
+const cruise: Path = (s) => ({ speed: 12 + 2.5 * Math.sin(0.7 * s) + 1.5 * Math.sin(1.9 * s + 1), heading: 0.4 + 0.3 * Math.sin(0.15 * s), y: -1.4 });
+const stopAndGo: Path = (s) => ({ speed: 7 * Math.max(0, Math.sin(0.5 * s)) ** 2, heading: 0.6 * Math.sin(0.23 * s) + (Math.sin(0.5 * s) < 0 ? 0.4 * s : 0), y: -1.4 });
+const circle: Path = (s) => ({ speed: 2, heading: (2 / 15) * s, y: -1.6 });
+const dive: Path = (s) => {
+  const k = s % 14;
+  return { speed: 5, heading: 0.1 * s, y: k < 8 ? -1.4 - 14.6 * Math.sin((Math.PI * k) / 8) ** 2 : -1.4 };
+};
+const breach: Path = (s) => {
+  const k = s % 10;
+  // Rise from −6, leave the water at k = 4, peak at 4.2 m, splash down.
+  const y = k < 4 ? -6 + 5 * (k / 4) ** 2 : k < 6 ? -1 + 5.2 * (1 - ((k - 5) / 1) ** 2) : -1.4 - 2 * Math.sin(Math.PI * Math.min(1, (k - 6) / 4));
+  return { speed: 4, heading: 1.2, y };
+};
+/** Seabed at −20, a ridge rising to an island off to the side, and a sea mount on the path. */
+const ground: Ground = (x, z) => Math.max(-20 + 26 * Math.exp(-((z + 60) ** 2) / 900), -20 + 12 * Math.exp(-((x + 160) ** 2 + (z - 70) ** 2) / 400));
+
+for (const screen of SCREENS) {
+  for (const [name, path, seconds] of [
+    ['fast noisy cruise', cruise, 40],
+    ['stop and go', stopAndGo, 40],
+    ['15 m circle', circle, 50],
+    ['dive to −16 m', dive, 42],
+    ['breach', breach, 30],
+  ] as const) {
+    test(`${screen.name}: ${name} keeps the whale framed`, () => {
+      assertFramed(journey(path, seconds, { screen, ground }).frames, ground, name);
+      assertFramed(journey(path, seconds, { screen }).frames, undefined, name);
+    });
+  }
+}
+
+test('the camera follows a dive under and comes back up', () => {
+  const { frames } = journey(dive, 14);
+  const deepest = Math.min(...frames.map((f) => f.eye.y));
+  assert.ok(deepest < -8, `eye only reached ${deepest}`);
+  assert.ok(frames.at(-1)!.eye.y > WATER_LEVEL + EYE_CLEARANCE, 'did not resurface');
+});
+
+test('a short shallow dip does not take the camera under', () => {
+  const dip: Path = (s) => ({ speed: 4, heading: 0, y: s > 2 && s < 2 + DIVE_DWELL * 0.6 ? -3.4 : -1.4 });
+  const { frames } = journey(dip, 6);
+  assert.ok(frames.every((f) => f.eye.y > WATER_LEVEL + EYE_CLEARANCE));
+});
+
+test('distance responds to speed steps without overshoot', () => {
+  const steps: Path = (s) => ({ speed: s < 5 ? 3 : s < 25 ? 10 : 3, heading: 0.3, y: -1.4 });
+  const { frames } = journey(steps, 45);
+  const trail = frames.map((f) => Math.hypot(f.eye.x - f.target.x, f.eye.z - f.target.z));
+  const at = (s: number) => Math.round(s * 60);
+  for (let i = at(5) + 1; i < at(25); i++) assert.ok(trail[i]! >= trail[i - 1]! - 1e-6, `shrank at ${i / 60}s`);
+  for (let i = at(25) + 1; i < trail.length; i++) assert.ok(trail[i]! <= trail[i - 1]! + 1e-6, `grew at ${i / 60}s`);
+  assert.ok(trail[at(24.9)]! > trail[at(4.9)]! + 3, 'no room made for speed');
+});
+
+test('journeys agree at 30 and 60 fps', () => {
+  const a = journey(cruise, 10, { fps: 30 }).frames.at(-1)!;
+  const b = journey(cruise, 10, { fps: 60 }).frames.at(-1)!;
+  const rel = (f: typeof a) => f.eye.clone().sub(new THREE.Vector3(f.target.x, f.target.y, f.target.z));
+  assert.ok(rel(a).distanceTo(rel(b)) < 0.15, `differ by ${rel(a).distanceTo(rel(b))}`);
+});
+
+test('circling turns the view calmly', () => {
+  const { frames } = journey(circle, 50);
+  let fastest = 0;
+  for (let i = 60 * 5; i < frames.length; i++) {
+    const d = Math.atan2(Math.sin(frames[i]!.yaw - frames[i - 1]!.yaw), Math.cos(frames[i]!.yaw - frames[i - 1]!.yaw));
+    fastest = Math.max(fastest, Math.abs(d) * 60);
+  }
+  assert.ok(fastest < 0.2, `yaw rate ${fastest.toFixed(3)} rad/s`);
+});
+
+test('a stopped whale turning in place does not swing the camera round', () => {
+  const spin: Path = (s) => ({ speed: 0, heading: 0.8 * s, y: -1.4 });
+  const { frames } = journey(spin, 8);
+  const swing = Math.abs(frames.at(-1)!.yaw - frames[0]!.yaw);
+  assert.ok(swing < 0.8, `swung ${swing.toFixed(2)} rad while the whale turned ${6.4} rad`);
 });
