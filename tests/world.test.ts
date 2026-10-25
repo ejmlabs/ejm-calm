@@ -1,0 +1,261 @@
+import { test } from 'vitest';
+import assert from 'node:assert/strict';
+import { chunkCoord, chunkKey, chunksAround, createChunkStreamer, parseChunkKey, cellDistance, SHIP_CELL } from '../src/chunks.js';
+import { createWorldOrigin, recenterDelta, RECENTER_RADIUS, ORIGIN_SNAP } from '../src/world-origin.js';
+import { createLand } from '../src/land.js';
+import { layoutWorld } from '../src/terrain.js';
+import { shipSpecsForCell } from '../src/world-ships.js';
+import { selectTiles } from '../src/landmesh.js';
+import { buildTile, tileSize } from '../src/world-tiles.js';
+import { makeNoise2D } from '../src/noise.js';
+import { createNavField } from '../src/world-nav.js';
+import { waterSignal, SURFACE_BAND } from '../src/seams.js';
+import { WHALE_ISLAND_MARGIN, createWhalePilot, shortestAngle, type WhaleCourse } from '../src/whale-course.js';
+import { fork } from '../src/rng.js';
+import type { Shore } from '../src/shore.js';
+
+test('chunk coordinates floor negatives and boundaries; keys round-trip', () => {
+  assert.equal(chunkCoord(0, 512), 0);
+  assert.equal(chunkCoord(511.999, 512), 0);
+  assert.equal(chunkCoord(512, 512), 1);
+  assert.equal(chunkCoord(-0.001, 512), -1);
+  assert.equal(chunkCoord(-512, 512), -1);
+  assert.equal(chunkCoord(-512.001, 512), -2);
+  assert.equal(chunkKey(2, -3, 4), '2:-3:4');
+  assert.deepEqual(parseChunkKey(chunkKey(5, -7, 0)), { lod: 5, cx: -7, cz: 0 });
+  assert.equal(cellDistance(10, 10, 0, 0, 100), 0);
+  assert.equal(cellDistance(-30, 50, 0, 0, 100), 30);
+});
+
+test('chunksAround is nearest first and deterministic', () => {
+  const a = chunksAround(130, -40, 600, 256);
+  assert.deepEqual(a, chunksAround(130, -40, 600, 256));
+  assert.equal(a[0], chunkKey(0, 0, -1));
+  let prev = -1;
+  for (const key of a) {
+    const { cx, cz } = parseChunkKey(key);
+    const d = cellDistance(130, -40, cx, cz, 256);
+    assert.ok(d >= prev && d <= 600);
+    prev = d;
+  }
+  assert.equal(new Set(a).size, a.length);
+});
+
+test('chunk streamer loads within budget, keeps a wider ring and unloads behind', () => {
+  const built: string[] = [];
+  const disposed: string[] = [];
+  const streamer = createChunkStreamer<string>({
+    wanted: (x, z) => chunksAround(x, z, 300, 256),
+    keep: (key, x, z) => {
+      const { cx, cz } = parseChunkKey(key);
+      return cellDistance(x, z, cx, cz, 256) < 450;
+    },
+    build: (key) => (built.push(key), key),
+    dispose: (_item, key) => disposed.push(key),
+    maxBuildsPerFrame: 2,
+  });
+  streamer.update(0, 0);
+  assert.equal(built.length, 2);
+  for (let i = 0; i < 20; i++) streamer.update(0, 0);
+  const full = streamer.loaded.size;
+  assert.equal(full, chunksAround(0, 0, 300, 256).length);
+  // Oscillating across a cell boundary never thrashes.
+  const before = built.length;
+  for (let i = 0; i < 40; i++) streamer.update(i % 2 ? 250 : 262, 0);
+  const afterWobble = built.length;
+  const disposedWobble = disposed.length;
+  for (let i = 0; i < 40; i++) streamer.update(i % 2 ? 250 : 262, 0);
+  assert.equal(built.length, afterWobble, 'no rebuilds while wobbling');
+  assert.equal(disposed.length, disposedWobble, 'no unloads while wobbling');
+  assert.ok(afterWobble - before < 8);
+  // Far away everything old unloads.
+  for (let i = 0; i < 40; i++) streamer.update(5000, 5000);
+  for (const key of chunksAround(0, 0, 300, 256)) assert.ok(!streamer.loaded.has(key));
+  assert.ok(disposed.length >= full);
+});
+
+test('recenterDelta: nothing inside the radius, snapped moves outside, continuous render positions', () => {
+  assert.equal(recenterDelta(0, 0, 1000, 0), null);
+  assert.equal(recenterDelta(0, 0, RECENTER_RADIUS * 0.7, RECENTER_RADIUS * 0.7), null);
+  const d = recenterDelta(0, 0, 1030, -300)!;
+  assert.deepEqual(d, { dx: 1024, dz: -256 });
+  assert.equal(d.dx % ORIGIN_SNAP, 0);
+  const origin = createWorldOrigin();
+  const deltas: Array<[number, number]> = [];
+  origin.onRecenter((dx, dz) => deltas.push([dx, dz]));
+  // A follower kept in render space, shifted by each recentre.
+  let renderX = 0;
+  let renderZ = 0;
+  origin.onRecenter((dx, dz) => {
+    renderX -= dx;
+    renderZ -= dz;
+  });
+  for (let t = 0; t < 4000; t++) {
+    const wx = t * 1.7;
+    const wz = Math.sin(t / 300) * 900;
+    renderX = wx - origin.x;
+    renderZ = wz - origin.z;
+    const beforeX = renderX + origin.x;
+    origin.maybeRecenter(wx, wz);
+    // World position of the follower is unchanged by a recentre.
+    assert.ok(Math.abs(renderX + origin.x - beforeX) < 1e-9);
+    assert.ok(Math.hypot(wx - origin.x, wz - origin.z) <= RECENTER_RADIUS);
+  }
+  assert.ok(deltas.length >= 4, `recentred ${deltas.length} times`);
+});
+
+test('land is endless: finite everywhere, coasts and highlands far from the start', () => {
+  const land = createLand(42, { viewYaw: 1 });
+  let crossings = 0;
+  let peak = -Infinity;
+  for (const [cx, cz] of [[50000, 0], [0, -50000], [-120000, 80000]] as const) {
+    let prev = land.maskAt(cx - 4000, cz) > 0;
+    for (let x = -4000; x <= 4000; x += 25) {
+      const here = land.maskAt(cx + x, cz) > 0;
+      if (here !== prev) crossings++;
+      prev = here;
+    }
+    for (let i = 0; i < 400; i++) {
+      const h = land.heightAt(cx + ((i % 20) - 10) * 600, cz + (Math.floor(i / 20) - 10) * 600);
+      assert.ok(Number.isFinite(h));
+      peak = Math.max(peak, h);
+    }
+  }
+  assert.ok(crossings > 6, `coast crossings far out ${crossings}`);
+  assert.ok(peak > 200, `highest far point ${peak.toFixed(0)}`);
+  // Clearance is valid far away: on land it is negative, out at sea positive.
+  let sea = 0;
+  let shore = 0;
+  for (let i = 0; i < 60; i++) {
+    const x = 50000 + i * 97;
+    const c = land.clearance(x, 0);
+    if (land.maskAt(x, 0) > 0.05) assert.ok(c <= land.nav.cell, `land at ${x} has clearance ${c}`);
+    if (land.maskAt(x, 0) < -0.05) {
+      sea++;
+      if (c > 0) shore++;
+    }
+  }
+  assert.equal(shore, sea);
+});
+
+test('the opening is unchanged: an offset rebuild matches and the start grid agrees with the nav field', () => {
+  const world = layoutWorld(7);
+  const land = world.land;
+  const again = createLand(7, { viewYaw: land.viewYaw, offset: land.offset });
+  for (let i = 0; i < 200; i++) {
+    const x = Math.sin(i * 1.3) * 3000;
+    const z = Math.cos(i * 0.7) * 3000;
+    assert.equal(again.heightAt(x, z), land.heightAt(x, z));
+  }
+  // Within its saturation the tiled nav field equals the start grid's exact distance transform.
+  const g = land.grid;
+  for (let k = 0; k < 400; k++) {
+    const ix = 20 + ((k * 37) % 280);
+    const iz = 20 + ((k * 91) % 280);
+    const exact = g.distance[iz * g.size + ix]!;
+    if (Math.abs(exact) >= land.nav.saturation) continue;
+    const tiled = land.nav.distanceAt(g.min + ix * g.cell, g.min + iz * g.cell);
+    assert.ok(Math.abs(tiled - exact) < 1e-3, `texel ${ix},${iz}: ${tiled} vs ${exact}`);
+  }
+});
+
+test('nav tiles are independent of visit order', () => {
+  const land = createLand(11, { viewYaw: 0.4 });
+  const a = createNavField(land.maskAt, { min: -1600, cell: 10 });
+  const b = createNavField(land.maskAt, { min: -1600, cell: 10 });
+  const points = Array.from({ length: 30 }, (_, i) => [8000 + Math.sin(i) * 900, -6000 + Math.cos(i * 2.1) * 900] as const);
+  const first = points.map(([x, z]) => a.distanceAt(x, z));
+  b.prefetch(8000, -6000, 1200, Infinity);
+  const second = [...points].reverse().map(([x, z]) => b.distanceAt(x, z)).reverse();
+  assert.deepEqual(first, second);
+});
+
+test('land tiles and ship cells are pure functions of seed and key', () => {
+  const land = layoutWorld(42).land;
+  const patch = makeNoise2D(42, 21);
+  const keys = selectTiles(30000, -20000, new Set(), new Set());
+  assert.ok(keys.length > 20);
+  // Tiles together cover the stream radius without overlapping.
+  let area = 0;
+  for (const key of keys) area += tileSize(parseChunkKey(key).lod) ** 2;
+  assert.ok(area > Math.PI * 8600 * 8600);
+  const pick = keys.filter((_, i) => i % 7 === 0).slice(0, 6);
+  const once = pick.map((key) => {
+    const { lod, cx, cz } = parseChunkKey(key);
+    return buildTile(land, patch, lod, cx, cz, 16);
+  });
+  const fresh = createLand(42, { viewYaw: land.viewYaw, offset: land.offset });
+  const twice = [...pick].reverse().map((key) => {
+    const { lod, cx, cz } = parseChunkKey(key);
+    return buildTile(fresh, makeNoise2D(42, 21), lod, cx, cz, 16);
+  }).reverse();
+  assert.deepEqual(once, twice);
+
+  const specs = (seed: number) => {
+    const out = [];
+    for (let cz = -6; cz <= 6; cz++) for (let cx = -6; cx <= 6; cx++) out.push(...shipSpecsForCell(seed, cx, cz, land.maskAt));
+    return out;
+  };
+  const ships = specs(42);
+  assert.deepEqual(ships, specs(42));
+  assert.ok(ships.length > 10, `${ships.length} ships`);
+  assert.notDeepEqual(ships, specs(43));
+  for (const ship of ships) {
+    assert.ok(land.maskAt(ship.x, ship.z) < 0, 'ship at sea');
+    assert.ok(Math.hypot(ship.x, ship.z) > 1600, 'random ships keep out of the opening');
+    const { cx, cz } = { cx: Math.floor(ship.x / SHIP_CELL), cz: Math.floor(ship.z / SHIP_CELL) };
+    assert.ok(shipSpecsForCell(42, cx, cz, land.maskAt).some((s) => s.id === ship.id));
+  }
+});
+
+test('water signal crosses the surface smoothly', () => {
+  assert.equal(waterSignal(5).submersion, 0);
+  assert.equal(waterSignal(-5).submersion, 1);
+  assert.equal(waterSignal(0).submersion, 0.5);
+  assert.equal(waterSignal(-SURFACE_BAND * 2).underwater, true);
+});
+
+function journey(seed: number, dt: number, seconds: number, shore: Shore) {
+  const world = layoutWorld(seed);
+  const heading = fork(seed, 'whale')() * Math.PI * 2;
+  const pilot = createWhalePilot(seed, world.whaleHome, heading);
+  const course: WhaleCourse = { x: world.whaleHome.x, z: world.whaleHome.z, heading, leg: heading };
+  const steps = Math.round(seconds / dt);
+  const marks: number[] = [];
+  let minClear = Infinity;
+  for (let i = 0; i < steps; i++) {
+    const prev = course.heading;
+    pilot.step(course, dt, i * dt, shore);
+    assert.ok(Math.abs(shortestAngle(prev, course.heading)) <= pilot.params.turnRate * dt + 1e-8, `seed ${seed} turn rate`);
+    minClear = Math.min(minClear, shore.clearance(course.x, course.z));
+    if (i % Math.round(300 / dt) === 0) marks.push(Math.hypot(course.x - world.whaleHome.x, course.z - world.whaleHome.z));
+  }
+  const net = Math.hypot(course.x - world.whaleHome.x, course.z - world.whaleHome.z);
+  return { course, net, minClear, marks };
+}
+
+test('the whale keeps travelling for 25 minutes, never beaching, for seeds 1..10', () => {
+  let far = 0;
+  for (let seed = 1; seed <= 10; seed++) {
+    const land = layoutWorld(seed).land;
+    const run = journey(seed, 1 / 30, 1500, land);
+    // Some seeds start in a near-enclosed sea whose way out lies beyond the planner's reach.
+    assert.ok(run.net > 900, `seed ${seed} net displacement ${run.net.toFixed(0)} m`);
+    if (run.net > 1500) far++;
+    assert.ok(run.minClear >= WHALE_ISLAND_MARGIN - 1e-3, `seed ${seed} came within ${run.minClear.toFixed(1)} m of land`);
+    // Steady: well away from the start after every five minutes past the first.
+    for (let k = 2; k < run.marks.length; k++) assert.ok(run.marks[k]! > 250, `seed ${seed} back near the start at ${k * 5} min`);
+  }
+  assert.ok(far >= 9, `${far} of 10 seeds travelled over 1.5 km`);
+}, 120000);
+
+test('the journey is deterministic and close across 30 and 60 fps', () => {
+  const land = layoutWorld(3).land;
+  const a = journey(3, 1 / 60, 600, land);
+  const b = journey(3, 1 / 60, 600, createLand(3, { viewYaw: land.viewYaw, offset: land.offset }));
+  assert.equal(a.course.x, b.course.x);
+  assert.equal(a.course.z, b.course.z);
+  const c = journey(3, 1 / 30, 600, land);
+  const gap = Math.hypot(a.course.x - c.course.x, a.course.z - c.course.z);
+  assert.ok(gap < 40, `frame-rate gap after 10 minutes ${gap.toFixed(1)} m`);
+}, 60000);

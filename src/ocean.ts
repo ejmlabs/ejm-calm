@@ -7,7 +7,12 @@ import type { ShelfMap } from './land.js';
 export type OceanHandle = {
   water: Water;
   mesh: THREE.Mesh;
-  update: (dt: number, sunDirection: THREE.Vector3) => void;
+  /** With a camera, the plane follows it (render space) while ripples stay fixed to the world. */
+  update: (dt: number, sunDirection: THREE.Vector3, camera?: THREE.Camera) => void;
+  /** World X/Z of render (0, 0); keeps ripples and shelf maps on the world after a recentre. */
+  setOrigin: (x: number, z: number) => void;
+  /** Swaps in shelf maps baked elsewhere in the world (maps are in world coordinates). */
+  setShelves: (shelves: { near?: ShelfMap; far?: ShelfMap }) => void;
   setSize: (textureSize: number) => void;
   dispose: () => void;
 };
@@ -119,16 +124,57 @@ export function createOcean(
   if (material.uniforms?.sunColor) material.uniforms.sunColor.value.set(0xe8dcc0);
 
   const shelfTextures = applyWaterLook(material, options.shelves, options.reflectionHaze, options.reflectionGain ?? 1);
+  const maps = { near: options.shelves?.near, far: options.shelves?.far };
+  const origin = { x: 0, z: 0 };
+
+  function place(): void {
+    const uniforms = material.uniforms;
+    // Ripple texture offsets for the origin, reduced to their period in float64 so the GPU never sees large numbers.
+    const size = uniforms.size?.value ?? 1;
+    const fract = (v: number) => v - Math.floor(v);
+    const ox = origin.x * size;
+    const oz = origin.z * size;
+    uniforms.rippleShiftA?.value.set(fract(ox / 103), fract(oz / 103), fract(ox / 107), fract(oz / 107));
+    uniforms.rippleShiftB?.value.set(fract(ox / 8907), fract(oz / 9803), fract(ox / 1091), fract(oz / 1027));
+    if (maps.near && uniforms.shelfNearBounds) uniforms.shelfNearBounds.value.copy(shelfBounds(maps.near, origin));
+    if (maps.far && uniforms.shelfFarBounds) uniforms.shelfFarBounds.value.copy(shelfBounds(maps.far, origin));
+  }
+  place();
 
   let time = 0;
   return {
     water,
     mesh: water,
-    update(dt: number, sun: THREE.Vector3) {
+    update(dt: number, sun: THREE.Vector3, camera?: THREE.Camera) {
       time += dt;
       const uniforms = (water.material as THREE.ShaderMaterial).uniforms;
       if (uniforms.time) uniforms.time.value = time * 0.35;
       if (uniforms.sunDirection) uniforms.sunDirection.value.copy(sun).normalize();
+      if (camera) {
+        water.position.x = camera.position.x;
+        water.position.z = camera.position.z;
+      }
+    },
+    setOrigin(x: number, z: number) {
+      origin.x = x;
+      origin.z = z;
+      place();
+    },
+    setShelves(next: { near?: ShelfMap; far?: ShelfMap }) {
+      const uniforms = material.uniforms;
+      for (const which of ['near', 'far'] as const) {
+        const shelf = next[which];
+        const name = which === 'near' ? 'shelfNear' : 'shelfFar';
+        if (!shelf || !uniforms[name]) continue;
+        const old = uniforms[name].value as THREE.DataTexture;
+        const texture = shelfTexture(shelf);
+        uniforms[name].value = texture;
+        const at = shelfTextures.indexOf(old);
+        if (at >= 0) shelfTextures[at] = texture;
+        old.dispose();
+        maps[which] = shelf;
+      }
+      place();
     },
     setSize(_textureSize: number) {
       // Water render target size is fixed at construction; quality changes adjust DPR instead.
@@ -158,6 +204,13 @@ function shelfTexture(shelf: ShelfMap): THREE.DataTexture {
   return texture;
 }
 
+/** Maps render XZ onto a world-coordinate shelf map's texel centres. */
+export function shelfBounds(shelf: ShelfMap, origin: { x: number; z: number }): THREE.Vector4 {
+  const texel = shelf.extent / (shelf.size - 1);
+  const span = texel * shelf.size;
+  return new THREE.Vector4(shelf.min - texel * 0.5 - origin.x, (shelf.minZ ?? shelf.min) - texel * 0.5 - origin.z, 1 / span, 1 / span);
+}
+
 export type ShaderPatch = { find: string; replace: string };
 
 /**
@@ -175,6 +228,14 @@ export function patchShader(source: string, patches: readonly ShaderPatch[]): st
 
 /** Calm, slightly rough water: reflections streak and lift toward the haze instead of mirroring dark land. */
 const reflectionPatches: ShaderPatch[] = [
+  // Ripples are sampled in render space; these shifts carry the floating origin so they never jump.
+  { find: 'vec2 uv0 = ( uv / 103.0 )', replace: 'vec2 uv0 = ( uv / 103.0 ) + rippleShiftA.xy' },
+  { find: 'vec2 uv1 = uv / 107.0', replace: 'vec2 uv1 = uv / 107.0 + rippleShiftA.zw' },
+  { find: 'vec2 uv2 = uv / vec2( 8907.0, 9803.0 )', replace: 'vec2 uv2 = uv / vec2( 8907.0, 9803.0 ) + rippleShiftB.xy' },
+  { find: 'vec2 uv3 = uv / vec2( 1091.0, 1027.0 )', replace: 'vec2 uv3 = uv / vec2( 1091.0, 1027.0 ) + rippleShiftB.zw' },
+  { find: 'vec4 getNoise( vec2 uv ) {', replace: `uniform vec4 rippleShiftA;
+				uniform vec4 rippleShiftB;
+				vec4 getNoise( vec2 uv ) {` },
   {
     find: 'uniform vec3 waterColor;',
     replace: `uniform vec3 waterColor;
@@ -261,6 +322,8 @@ function applyWaterLook(
     return [];
   }
   material.fragmentShader = patched;
+  material.uniforms.rippleShiftA = { value: new THREE.Vector4() };
+  material.uniforms.rippleShiftB = { value: new THREE.Vector4() };
   material.uniforms.reflectionHaze = { value: (haze ?? new THREE.Color(0x8a9aa4)).clone() };
   material.uniforms.reflectionLift = { value: 0.25 };
   material.uniforms.reflectionGain = { value: Number.isFinite(gain) ? Math.min(3, Math.max(1, gain)) : 1 };
@@ -269,16 +332,10 @@ function applyWaterLook(
 
   const near = shelfTexture(shelves.near);
   const far = shelfTexture(shelves.far);
-  const bounds = (shelf: ShelfMap) => {
-    // Map world XZ onto texel centres.
-    const texel = shelf.extent / (shelf.size - 1);
-    const span = texel * shelf.size;
-    return new THREE.Vector4(shelf.min - texel * 0.5, shelf.min - texel * 0.5, 1 / span, 1 / span);
-  };
   material.uniforms.shelfNear = { value: near };
   material.uniforms.shelfFar = { value: far };
-  material.uniforms.shelfNearBounds = { value: bounds(shelves.near) };
-  material.uniforms.shelfFarBounds = { value: bounds(shelves.far) };
+  material.uniforms.shelfNearBounds = { value: shelfBounds(shelves.near, { x: 0, z: 0 }) };
+  material.uniforms.shelfFarBounds = { value: shelfBounds(shelves.far, { x: 0, z: 0 }) };
   material.uniforms.shallowColor = { value: new THREE.Color(0x58aaa0) };
   material.uniforms.shelfColor = { value: new THREE.Color(0x1d6f7c) };
   material.uniforms.shallowLight = { value: shelves.light ?? 1 };

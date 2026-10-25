@@ -3,6 +3,7 @@ import { fbm2, makeNoise2D, ridged2 } from './noise.js';
 import { hash } from './rng.js';
 import { clamp, smoothstep } from './math.js';
 import type { Shore } from './shore.js';
+import { createNavField, squaredDistance, type NavField } from './world-nav.js';
 
 /**
  * Earth-like land for one seed: continents from a warped low-frequency mask,
@@ -21,8 +22,13 @@ export type Land = Shore & {
   surfaceAt: (x: number, z: number, lod: number, out: { cliff: number }) => number;
   /** Submerged sand banks in [0, 1]: visual only, they never block navigation. */
   shoalAt: (x: number, z: number) => number;
-  /** Sampled grid used for navigation and the shallow-water map. */
-  grid: LandGrid;
+  /** Sampled grid around the start (built on first use) for the opening's shallow-water map. */
+  readonly grid: LandGrid;
+  /** Navigation field valid anywhere; clearance and away read it. */
+  nav: NavField;
+  /** Continent offset found for the opening view; pass it back to rebuild the same land cheaply. */
+  offset: { x: number; z: number };
+  viewYaw: number;
 };
 
 export type LandGrid = {
@@ -43,6 +49,8 @@ export type LandOptions = {
   gridSize?: number;
   /** Half-extent of the navigation grid in metres. */
   gridExtent?: number;
+  /** Skip the opening search and use this continent offset (from `land.offset`). */
+  offset?: { x: number; z: number };
 };
 
 /** Open water is kept around the origin so the whale and ships have room. */
@@ -152,7 +160,8 @@ export function createLand(seed: number, options: LandOptions): Land {
     const harbour = 0.3 * (1 - smoothstep(reach, reach + 260, r));
     // Far land rises toward the horizon ahead, so a second, hazier range sits behind the coast.
     const ahead = r > 1 ? (x * look.x + z * look.z) / r : 0;
-    const distant = 0.32 * smoothstep(3600, 5400, r) * smoothstep(0.25, 0.8, ahead);
+    // Bounded to the start area: out on the journey the continents speak for themselves.
+    const distant = 0.32 * smoothstep(3600, 5400, r) * smoothstep(0.25, 0.8, ahead) * (1 - smoothstep(9000, 14000, r));
     let m = rawMask() + held + distant - harbour;
     // Offshore islets: blobs that only rise in the water off the coast.
     const isl = fbm2(n.islet, x / 340, z / 340, 2);
@@ -213,7 +222,10 @@ export function createLand(seed: number, options: LandOptions): Land {
     );
   }
 
-  {
+  if (options.offset) {
+    ox = options.offset.x;
+    oz = options.offset.z;
+  } else {
     let best = { x: 0, z: 0, score: Infinity };
     for (let k = 0; k < 160; k++) {
       ox = (hash(seed, 'land-offset-x', k) / 0x100000000 - 0.5) * 60000;
@@ -271,9 +283,7 @@ export function createLand(seed: number, options: LandOptions): Land {
     const far = smoothstep(1200, 2800, r);
     const scale = 800 + 900 * smoothstep(1800, 4800, r);
     h += peaks * scale * smoothstep(0.04, 0.55, natural) * (0.12 + 0.88 * ranges) * far;
-    // Sink the outer rim so the mesh edge vanishes under the haze.
-    const rim = 1 - smoothstep(6200, 7800, r);
-    return h * rim;
+    return h;
   }
 
   function heightAt(x: number, z: number, lod = 0): number {
@@ -289,24 +299,20 @@ export function createLand(seed: number, options: LandOptions): Land {
     const bx = x - bank.x;
     const bz = z - bank.z;
     const lobe = fbm2(n.shoal, x / 60 + 3.3, z / 60 - 1.7, 2) * 0.35;
-    const main = smoothstep(0.15, 0.6, Math.exp(-(bx * bx + bz * bz) / (bank.r * bank.r)) + lobe);
+    const main = smoothstep(0.15, 0.6, Math.exp(-(bx * bx + bz * bz) / (bank.r * bank.r)) + lobe) * (1 - smoothstep(1400, 1700, r));
     return Math.max(patches, main);
   }
 
-  const grid = buildGrid(maskAt, options.gridSize ?? 320, options.gridExtent ?? 1600);
-
-  function sampleDistance(x: number, z: number): number {
-    const fx = (x - grid.min) / grid.cell;
-    const fz = (z - grid.min) / grid.cell;
-    if (fx < 0 || fz < 0 || fx > grid.size - 1 || fz > grid.size - 1) {
-      // Beyond the grid: distance to its edge plus the edge value keeps a gradient.
-      const cx = clamp(fx, 0, grid.size - 1);
-      const cz = clamp(fz, 0, grid.size - 1);
-      const edge = Math.hypot(fx - cx, fz - cz) * grid.cell;
-      return bilinear(grid.distance, grid.size, cx, cz) + edge;
-    }
-    return bilinear(grid.distance, grid.size, fx, fz);
-  }
+  const gridSize = options.gridSize ?? 320;
+  const gridExtent = options.gridExtent ?? 1600;
+  let grid: LandGrid | null = null;
+  // Same lattice as the start grid, so both agree wherever they overlap.
+  const nav = createNavField(maskAt, {
+    min: -gridExtent,
+    cell: (gridExtent * 2) / (gridSize - 1),
+    // Reuse the start grid's samples once it exists.
+    known: (i, j) => (grid && i >= 0 && j >= 0 && i < gridSize && j < gridSize ? grid.mask[j * gridSize + i] : undefined),
+  });
 
   return {
     seed,
@@ -315,32 +321,15 @@ export function createLand(seed: number, options: LandOptions): Land {
     heightAt,
     surfaceAt,
     shoalAt,
-    grid,
-    clearance(x, z) {
-      // Texel centres sit about half a cell either side of the coast.
-      return sampleDistance(x, z) - grid.cell * 0.5;
+    get grid() {
+      return (grid ??= buildGrid(maskAt, gridSize, gridExtent));
     },
-    away(x, z) {
-      const e = grid.cell;
-      const gx = sampleDistance(x + e, z) - sampleDistance(x - e, z);
-      const gz = sampleDistance(x, z + e) - sampleDistance(x, z - e);
-      const len = Math.hypot(gx, gz);
-      if (len > 1e-6) return { x: gx / len, z: gz / len };
-      const r = Math.hypot(x, z);
-      return r > 1e-6 ? { x: -x / r, z: -z / r } : { x: 1, z: 0 };
-    },
+    nav,
+    offset: { x: ox, z: oz },
+    viewYaw: options.viewYaw,
+    clearance: nav.clearance,
+    away: nav.away,
   };
-}
-
-function bilinear(field: Float32Array, size: number, fx: number, fz: number): number {
-  const x0 = Math.min(size - 2, Math.floor(fx));
-  const z0 = Math.min(size - 2, Math.floor(fz));
-  const tx = fx - x0;
-  const tz = fz - z0;
-  const i = z0 * size + x0;
-  const a = field[i]! + (field[i + 1]! - field[i]!) * tx;
-  const b = field[i + size]! + (field[i + size + 1]! - field[i + size]!) * tx;
-  return a + (b - a) * tz;
 }
 
 function buildGrid(maskAt: (x: number, z: number) => number, size: number, extent: number): LandGrid {
@@ -352,7 +341,7 @@ function buildGrid(maskAt: (x: number, z: number) => number, size: number, exten
   const toSea = new Float64Array(size * size);
   for (let iz = 0; iz < size; iz++) {
     for (let ix = 0; ix < size; ix++) {
-      const m = maskAt(min + ix * cell, min + iz * cell);
+      const m = Math.fround(maskAt(min + ix * cell, min + iz * cell));
       mask[iz * size + ix] = m;
       toLand[iz * size + ix] = m > 0 ? 0 : inf;
       toSea[iz * size + ix] = m > 0 ? inf : 0;
@@ -366,41 +355,6 @@ function buildGrid(maskAt: (x: number, z: number) => number, size: number, exten
     distance[i] = toLand[i]! > 0 ? Math.sqrt(toLand[i]!) * cell : -Math.sqrt(toSea[i]!) * cell;
   }
   return { min, cell, size, mask, distance };
-}
-
-/** Exact squared Euclidean distance transform (Felzenszwalb–Huttenlocher), in place. */
-function squaredDistance(grid: Float64Array, size: number): void {
-  const f = new Float64Array(size);
-  const d = new Float64Array(size);
-  const v = new Int32Array(size);
-  const z = new Float64Array(size + 1);
-  const pass = (offset: number, stride: number) => {
-    for (let i = 0; i < size; i++) f[i] = grid[offset + i * stride]!;
-    let k = 0;
-    v[0] = 0;
-    z[0] = -Infinity;
-    z[1] = Infinity;
-    for (let q = 1; q < size; q++) {
-      let s = ((f[q]! + q * q) - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
-      while (s <= z[k]!) {
-        k--;
-        s = ((f[q]! + q * q) - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
-      }
-      k++;
-      v[k] = q;
-      z[k] = s;
-      z[k + 1] = Infinity;
-    }
-    k = 0;
-    for (let q = 0; q < size; q++) {
-      while (z[k + 1]! < q) k++;
-      const dq = q - v[k]!;
-      d[q] = dq * dq + f[v[k]!]!;
-    }
-    for (let i = 0; i < size; i++) grid[offset + i * stride] = d[i]!;
-  };
-  for (let row = 0; row < size; row++) pass(row * size, 1);
-  for (let col = 0; col < size; col++) pass(col, size);
 }
 
 /** Fraction of land over a square window, sampled on a coarse lattice. */
@@ -417,7 +371,14 @@ export function landFraction(land: Land, extent = 4000, steps = 64): number {
 }
 
 /** Shallowness per texel for the water shader: 1 at the shore, 0 at ≥ 40 m depth. */
-export type ShelfMap = { data: Uint8Array; size: number; min: number; extent: number };
+export type ShelfMap = {
+  data: Uint8Array;
+  size: number;
+  /** World X (and Z unless `minZ` is set) of texel (0, 0) centre. */
+  min: number;
+  minZ?: number;
+  extent: number;
+};
 
 /** Water depth (metres) by distance from the coast: a wide sandy shelf, then the drop-off. */
 export function depthForDistance(metres: number): number {
@@ -447,27 +408,79 @@ function shelfFromDistance(distance: ArrayLike<number>, size: number, min: numbe
 export function nearShelf(land: Land): ShelfMap {
   const g = land.grid;
   const shelf = shelfFromDistance(g.distance, g.size, g.min, g.cell * (g.size - 1));
-  // Sand banks: patches of 2–4 m water out in the bay.
-  const bank = Math.round(clamp(1 - 2 / 40, 0, 1) * 255);
-  for (let iz = 1; iz < g.size - 1; iz++) {
-    for (let ix = 1; ix < g.size - 1; ix++) {
-      const i = iz * g.size + ix;
-      const t = land.shoalAt(g.min + ix * g.cell, g.min + iz * g.cell);
-      if (t > 0) shelf.data[i] = Math.max(shelf.data[i]!, Math.round(shelf.data[i]! + (bank - shelf.data[i]!) * t));
-    }
-  }
+  addSandBanks(land, shelf, g.min, g.min, g.cell);
   return shelf;
 }
 
-export function farShelf(land: Land, size = 192, extent = 6400): ShelfMap {
+export function farShelf(land: Pick<Land, 'maskAt'>, size = 192, extent = 6400, cx = 0, cz = 0): ShelfMap {
+  const steps = farShelfSteps(land, size, extent, cx, cz);
+  for (;;) {
+    const next = steps.next();
+    if (next.done) return next.value;
+  }
+}
+
+/** farShelf in slices of a few rows. */
+export function* farShelfSteps(land: Pick<Land, 'maskAt'>, size = 192, extent = 6400, cx = 0, cz = 0): Generator<void, ShelfMap> {
   // Too coarse for an exact distance field: estimate it from the coast mask slope.
   const distance = new Float32Array(size * size);
   const cell = (extent * 2) / (size - 1);
   for (let iz = 0; iz < size; iz++) {
     for (let ix = 0; ix < size; ix++) {
-      const m = land.maskAt(-extent + ix * cell, -extent + iz * cell);
+      const m = land.maskAt(cx - extent + ix * cell, cz - extent + iz * cell);
       distance[iz * size + ix] = m > 0 ? 0 : -m / 0.0025;
     }
+    if (iz % 6 === 5) yield;
   }
-  return shelfFromDistance(distance, size, -extent, extent * 2);
+  return { ...shelfFromDistance(distance, size, cx - extent, extent * 2), minZ: cz - extent };
+}
+
+/**
+ * Exact shelf map around world (cx, cz) from the navigation field, snapped to its
+ * lattice; the start's sand banks are added where they reach.
+ */
+export function navShelf(land: Land, cx: number, cz: number, size = 320): ShelfMap {
+  const steps = navShelfSteps(land, cx, cz, size);
+  for (;;) {
+    const next = steps.next();
+    if (next.done) return next.value;
+  }
+}
+
+/** navShelf in slices: yields every few rows so a bake never holds up a frame. */
+export function* navShelfSteps(land: Land, cx: number, cz: number, size = 320): Generator<void, ShelfMap> {
+  const nav = land.nav;
+  const i0 = Math.round((cx - nav.min) / nav.cell) - (size >> 1);
+  const j0 = Math.round((cz - nav.min) / nav.cell) - (size >> 1);
+  const distance = new Float32Array(size * size);
+  for (let j = 0; j < size; j++) {
+    for (let i = 0; i < size; i++) distance[j * size + i] = nav.distanceAt(nav.min + (i0 + i) * nav.cell, nav.min + (j0 + j) * nav.cell);
+    if (j % 24 === 23) yield;
+  }
+  // The clamped far field is open sea.
+  for (let i = 0; i < distance.length; i++) if (distance[i]! >= nav.saturation - 1e-3) distance[i] = 1e4;
+  const minX = nav.min + i0 * nav.cell;
+  const minZ = nav.min + j0 * nav.cell;
+  const shelf: ShelfMap = { ...shelfFromDistance(distance, size, minX, nav.cell * (size - 1)), minZ };
+  addSandBanks(land, shelf, minX, minZ, nav.cell);
+  return shelf;
+}
+
+/** Sand banks: patches of 2–4 m water out in the start bay. */
+function addSandBanks(land: Land, shelf: ShelfMap, minX: number, minZ: number, cell: number): void {
+  const size = shelf.size;
+  // Banks only lie within ~1.7 km of the start.
+  const far = Math.hypot(Math.max(0, Math.abs(minX + (size * cell) / 2) - (size * cell) / 2), Math.max(0, Math.abs(minZ + (size * cell) / 2) - (size * cell) / 2));
+  if (far > 1700) return;
+  const bank = Math.round(clamp(1 - 2 / 40, 0, 1) * 255);
+  for (let iz = 1; iz < size - 1; iz++) {
+    for (let ix = 1; ix < size - 1; ix++) {
+      const x = minX + ix * cell;
+      const z = minZ + iz * cell;
+      if (x * x + z * z > 1700 * 1700) continue;
+      const i = iz * size + ix;
+      const t = land.shoalAt(x, z);
+      if (t > 0) shelf.data[i] = Math.max(shelf.data[i]!, Math.round(shelf.data[i]! + (bank - shelf.data[i]!) * t));
+    }
+  }
 }

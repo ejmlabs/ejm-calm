@@ -1,20 +1,16 @@
 import * as THREE from 'three';
 import type { Land } from './land.js';
 import { makeNoise2D } from './noise.js';
-import { clamp, smoothstep } from './math.js';
+import { chunkKey, parseChunkKey, cellDistance } from './chunks.js';
+import { buildTile, tileSize, TOP_LEVEL, SINK, type TileData } from './world-tiles.js';
+import type { WorkerRequest } from './world-worker.js';
+import { underwaterUniforms, UNDERWATER_GLSL_PARS } from './seams.js';
 
-export type LandMeshHandle = {
-  group: THREE.Group;
-  triangles: number;
-  dispose: () => void;
-};
+export { biomeColor } from './world-tiles.js';
 
-export type LandMeshOptions = {
-  /** Cells per side of every LOD ring (multiple of 4). */
+export type LandStreamOptions = {
+  /** Old clipmap ring segments; tiles get 3/16 of that per side, which keeps each tier's triangle budget. */
   segments: number;
-  /** Half-size of the finest ring in metres. Each ring doubles it. */
-  inner?: number;
-  levels?: number;
   sunDirection: THREE.Vector3;
   /** Sky colour at the horizon; distance haze blends land into it. */
   hazeColor: THREE.Color;
@@ -22,10 +18,35 @@ export type LandMeshOptions = {
   hazeDensity?: number;
   /** Sky colours by elevation angle; when set, haze matches the sky behind each point. */
   hazeGradient?: { angles: number[]; colors: THREE.Color[] };
+  /** Build tiles in a worker (browser only); falls back to time-sliced main-thread builds. */
+  worker?: boolean;
+};
+
+export type LandStream = {
+  /** Holds tiles at world positions: add it under the world root. */
+  group: THREE.Group;
+  /** Builds every tile needed around world (x, z) right now, fully faded in (first frame). */
+  prime: (x: number, z: number) => void;
+  /** Streams around the camera's world position and advances fades. */
+  update: (x: number, z: number, dt: number) => void;
+  stats: () => { tiles: number; triangles: number; pending: number; fading: number };
+  dispose: () => void;
 };
 
 /** Eye height the haze gradient is measured from (the camera rides just above the sea). */
 const EYE = 4;
+/** Default haze density (per metre); land a few kilometres out melts into the sky. */
+const HAZE = 0.00026;
+/** Haze is complete here, inside the streamed radius, so the land never shows an edge. */
+const HAZE_END = 7800;
+/** Tiles are kept out to this distance from the camera. */
+const STREAM_RADIUS = 8600;
+/** A tile splits into four when the camera is closer than SPLIT × its size. */
+const SPLIT = 0.8;
+/** Seconds a tile takes to dissolve in or out. */
+const FADE = 1.5;
+/** Re-select tiles once the camera has moved this far. */
+const RESELECT = 12;
 
 const vertexShader = /* glsl */ `
 varying vec3 vColor;
@@ -35,23 +56,30 @@ void main() {
   vColor = color;
   vNormal = normal;
   vec4 world = modelMatrix * vec4( position, 1.0 );
+  // Far land settles into the sea toward the streamed edge (behind the haze), so no edge can show.
+  float far = smoothstep( ${(HAZE_END - 1600).toFixed(1)}, ${HAZE_END.toFixed(1)}, length( world.xz - cameraPosition.xz ) );
+  world.y = ( world.y + ${SINK.toFixed(2)} ) * ( 1.0 - far ) - ${SINK.toFixed(2)};
   vWorld = world.xyz;
   gl_Position = projectionMatrix * viewMatrix * world;
 }`;
 
 /**
  * Lighting and aerial perspective per fragment, so tall far triangles haze
- * evenly instead of streaking between vertices. Haze is measured from a fixed
- * eye at the origin (the camera stays close to it), which keeps the land's
- * colour identical in the water's mirror pass.
+ * evenly instead of streaking between vertices. Haze runs by horizontal
+ * distance from the camera from a fixed eye height, which keeps the land's
+ * colour identical in the water's mirror pass, and is complete before the
+ * streamed edge. Fading tiles dissolve with a screen-space dither (opaque, no
+ * sorting).
  */
-function fragmentShader(stops: number): string {
+function fragmentShader(stops: number, dither: boolean): string {
   return /* glsl */ `
 uniform vec3 sunDirection;
 uniform vec3 sunTint;
 uniform float hazeDensity;
 uniform float hazeAngles[${stops}];
 uniform vec3 hazeColors[${stops}];
+uniform float fade;
+${UNDERWATER_GLSL_PARS}
 varying vec3 vColor;
 varying vec3 vNormal;
 varying vec3 vWorld;
@@ -66,11 +94,18 @@ vec3 hazeAt( float deg ) {
 }
 
 void main() {
+  ${
+    dither
+      ? `// Interleaved gradient noise: an even, fine dissolve.
+  float grain = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
+  if ( grain >= fade ) discard;`
+      : ''
+  }
   vec3 n = normalize( vNormal );
   float lambert = max( 0.0, dot( n, sunDirection ) );
   float sky = 0.38 + 0.14 * n.y;
-  float h = vWorld.y + ${SINK_GLSL};
-  float d = length( vWorld.xz );
+  float h = vWorld.y + ${SINK.toFixed(2)};
+  float d = length( vWorld.xz - cameraPosition.xz );
   // Far ranges read as solid masses: facet-to-facet light differences fade with distance.
   float distant = smoothstep( 2000.0, 5500.0, d );
   lambert = mix( lambert, 0.45 * max( 0.0, sunDirection.y ) + 0.25, distant );
@@ -79,228 +114,263 @@ void main() {
   // Air thins with altitude: high ridges and snowfields stay solid through the haze.
   float dh = d * mix( 1.0, 0.62, smoothstep( 150.0, 900.0, h ) );
   float a = min( 0.88, 1.0 - exp( -dh / 9000.0 - pow( dh * hazeDensity, 2.0 ) ) );
+  // Past the composed view the haze closes completely, well inside the streamed edge.
+  a = max( a, smoothstep( ${(HAZE_END - 1600).toFixed(1)}, ${HAZE_END.toFixed(1)}, d ) );
   // Haze is the air in front of the peak (sky nearer the horizon), not the sky behind
   // it, so a far range stays a distinct silhouette rather than a see-through curtain.
   vec3 haze = hazeAt( 0.5 * degrees( atan( h - ${EYE.toFixed(1)}, max( 1.0, d ) ) ) );
-  gl_FragColor = vec4( mix( lit, haze, a ), 1.0 );
+  vec3 color = mix( lit, haze, a );
+  color = applyUnderwater( color, length( vWorld - cameraPosition ) );
+  gl_FragColor = vec4( color, 1.0 );
   #include <colorspace_fragment>
 }`;
 }
 
-type Rgb = [number, number, number];
-
-const hex = (value: number): Rgb => {
-  const c = new THREE.Color().setHex(value, THREE.SRGBColorSpace);
-  return [c.r, c.g, c.b];
+type Tile = {
+  key: string;
+  level: number;
+  ix: number;
+  iz: number;
+  mesh: THREE.Mesh | null;
+  triangles: number;
+  /** 0 → 1 while dissolving in; back to 0 while dissolving out. */
+  fade: number;
+  state: 'in' | 'on' | 'out';
 };
 
-const WET_SAND = hex(0xa8946c);
-const SAND = hex(0xd6c49a);
-const GRASS = hex(0x6f8f3e);
-const MEADOW = hex(0x8c9a50);
-const FOREST = hex(0x3a5a2c);
-const DARK_FOREST = hex(0x2c4626);
-const SCRUB = hex(0x6f7046);
-const ROCK = hex(0x7a7266);
-const CLIFF = hex(0x6d665c);
-const CLIFF_PALE = hex(0x8c8274);
-const SNOW = hex(0xf2f5f8);
-
-function mix(out: Rgb, to: Rgb, t: number): void {
-  const u = clamp(t, 0, 1);
-  out[0] += (to[0] - out[0]) * u;
-  out[1] += (to[1] - out[1]) * u;
-  out[2] += (to[2] - out[2]) * u;
+/**
+ * Picks the tiles to draw around (x, z): a quadtree from TOP_LEVEL down, where a
+ * node splits when the camera is within SPLIT × its size. Nodes that were split
+ * stay split a little longer, so a camera hovering at a boundary never flickers.
+ */
+export function selectTiles(x: number, z: number, wasSplit: ReadonlySet<string>, split: Set<string>, radius = STREAM_RADIUS, factor = SPLIT): string[] {
+  const out: Array<{ key: string; d: number; level: number }> = [];
+  const top = tileSize(TOP_LEVEL);
+  const visit = (level: number, ix: number, iz: number) => {
+    const size = tileSize(level);
+    const d = cellDistance(x, z, ix, iz, size);
+    const key = chunkKey(level, ix, iz);
+    const reach = factor * size * (wasSplit.has(key) ? 1.2 : 1);
+    if (level > 0 && d < reach) {
+      split.add(key);
+      for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) visit(level - 1, ix * 2 + i, iz * 2 + j);
+    } else {
+      out.push({ key, d, level });
+    }
+  };
+  for (let iz = Math.floor((z - radius) / top); iz <= Math.floor((z + radius) / top); iz++) {
+    for (let ix = Math.floor((x - radius) / top); ix <= Math.floor((x + radius) / top); ix++) {
+      if (cellDistance(x, z, ix, iz, top) <= radius) visit(TOP_LEVEL, ix, iz);
+    }
+  }
+  out.sort((a, b) => a.d - b.d || a.level - b.level || (a.key < b.key ? -1 : 1));
+  return out.map((t) => t.key);
 }
 
-/** Biome colour (linear RGB) from height in metres, slope (normal Y) and a patch noise in [−1, 1]. */
-export function biomeColor(height: number, slopeY: number, patch: number, out: Rgb = [0, 0, 0]): Rgb {
-  const h = height + patch * 18;
-  out[0] = GRASS[0];
-  out[1] = GRASS[1];
-  out[2] = GRASS[2];
-  mix(out, MEADOW, patch * 0.5 + 0.5);
-  mix(out, FOREST, smoothstep(12, 70, h + patch * 25));
-  mix(out, DARK_FOREST, smoothstep(90, 220, h) * (0.5 + 0.5 * patch));
-  mix(out, SCRUB, smoothstep(260, 460, h + patch * 60));
-  mix(out, ROCK, smoothstep(460, 720, h + patch * 70));
-  const steep = 1 - smoothstep(0.42, 0.66, slopeY);
-  // Sea cliffs show layered rock bands rather than one flat tone.
-  const strata = 0.5 + 0.35 * Math.sin(height * 0.3 + patch * 2.5);
-  const cliffRgb: Rgb = [CLIFF[0], CLIFF[1], CLIFF[2]];
-  mix(cliffRgb, CLIFF_PALE, strata);
-  mix(out, height < 90 ? cliffRgb : ROCK, steep);
-  const snowline = 640 + patch * 110;
-  const snowy = smoothstep(snowline - 60, snowline + 60, height);
-  // Snow settles on all but sheer faces, and dusts even those well above the line.
-  mix(out, SNOW, Math.max(snowy * smoothstep(0.2, 0.45, slopeY), smoothstep(snowline + 120, snowline + 260, height) * 0.7));
-  // Beaches: flat sand at the waterline, darker where wet.
-  const sandy = (1 - smoothstep(1.8, 3.4, height + patch * 0.6)) * smoothstep(0.75, 0.92, slopeY);
-  mix(out, SAND, sandy);
-  mix(out, WET_SAND, (1 - smoothstep(0.4, 1.0, height)) * smoothstep(0.6, 0.85, slopeY));
-  return out;
+function overlaps(a: Tile, b: Tile): boolean {
+  const sa = tileSize(a.level);
+  const sb = tileSize(b.level);
+  return a.ix * sa < (b.ix + 1) * sb && b.ix * sb < (a.ix + 1) * sa && a.iz * sa < (b.iz + 1) * sb && b.iz * sb < (a.iz + 1) * sa;
 }
-
-/** Sink the land a little so beaches meet the water without a seam. */
-const SINK = 0.7;
-const SINK_GLSL = SINK.toFixed(2);
-/** Default haze density (per metre); land a few kilometres out melts into the sky. */
-const HAZE = 0.00026;
 
 /**
- * Nested square rings (a static clipmap): each ring has the same cell count and
- * twice the spacing of the one inside it, so far land costs little. Cells that
- * sit fully under water are skipped.
+ * Endless land: LOD tiles streamed around the camera, built in a worker, each
+ * dissolving in over FADE seconds; a tile being replaced stays until everything
+ * covering it is solid, then dissolves out.
  */
-export function createLandMesh(land: Land, options: LandMeshOptions): LandMeshHandle {
-  const N = Math.max(8, Math.round(options.segments / 4) * 4);
-  const inner = options.inner ?? 256;
-  const levels = options.levels ?? 6;
-  const count = N + 1;
+export function createLandStream(land: Land, options: LandStreamOptions): LandStream {
+  const cells = Math.max(8, Math.round((options.segments * 3) / 16));
   const sun = options.sunDirection.clone().normalize();
   const sunTint = new THREE.Color().setHex(0xfff0d8, THREE.SRGBColorSpace);
   const patchNoise = makeNoise2D(land.seed, 21);
   // Without a gradient, a single haze colour at every elevation.
   const gradient = options.hazeGradient ?? { angles: [0, 90], colors: [options.hazeColor, options.hazeColor] };
+  const uniforms = {
+    sunDirection: { value: sun },
+    sunTint: { value: sunTint },
+    hazeDensity: { value: options.hazeDensity ?? HAZE },
+    hazeAngles: { value: gradient.angles.slice() },
+    hazeColors: { value: gradient.colors.map((c) => c.clone()) },
+    fade: { value: 1 },
+    ...underwaterUniforms,
+  };
+  const makeMaterial = (dither: boolean) =>
+    new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader: fragmentShader(gradient.angles.length, dither),
+      uniforms,
+      vertexColors: true,
+      fog: false,
+      toneMapped: false,
+    });
+  const solid = makeMaterial(false);
+  const dissolving = makeMaterial(true);
+
   const group = new THREE.Group();
-  const material = new THREE.ShaderMaterial({
-    vertexShader,
-    fragmentShader: fragmentShader(gradient.angles.length),
-    uniforms: {
-      sunDirection: { value: sun },
-      sunTint: { value: sunTint },
-      hazeDensity: { value: options.hazeDensity ?? HAZE },
-      hazeAngles: { value: gradient.angles.slice() },
-      hazeColors: { value: gradient.colors.map((c) => c.clone()) },
-    },
-    vertexColors: true,
-    fog: false,
-    toneMapped: false,
-  });
-  const surface = { cliff: 0 };
-  const geometries: THREE.BufferGeometry[] = [];
-  let triangles = 0;
-  const rgb: Rgb = [0, 0, 0];
+  group.name = 'land';
+  const tiles = new Map<string, Tile>();
+  const requested = new Set<string>();
+  let wanted = new Set<string>();
+  let wantedList: string[] = [];
+  let split = new Set<string>();
+  let lastX = Infinity;
+  let lastZ = Infinity;
+  let queue: string[] = [];
 
-  for (let level = 0; level < levels; level++) {
-    const half = inner * 2 ** level;
-    const step = (half * 2) / N;
-    const heights = new Float32Array(count * count);
-    const cliffs = new Float32Array(count * count);
-    const outer = level < levels - 1;
-    for (let iz = 0; iz < count; iz++) {
-      for (let ix = 0; ix < count; ix++) {
-        // The outer edge shares vertices with the next ring: sample at its detail.
-        const edge = outer && (ix === 0 || iz === 0 || ix === N || iz === N);
-        const i = iz * count + ix;
-        heights[i] = land.surfaceAt(-half + ix * step, -half + iz * step, edge ? level + 1 : level, surface);
-        cliffs[i] = surface.cliff;
-      }
+  let worker: Worker | null = null;
+  let inFlight = 0;
+  const MAX_IN_FLIGHT = 2;
+  if (options.worker && typeof Worker !== 'undefined') {
+    try {
+      worker = new Worker(new URL('./world-worker.ts', import.meta.url), { type: 'module' });
+      const init: WorkerRequest = { type: 'init', seed: land.seed, viewYaw: land.viewYaw, offset: land.offset };
+      worker.postMessage(init);
+      worker.onmessage = (event: MessageEvent<{ type: string; key: string; data: TileData | null }>) => {
+        if (event.data.type !== 'tile') return;
+        inFlight = Math.max(0, inFlight - 1);
+        requested.delete(event.data.key);
+        if (wanted.has(event.data.key)) place(event.data.key, event.data.data, false);
+      };
+      worker.onerror = () => {
+        // Build on the main thread from here on; re-queue whatever was in flight.
+        worker?.terminate();
+        worker = null;
+        inFlight = 0;
+        requested.clear();
+        lastX = Infinity;
+      };
+    } catch {
+      worker = null;
     }
-    // The outer edge meets a ring with twice the spacing: put odd vertices on its edges.
-    if (outer) {
-      for (let i = 1; i < N; i += 2) {
-        for (const [a, b, c] of [
-          [i, i - 1, i + 1],
-          [N * count + i, N * count + i - 1, N * count + i + 1],
-          [i * count, (i - 1) * count, (i + 1) * count],
-          [i * count + N, (i - 1) * count + N, (i + 1) * count + N],
-        ] as Array<[number, number, number]>) {
-          heights[a] = (heights[b]! + heights[c]!) * 0.5;
-        }
-      }
-    }
+  }
 
-    // Far rings sample sparsely; a lone sampled peak becomes a needle. Limit
-    // how far a vertex may rise above its neighbours. Ring seams stay untouched.
-    if (level >= 2) {
-      const lo = N / 4;
-      const hi = (3 * N) / 4;
-      const seam = (i: number) => i === lo || i === hi;
-      const source = heights.slice();
-      for (let iz = 1; iz < N; iz++) {
-        for (let ix = 1; ix < N; ix++) {
-          if ((seam(ix) && iz >= lo && iz <= hi) || (seam(iz) && ix >= lo && ix <= hi)) continue;
-          const i = iz * count + ix;
-          const around = (source[i - 1]! + source[i + 1]! + source[i - count]! + source[i + count]!) * 0.25;
-          const limit = around + step * 0.8;
-          if (source[i]! > limit) heights[i] = limit;
-        }
-      }
+  function place(key: string, data: TileData | null, solidNow: boolean): void {
+    if (tiles.has(key)) return;
+    const { lod, cx, cz } = parseChunkKey(key);
+    const tile: Tile = { key, level: lod, ix: cx, iz: cz, mesh: null, triangles: 0, fade: solidNow ? 1 : 0, state: solidNow ? 'on' : 'in' };
+    if (data) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+      geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+      geometry.setIndex(new THREE.BufferAttribute(data.index, 1));
+      geometry.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geometry, solidNow ? solid : dissolving);
+      const size = tileSize(lod);
+      mesh.position.set(cx * size, 0, cz * size);
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
+      mesh.onBeforeRender = () => {
+        if (mesh.material !== dissolving) return;
+        uniforms.fade.value = tile.fade;
+        dissolving.uniformsNeedUpdate = true;
+      };
+      group.add(mesh);
+      tile.mesh = mesh;
+      tile.triangles = data.triangles;
     }
+    tiles.set(key, tile);
+  }
 
-    const positions = new Float32Array(count * count * 3);
-    const colors = new Float32Array(count * count * 3);
-    const normals = new Float32Array(count * count * 3);
-    for (let iz = 0; iz < count; iz++) {
-      for (let ix = 0; ix < count; ix++) {
-        const i = iz * count + ix;
-        const x = -half + ix * step;
-        const z = -half + iz * step;
-        const h = heights[i]!;
-        positions[i * 3] = x;
-        positions[i * 3 + 1] = h - SINK;
-        positions[i * 3 + 2] = z;
-        const hl = heights[iz * count + Math.max(0, ix - 1)]!;
-        const hr = heights[iz * count + Math.min(N, ix + 1)]!;
-        const hd = heights[Math.max(0, iz - 1) * count + ix]!;
-        const hu = heights[Math.min(N, iz + 1) * count + ix]!;
-        let nx = (hl - hr) / (2 * step);
-        let nz = (hd - hu) / (2 * step);
-        let ny = 1;
-        const len = Math.hypot(nx, ny, nz);
-        nx /= len;
-        ny /= len;
-        nz /= len;
-        normals[i * 3] = nx;
-        normals[i * 3 + 1] = ny;
-        normals[i * 3 + 2] = nz;
-        const patch = patchNoise(x / 140, z / 140) * 0.7 + patchNoise(x / 37, z / 37) * 0.3;
-        // Coarse rings smear a cliff face over one cell: colour it as a cliff from the land's own cliff map.
-        // Far rings are too coarse for per-face rock and snow: colour from a gentler slope
-        // so a range reads as one mass with snowy tops, not stripes.
-        const slopeY = level >= 3 ? ny + (1 - ny) * 0.6 : ny;
-        biomeColor(h, Math.min(slopeY, 1 - cliffs[i]! * 0.75), patch, rgb);
-        colors[i * 3] = rgb[0];
-        colors[i * 3 + 1] = rgb[1];
-        colors[i * 3 + 2] = rgb[2];
-      }
-    }
+  function buildHere(key: string): TileData | null {
+    const { lod, cx, cz } = parseChunkKey(key);
+    return buildTile(land, patchNoise, lod, cx, cz, cells);
+  }
 
-    const index: number[] = [];
-    const lo = N / 4;
-    const hi = (3 * N) / 4;
-    for (let iz = 0; iz < N; iz++) {
-      for (let ix = 0; ix < N; ix++) {
-        if (level > 0 && ix >= lo && ix < hi && iz >= lo && iz < hi) continue;
-        const a = iz * count + ix;
-        const b = a + 1;
-        const c = a + count;
-        const d = c + 1;
-        if (Math.max(heights[a]!, heights[b]!, heights[c]!, heights[d]!) < -1.5) continue;
-        index.push(a, c, b, b, c, d);
-      }
+  function remove(tile: Tile): void {
+    tiles.delete(tile.key);
+    if (tile.mesh) {
+      group.remove(tile.mesh);
+      tile.mesh.geometry.dispose();
     }
-    if (!index.length) continue;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-    geometry.setIndex(index);
-    geometry.computeBoundingSphere();
-    geometries.push(geometry);
-    triangles += index.length / 3;
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.matrixAutoUpdate = false;
-    group.add(mesh);
+  }
+
+  function reselect(x: number, z: number): void {
+    const next = new Set<string>();
+    wantedList = selectTiles(x, z, split, next);
+    split = next;
+    wanted = new Set(wantedList);
+    queue = wantedList.filter((key) => !tiles.has(key));
+    lastX = x;
+    lastZ = z;
+  }
+
+  /** True when every wanted tile overlapping `tile` is solid (or empty sea). */
+  function covered(tile: Tile): boolean {
+    for (const key of wantedList) {
+      const other = tiles.get(key);
+      const { lod, cx, cz } = parseChunkKey(key);
+      const probe = other ?? ({ level: lod, ix: cx, iz: cz } as Tile);
+      if (!overlaps(tile, probe)) continue;
+      if (!other || other.state !== 'on') return false;
+    }
+    return true;
   }
 
   return {
     group,
-    triangles,
+    prime(x, z) {
+      reselect(x, z);
+      for (const key of wantedList) place(key, buildHere(key), true);
+      queue = [];
+    },
+    update(x, z, dt) {
+      if (Math.hypot(x - lastX, z - lastZ) > RESELECT) reselect(x, z);
+      // Requests, nearest first.
+      if (queue.length) {
+        if (worker) {
+          while (queue.length && inFlight < MAX_IN_FLIGHT) {
+            const key = queue.shift()!;
+            if (tiles.has(key) || requested.has(key) || !wanted.has(key)) continue;
+            const { lod, cx, cz } = parseChunkKey(key);
+            const request: WorkerRequest = { type: 'tile', key, level: lod, ix: cx, iz: cz, cells };
+            worker.postMessage(request);
+            requested.add(key);
+            inFlight++;
+          }
+        } else {
+          // One tile per frame on the main thread.
+          while (queue.length) {
+            const key = queue.shift()!;
+            if (tiles.has(key) || !wanted.has(key)) continue;
+            place(key, buildHere(key), false);
+            break;
+          }
+        }
+      }
+      // Without motion (reduced-motion preference) tiles swap at once.
+      const step = dt > 0 ? dt / FADE : 1;
+      for (const tile of [...tiles.values()]) {
+        const want = wanted.has(tile.key);
+        if (want && tile.state === 'out') tile.state = 'in';
+        if (!want && tile.state !== 'out' && covered(tile)) tile.state = 'out';
+        if (tile.state === 'in') {
+          tile.fade = Math.min(1, tile.fade + step);
+          if (tile.fade >= 1) {
+            tile.state = 'on';
+            if (tile.mesh) tile.mesh.material = solid;
+          }
+        } else if (tile.state === 'out') {
+          if (tile.mesh) tile.mesh.material = dissolving;
+          tile.fade = Math.max(0, tile.fade - step);
+          if (tile.fade <= 0 || !tile.mesh) remove(tile);
+        }
+      }
+    },
+    stats() {
+      let triangles = 0;
+      let fading = 0;
+      for (const tile of tiles.values()) {
+        triangles += tile.triangles;
+        if (tile.state !== 'on') fading++;
+      }
+      return { tiles: tiles.size, triangles, pending: queue.length + requested.size, fading };
+    },
     dispose() {
-      for (const geometry of geometries) geometry.dispose();
-      material.dispose();
+      worker?.terminate();
+      for (const tile of [...tiles.values()]) remove(tile);
+      solid.dispose();
+      dissolving.dispose();
     },
   };
 }

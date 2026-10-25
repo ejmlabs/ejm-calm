@@ -2,15 +2,12 @@ import * as THREE from 'three';
 import { resolveSeed, seedURL, nextSeed } from './seed.js';
 import { createQuality, updateQuality } from './quality.js';
 import { layoutWorld } from './terrain.js';
-import { createOcean } from './ocean.js';
 import { createSky, HAZE_ANGLES } from './sky.js';
 import { createWhale } from './whale.js';
-import { createShips } from './ships.js';
-import { createLandMesh } from './landmesh.js';
-import { nearShelf, farShelf } from './land.js';
+import { createWorld } from './world.js';
 import { createBirds } from './birds.js';
 import { CalmCamera } from './camera.js';
-import { clamp } from './math.js';
+import { clamp, smoothstep } from './math.js';
 import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
@@ -19,6 +16,8 @@ import { cycleDuration } from './whale.js';
 type CalmReview = {
   time: number;
   advance: (seconds: number) => void;
+  /** Swims the whale on for this many seconds of simulation (30 Hz steps), streaming the world as it goes. */
+  travel: (seconds: number) => void;
   /** Optional normalised start time; 0 starts below the surface so the exit splash is visible. */
   forceBreach: (at?: number) => void;
   forceSpout: () => void;
@@ -100,10 +99,8 @@ const camera = new THREE.PerspectiveCamera(portrait ? 62 : 48, 1, 0.5, 12000);
 camera.layers.enable(1);
 
 let sky: ReturnType<typeof createSky>;
-let ocean: ReturnType<typeof createOcean>;
+let world: ReturnType<typeof createWorld>;
 let whale: ReturnType<typeof createWhale>;
-let ships: ReturnType<typeof createShips>;
-let landMesh: ReturnType<typeof createLandMesh>;
 let buildMs = 0;
 let birds: ReturnType<typeof createBirds>;
 let layout: ReturnType<typeof layoutWorld>;
@@ -126,34 +123,24 @@ try {
     portrait,
     saved: framing,
   });
-  ocean = createOcean(seed, sky.sunDirection, {
-    textureSize: quality.waterSize,
-    waterColor: 0x1c5470,
-    shelves: {
-      near: nearShelf(layout.land),
-      far: farShelf(layout.land),
-      // Low sun lights the shallows less.
-      light: sky.timeOfDay === 'golden' || sky.timeOfDay === 'dusk' ? 0.55 : 1,
-    },
-    reflectionHaze: sky.hazeColor,
-    // Slightly under 1 / exposure: reflections sit a touch darker than the land itself.
-    reflectionGain: 0.8 / renderer.toneMappingExposure,
-  });
-  scene.add(ocean.mesh);
-  landMesh = createLandMesh(layout.land, {
-    segments: quality.landSegments,
+  world = createWorld(seed, layout, scene, {
     sunDirection: sky.sunDirection,
     hazeColor: sky.hazeColor,
     hazeDensity: sky.hazeDensity,
     hazeGradient: { angles: HAZE_ANGLES, colors: sky.hazeGradient },
+    // Low sun lights the shallows less.
+    shallowLight: sky.timeOfDay === 'golden' || sky.timeOfDay === 'dusk' ? 0.55 : 1,
+    // Slightly under 1 / exposure: reflections sit a touch darker than the land itself.
+    reflectionGain: 0.8 / renderer.toneMappingExposure,
+    waterSize: quality.waterSize,
+    landSegments: quality.landSegments,
+    mobile,
+    worker: true,
   });
-  scene.add(landMesh.group);
-  ships = createShips(layout.ships);
-  for (const ship of ships) scene.add(ship.group);
   whale = createWhale(seed, layout.whaleHome, { tier: quality.tier });
-  scene.add(whale.group);
+  world.root.add(whale.group);
   birds = createBirds(seed, mobile ? 3 : 6);
-  scene.add(birds.group);
+  world.root.add(birds.group);
   buildMs = performance.now() - buildStart;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
@@ -242,9 +229,10 @@ function focusPoint(): THREE.Vector3 {
   }
   // Keep the whale centred (≥0.75 weight); glance toward the hero ship.
   const focus = new THREE.Vector3(w.x, Math.max(0.4, Math.min(2.2, w.y * 0.2 + 0.5)), w.z);
-  const hero = ships[0];
+  const hero = world.ships.active().find((ship) => ship.spec.id === 0);
   if (hero) {
-    const pull = 0.22;
+    // The pull fades once the journey leaves the hero ship behind.
+    const pull = 0.22 * (1 - smoothstep(160, 420, Math.hypot(hero.group.position.x - w.x, hero.group.position.z - w.z)));
     focus.x = focus.x * (1 - pull) + hero.group.position.x * pull;
     focus.z = focus.z * (1 - pull) + hero.group.position.z * pull;
   }
@@ -272,7 +260,7 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
   rig.driftWeight = 0;
   rig.lastInput = Infinity; // keep drift off for the whole review shot
   const focus = focusPoint();
-  rig.setFocus(focus.x, focus.y, focus.z);
+  rig.setFocus(focus.x - world.origin.x, focus.y, focus.z - world.origin.z);
   // Snap camera (large dt) so the first screenshot is already framed.
   rig.update(8, time, true);
 }
@@ -296,13 +284,13 @@ function tick(now: number): void {
   }
 
   sky.update(dt);
-  ocean.update(dt, sky.sunDirection);
-  whale.update(dt, time, layout.land);
-  for (const ship of ships) ship.update(dt, time, layout.land);
-  birds.update(time);
+  world.update(whale.state.x, whale.state.z, camera, dt, time);
+  world.ocean.update(dt, sky.sunDirection, camera);
+  whale.update(dt, time, world.shore);
+  birds.update(time, whale.state.x, whale.state.z, dt);
 
   const focus = focusPoint();
-  rig.setFocus(focus.x, focus.y, focus.z);
+  rig.setFocus(focus.x - world.origin.x, focus.y, focus.z - world.origin.z);
   rig.update(dt || 1 / 60, time, motion.matches);
 
   renderer.render(scene, camera);
@@ -334,6 +322,13 @@ if (debug) {
     advance(seconds: number) {
       if (Number.isFinite(seconds)) time += Math.max(0, seconds);
     },
+    travel(seconds: number) {
+      for (let t = 0; t < Math.min(3600, Math.max(0, seconds || 0)); t += 1 / 30) {
+        time += 1 / 30;
+        world.update(whale.state.x, whale.state.z, camera, 1 / 30, time);
+        whale.update(1 / 30, time, world.shore);
+      }
+    },
     forceBreach(at?: number) {
       whale.forcePhase('breach', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
       frameWhaleEvent('breach');
@@ -347,16 +342,16 @@ if (debug) {
       frameWhaleEvent(kind, { yawOffset: finite(yawOffset), pitch: finite(pitch), distance: finite(distance) });
     },
     setWaterVisible(visible: boolean) {
-      ocean.mesh.visible = visible;
+      world.ocean.mesh.visible = visible;
     },
     setWhaleVisible(visible: boolean) {
       whale.group.visible = visible;
     },
     setLandVisible(visible: boolean) {
-      landMesh.group.visible = visible;
+      world.landStream.group.visible = visible;
     },
     setShipsVisible(visible: boolean) {
-      for (const ship of ships) ship.group.visible = visible;
+      world.ships.setVisible(visible);
     },
     frame(yaw: number, pitch: number, distance: number) {
       if (![yaw, pitch, distance].every(Number.isFinite)) return;
@@ -390,9 +385,9 @@ if (debug) {
         cam: [camera.position.x, camera.position.y, camera.position.z],
         focus: [rig.lookAt.x, rig.lookAt.y, rig.lookAt.z],
         dist: rig.current.distance,
-        landTriangles: landMesh.triangles,
         buildMs: Math.round(buildMs),
-        ships: layout.ships.length,
+        ships: world.ships.active().length,
+        ...world.stats(),
         cycle: cycleDuration(),
         exposure: renderer.toneMappingExposure,
       };
@@ -423,11 +418,9 @@ window.addEventListener('pagehide', () => {
   if (frame !== null) cancelAnimationFrame(frame);
   persist();
   ui.dispose();
-  ocean.dispose();
   sky.dispose();
   whale.dispose();
-  for (const ship of ships) ship.dispose();
-  landMesh.dispose();
+  world.dispose();
   birds.dispose();
   renderer.dispose();
 });
