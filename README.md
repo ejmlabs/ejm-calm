@@ -1,4 +1,4 @@
-# calm
+# ejm-calm
 
 A calm, beautiful, seeded ocean scene from **ejmlabs, an open source lab**.
 A whale surfaces and breaches, sailboats drift, and long hazy coastlines run to the horizon.
@@ -61,4 +61,4 @@ MIT © ejmlabs. See `LICENSE` and `THIRD_PARTY_NOTICES` for three.js and
 simplex-noise.
 
 The whale-tail mark (favicon, touch icon and the mark above the title) is the
-ejmlabs calm logo, drawn in the ejm-ui palette. No wordmark or font is shipped.
+ejmlabs ejm-calm logo, drawn in the ejm-ui palette. No wordmark or font is shipped.
