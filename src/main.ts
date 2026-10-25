@@ -6,8 +6,8 @@ import { createSky, HAZE_ANGLES } from './sky.js';
 import { createWhale } from './whale.js';
 import { createWorld } from './world.js';
 import { createBirds } from './birds.js';
-import { CalmCamera } from './camera.js';
-import { clamp, smoothstep } from './math.js';
+import { FollowCamera } from './camera.js';
+import { clamp } from './math.js';
 import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
@@ -23,7 +23,9 @@ type CalmReview = {
   forceSpout: () => void;
   /** Optional yaw offset from broadside, pitch and distance for close-up review. */
   frameWhale: (kind?: 'breach' | 'spout', yawOffset?: number, pitch?: number, distance?: number) => void;
+  /** Review view relative to the whale's heading (yaw 0 = behind); `follow()` returns to the chase. */
   frame: (yaw: number, pitch: number, distance: number) => void;
+  follow: () => void;
   setWaterVisible: (visible: boolean) => void;
   setWhaleVisible: (visible: boolean) => void;
   setLandVisible: (visible: boolean) => void;
@@ -104,24 +106,19 @@ let whale: ReturnType<typeof createWhale>;
 let buildMs = 0;
 let birds: ReturnType<typeof createBirds>;
 let layout: ReturnType<typeof layoutWorld>;
-let rig: CalmCamera;
+let rig: FollowCamera;
 
 try {
   const buildStart = performance.now();
   sky = createSky(seed, renderer, scene);
   layout = layoutWorld(seed, sky.sunAzimuthDeg);
-  const savedFraming = memory?.framing;
-  // Subject-derived yaw always; keep saved pitch/distance when present.
-  const framing = {
-    yaw: layout.viewYaw,
-    pitch: savedFraming?.pitch ?? (portrait ? 0.08 : 0.12),
-    distance: savedFraming?.distance ?? (portrait ? 42 : 40),
-  };
-  rig = new CalmCamera(camera, {
-    initialYaw: layout.viewYaw,
-    sunAzimuthDeg: sky.sunAzimuthDeg,
+  // yaw 0 marks a follow-camera framing; older orbit framings (yaw = view yaw) are ignored.
+  const savedFraming = memory?.framing?.yaw === 0 ? memory.framing : null;
+  rig = new FollowCamera(camera, {
     portrait,
-    saved: framing,
+    saved: savedFraming,
+    // Render coordinates in, world coordinates for the land field.
+    groundAt: (x, z) => world.land.heightAt(x + world.origin.x, z + world.origin.z),
   });
   world = createWorld(seed, layout, scene, {
     sunDirection: sky.sunDirection,
@@ -141,6 +138,8 @@ try {
   world.root.add(whale.group);
   birds = createBirds(seed, mobile ? 3 : 6);
   world.root.add(birds.group);
+  // The floating origin moved: shift the camera with the world so the chase does not jump.
+  world.origin.onRecenter((dx, dz) => rig.shift(dx, dz));
   buildMs = performance.now() - buildStart;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
@@ -180,8 +179,9 @@ canvas.addEventListener('pointermove', (event) => {
   const dy = event.clientY - lastY;
   lastX = event.clientX;
   lastY = event.clientY;
-  rig.orbit(dx, dy);
+  rig.look(dx, dy);
 });
+canvas.addEventListener('wheel', (event) => rig.zoom(event.deltaY), { passive: true });
 const endDrag = (event: PointerEvent) => {
   dragging = false;
   try {
@@ -214,55 +214,26 @@ function persist(): void {
   });
 }
 
-/** When set, camera locks onto the whale for spout/breach review framing. */
-let eventFrame: 'breach' | 'spout' | null = null;
-
-function focusPoint(): THREE.Vector3 {
+/** Chase target from the whale, in render coordinates. */
+function followWhale(): void {
   const w = whale.state;
-  if (eventFrame) {
-    // Whale-only focus at the body centre (triggers camera event-orbit when y > 1.8).
-    const lift =
-      eventFrame === 'breach'
-        ? Math.max(2.5, w.y * 0.7 + 1.4)
-        : Math.max(1.9, Math.max(0.8, w.y) + 1.6);
-    return new THREE.Vector3(w.x, lift, w.z);
-  }
-  // Keep the whale centred (≥0.75 weight); glance toward the hero ship.
-  const focus = new THREE.Vector3(w.x, Math.max(0.4, Math.min(2.2, w.y * 0.2 + 0.5)), w.z);
-  const hero = world.ships.active().find((ship) => ship.spec.id === 0);
-  if (hero) {
-    // The pull fades once the journey leaves the hero ship behind.
-    const pull = 0.22 * (1 - smoothstep(160, 420, Math.hypot(hero.group.position.x - w.x, hero.group.position.z - w.z)));
-    focus.x = focus.x * (1 - pull) + hero.group.position.x * pull;
-    focus.z = focus.z * (1 - pull) + hero.group.position.z * pull;
-  }
-  return focus;
+  rig.setTarget({ x: w.x - world.origin.x, y: w.y, z: w.z - world.origin.z, heading: w.heading });
 }
 
 /** Side-on, close framing so the whale fills ~35–50% of screen width. */
 function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; pitch?: number; distance?: number } = {}): void {
-  eventFrame = kind;
-  const w = whale.state;
-  // Camera sits at focus + (sin yaw, cos yaw), so yaw = heading is a broadside on the
-  // whale's left; a small negative offset swings toward the head for a three-quarter view.
+  // Review yaw is relative to the heading (0 = behind); −π/2 is a broadside on the whale's
+  // left, and the small negative offset swings toward the head for a three-quarter view.
   // Debug overrides are clamped to the ranges the camera rig itself allows.
-  const yaw = (Number.isFinite(w.heading) ? w.heading - 0.22 : layout.viewYaw) + clamp(view.yawOffset ?? 0, -Math.PI, Math.PI);
+  const yaw = -Math.PI / 2 - 0.22 + clamp(view.yawOffset ?? 0, -Math.PI, Math.PI);
   // Close enough that a ~12 m whale fills ~35–50% of portrait width.
-  const dist = clamp(view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14), 6, 80);
+  const distance = clamp(view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14), 6, 80);
   const pitch = clamp(view.pitch ?? (kind === 'breach' ? 0.12 : 0.02), 0.02, 0.62);
-  rig.framing.yaw = yaw;
-  rig.framing.pitch = pitch;
-  rig.framing.distance = dist;
-  rig.current.yaw = yaw;
-  rig.current.pitch = pitch;
-  rig.current.distance = dist;
-  rig.baseYaw = yaw;
-  rig.driftWeight = 0;
-  rig.lastInput = Infinity; // keep drift off for the whole review shot
-  const focus = focusPoint();
-  rig.setFocus(focus.x - world.origin.x, focus.y, focus.z - world.origin.z);
-  // Snap camera (large dt) so the first screenshot is already framed.
-  rig.update(8, time, true);
+  rig.setReview({ yaw, pitch, distance, minLookY: kind === 'breach' ? 2.5 : 2.4 });
+  followWhale();
+  // Snap so the first screenshot is already framed.
+  rig.snap();
+  rig.update(0, time);
 }
 
 function tick(now: number): void {
@@ -289,9 +260,8 @@ function tick(now: number): void {
   whale.update(dt, time, world.shore);
   birds.update(time, whale.state.x, whale.state.z, dt);
 
-  const focus = focusPoint();
-  rig.setFocus(focus.x - world.origin.x, focus.y, focus.z - world.origin.z);
-  rig.update(dt || 1 / 60, time, motion.matches);
+  followWhale();
+  rig.update(dt, time, motion.matches);
 
   renderer.render(scene, camera);
 
@@ -358,16 +328,11 @@ if (debug) {
       yaw = clamp(yaw, -4 * Math.PI, 4 * Math.PI);
       pitch = clamp(pitch, 0.02, 0.62);
       distance = clamp(distance, 6, 80);
-      eventFrame = null;
-      rig.framing.yaw = yaw;
-      rig.framing.pitch = pitch;
-      rig.framing.distance = distance;
-      rig.current.yaw = yaw;
-      rig.current.pitch = pitch;
-      rig.current.distance = distance;
-      rig.baseYaw = yaw;
-      rig.driftWeight = 0;
-      rig.noteInput();
+      rig.setReview({ yaw, pitch, distance });
+      rig.snap();
+    },
+    follow() {
+      rig.setReview(null);
     },
     stats() {
       const size = whale.measure();
@@ -384,7 +349,8 @@ if (debug) {
         whaleDetail: whale.detail(),
         cam: [camera.position.x, camera.position.y, camera.position.z],
         focus: [rig.lookAt.x, rig.lookAt.y, rig.lookAt.z],
-        dist: rig.current.distance,
+        dist: rig.distance,
+        camMode: rig.mode,
         buildMs: Math.round(buildMs),
         ships: world.ships.active().length,
         ...world.stats(),
