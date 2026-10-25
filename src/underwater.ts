@@ -435,7 +435,8 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     // Whatever the camera sees through the lens is on its own side of the surface: hold the
     // murk back while above and go fully under soon after crossing; the waterline overlay
     // carries the visual transition across the split itself.
-    blendFog(above, below, fogMix(depth, s), blended);
+    const murk = fogMix(depth, s);
+    blendFog(above, below, murk, blended);
     if (fog) {
       fog.color.copy(blended.color);
       fog.density = blended.density;
@@ -449,7 +450,8 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     }
 
     // Exponential-fog equivalent of the FogExp2 visibility, for shaders that fade linearly.
-    underwaterUniforms.underwaterMix.value = s;
+    // Same blend as the scene fog, so the land (no three fog) fades exactly like everything else.
+    underwaterUniforms.underwaterMix.value = murk;
     // The land (the only reader) skips tone mapping, so it takes the display colour, like the clear colour.
     underwaterUniforms.underwaterColor.value.copy(tint.color);
     underwaterUniforms.underwaterDensity.value = below.density * 1.73;

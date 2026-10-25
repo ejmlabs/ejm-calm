@@ -388,6 +388,9 @@ if (debug) {
         ...world.stats(),
         cycle: cycleDuration(),
         exposure: renderer.toneMappingExposure,
+        // Last rendered frame (three resets these per render).
+        draws: renderer.info.render.calls,
+        triangles: renderer.info.render.triangles,
         submersion: underwater.signal.submersion,
         depth: underwater.signal.depth,
         audio: audio.stats(),
