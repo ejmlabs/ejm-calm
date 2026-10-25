@@ -1,10 +1,41 @@
 import * as THREE from 'three';
 import { fork, hash } from './rng.js';
-import { clamp, damp, lerp, smoothstep } from './math.js';
+import { clamp, lerp, smoothstep } from './math.js';
+import { makeNoise2D } from './noise.js';
 import type { Shore } from './shore.js';
-import { createWhalePilot, type WhaleCourse } from './whale-course.js';
+import type { QualityTier } from './quality.js';
+import { createWhalePilot, whaleForward, type WhaleCourse } from './whale-course.js';
+import {
+  FLIPPER_DROOP,
+  FLIPPER_L,
+  FLIPPER_R,
+  FLIPPER_SWEEP,
+  FLUKE_BONE,
+  ROOT_BONE,
+  WHALE_LOD,
+  buildWhaleGeometry,
+  createWhaleBones,
+  flipperQuaternion,
+  sampleProfile,
+  type WhaleDetail,
+} from './whale-model.js';
+import {
+  BREACH_EXIT,
+  BREACH_SPLASH,
+  PHASE_LEN,
+  PHASE_ORDER,
+  SURFACE_Y,
+  POSE_KEYS,
+  emptyPose,
+  spineAngles,
+  whaleOrientation,
+  whalePose,
+  type WhalePhase,
+  type WhalePose,
+} from './whale-motion.js';
+import { BLOWHOLE_U, BLOWHOLE_X, createWhaleSkin } from './whale-skin.js';
 
-export type WhalePhase = 'swim' | 'surface' | 'spout' | 'dive' | 'breach' | 'splash';
+export type { WhalePhase } from './whale-motion.js';
 
 export type WhaleState = {
   phase: WhalePhase;
@@ -14,6 +45,7 @@ export type WhaleState = {
   y: number;
   z: number;
   heading: number;
+  pitch: number;
   roll: number;
   spout: number;
   splash: number;
@@ -23,20 +55,16 @@ export type WhaleHandle = {
   group: THREE.Group;
   state: WhaleState;
   update: (dt: number, time: number, shore: Shore) => void;
-  forcePhase: (phase: WhalePhase) => void;
+  /** Jump to a phase for review; `at` overrides the normalised start time. */
+  forcePhase: (phase: WhalePhase, at?: number) => void;
+  /** World-space size of the posed body (skinned), for debug stats. */
+  measure: () => THREE.Vector3;
+  /** Detail level currently drawn by the LOD. */
+  detail: () => WhaleDetail;
   dispose: () => void;
 };
 
-const PHASE_LEN: Record<WhalePhase, number> = {
-  swim: 18,
-  surface: 6,
-  spout: 3.5,
-  dive: 5,
-  breach: 5.5,
-  splash: 2.5,
-};
-
-const PHASE_ORDER: WhalePhase[] = ['swim', 'surface', 'spout', 'dive', 'swim', 'surface', 'spout', 'dive', 'breach', 'splash', 'dive'];
+export type WhaleOptions = { tier?: QualityTier };
 
 export function phaseAtCycleTime(t: number): { phase: WhalePhase; phaseT: number; cycle: number } {
   const total = PHASE_ORDER.reduce((sum, p) => sum + PHASE_LEN[p], 0);
@@ -54,100 +82,10 @@ export function cycleDuration(): number {
   return PHASE_ORDER.reduce((sum, p) => sum + PHASE_LEN[p], 0);
 }
 
-function buildWhaleGeometry(): THREE.BufferGeometry {
-  const points: THREE.Vector2[] = [];
-  const samples = 36;
-  // ~4.5:1 length:width. Max radius 1 → diameter 2, length 9.
-  // Profile is closed: radius is exactly 0 at both ends so the lathe is not a tube.
-  const length = 9;
-  const maxR = 1;
-  for (let i = 0; i <= samples; i++) {
-    const along = i / samples;
-    let radius = 0;
-    if (along > 0 && along < 1) {
-      if (along < 0.08) radius = Math.sin((along / 0.08) * Math.PI * 0.5) * 0.72;
-      else if (along < 0.2) radius = lerp(0.72, maxR, (along - 0.08) / 0.12);
-      else if (along < 0.62) radius = maxR;
-      // Tail stock is the last ~30% of length: gentle taper into the flukes, ending on the axis.
-      else radius = maxR * Math.sin(((1 - along) / 0.38) * Math.PI * 0.5);
-    }
-    points.push(new THREE.Vector2(radius, along * length - length / 2));
-  }
-  points[0]!.set(0, -length / 2);
-  points[points.length - 1]!.set(0, length / 2);
-
-  const body = new THREE.LatheGeometry(points, 28);
-  // Head at −X, tail at +X. Positive scale keeps winding outward.
-  body.rotateZ(-Math.PI / 2);
-  body.scale(1, 0.9, 1);
-  body.computeVertexNormals();
-
-  // If a mid-body normal points inward, flip winding and recompute.
-  const pos = body.attributes.position!;
-  const nrm = body.attributes.normal!;
-  let far = 0;
-  let farD = 0;
-  for (let i = 0; i < pos.count; i++) {
-    const d = Math.hypot(pos.getY(i), pos.getZ(i));
-    if (d > farD) {
-      farD = d;
-      far = i;
-    }
-  }
-  const outward = nrm.getY(far) * pos.getY(far) + nrm.getZ(far) * pos.getZ(far);
-  if (outward < 0 && body.index) {
-    const idx = body.index;
-    for (let i = 0; i < idx.count; i += 3) {
-      const a = idx.getX(i);
-      idx.setX(i, idx.getX(i + 1));
-      idx.setX(i + 1, a);
-    }
-    body.computeVertexNormals();
-  }
-
-  const colors = new Float32Array(pos.count * 3);
-  const back = new THREE.Color(0x3a4d5c);
-  const belly = new THREE.Color(0x9aa3ab);
-  const tmp = new THREE.Color();
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i);
-    const mix = smoothstep(-0.55, -0.12, y);
-    tmp.copy(belly).lerp(back, mix);
-    colors[i * 3] = tmp.r;
-    colors[i * 3 + 1] = tmp.g;
-    colors[i * 3 + 2] = tmp.b;
-  }
-  body.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  return body;
-}
-
-function makeFluke(): THREE.BufferGeometry {
-  // One simple non-crossing outline. Thin extrude, then laid flat in the horizontal plane.
-  const shape = new THREE.Shape();
-  shape.moveTo(0.05, 0);
-  shape.lineTo(1.15, 0.42);
-  shape.lineTo(1.7, 0.08);
-  shape.lineTo(0.15, -0.02);
-  shape.lineTo(-1.7, 0.08);
-  shape.lineTo(-1.15, 0.42);
-  shape.closePath();
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: 0.03,
-    bevelEnabled: false,
-  });
-  geo.rotateX(-Math.PI / 2);
-  geo.computeVertexNormals();
-  return geo;
-}
-
-function makeFin(): THREE.BufferGeometry {
-  const shape = new THREE.Shape();
-  shape.moveTo(0, 0);
-  shape.lineTo(0.95, -0.08);
-  shape.quadraticCurveTo(0.7, -0.45, 0.12, -0.38);
-  shape.lineTo(0, 0);
-  return new THREE.ExtrudeGeometry(shape, { depth: 0.05, bevelEnabled: false });
-}
+/** Base stroke frequency (Hz): slow, heavy beats for a 12 m animal. */
+const STROKE_HZ = 0.3;
+/** Forced review breach starts just after the exit so the shot lands near the apex. */
+const FORCED_BREACH_T = 0.26;
 
 function softCircleTexture(): THREE.CanvasTexture {
   const size = 64;
@@ -161,6 +99,91 @@ function softCircleTexture(): THREE.CanvasTexture {
   gradient.addColorStop(1, 'rgba(220,230,240,0)');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** Tight bright core with a short falloff: reads as a clump of droplets, not fog. */
+function dropletTexture(): THREE.CanvasTexture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 30);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.45, 'rgba(255,255,255,0.85)');
+  gradient.addColorStop(0.75, 'rgba(255,255,255,0.25)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Continuous, irregular foam patch: noise thresholded against a radial falloff,
+ * densest in the middle. Black is transparent under additive blending.
+ * `rim` > 0 hollows the centre into a band (for the waterline wash).
+ */
+function foamTexture(seed: number, channel: number, rim = 0): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const image = ctx.createImageData(size, size);
+  const noise = makeNoise2D(seed, channel);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (x + 0.5) / size * 2 - 1;
+      const dy = (y + 0.5) / size * 2 - 1;
+      const d = Math.hypot(dx, dy);
+      const n = 0.6 * noise(dx * 3.2, dy * 3.2) + 0.3 * noise(dx * 8 + 9, dy * 8) + 0.1 * noise(dx * 20, dy * 20 + 4);
+      const radial = rim > 0 ? Math.exp(-(((d - 0.82) / rim) ** 2)) : 1 - smoothstep(0.25, 0.95, d);
+      // Threshold rises toward the edge so the patch breaks up into lacework, not a disc.
+      const v = clamp((n * 0.5 + 0.5 + radial - (rim > 0 ? 1.2 : 0.95)) * 2.6, 0, 1) * radial;
+      const i = (y * size + x) * 4;
+      const c = Math.round(v * 255);
+      image.data[i] = c;
+      image.data[i + 1] = c;
+      image.data[i + 2] = c;
+      image.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** Vertical streak: bright core near the base, breaking into droplets toward the tip. */
+function streakTexture(seed: number): THREE.CanvasTexture {
+  const w = 32;
+  const h = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  const image = ctx.createImageData(w, h);
+  const noise = makeNoise2D(seed, 77);
+  for (let y = 0; y < h; y++) {
+    const up = 1 - (y + 0.5) / h; // 0 at the base, 1 at the tip
+    for (let x = 0; x < w; x++) {
+      const across = ((x + 0.5) / w) * 2 - 1;
+      const core = Math.exp(-((across / (0.55 - 0.3 * up)) ** 2));
+      const breakup = smoothstep(0.35 - up * 0.5, 0.75 - up * 0.3, noise(across * 3, up * 9) * 0.5 + 0.5);
+      const a = core * (1 - smoothstep(0.7, 1, up)) * lerp(1, breakup, smoothstep(0.2, 0.6, up)) * smoothstep(0, 0.06, up);
+      const i = (y * w + x) * 4;
+      image.data[i] = 255;
+      image.data[i + 1] = 255;
+      image.data[i + 2] = 255;
+      image.data[i + 3] = Math.round(clamp(a, 0, 1) * 255);
+    }
+  }
+  ctx.putImageData(image, 0, 0);
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
   return texture;
@@ -185,72 +208,56 @@ function mistTexture(): THREE.CanvasTexture {
   return texture;
 }
 
-export function createWhale(seed: number, home: { x: number; z: number }): WhaleHandle {
+export function createWhale(seed: number, home: { x: number; z: number }, options: WhaleOptions = {}): WhaleHandle {
   const rng = fork(seed, 'whale');
+  // First draw is the starting heading; tests rely on that order.
+  const startHeading = rng() * Math.PI * 2;
+  const rollSide = hash(seed, 0x0b4e) & 1 ? 1 : -1;
+  const tier = options.tier ?? 'high';
+
+  // The root group stays at the origin. `body` carries the pose; effects live in world space.
   const group = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    vertexColors: true,
-    roughness: 0.62,
-    metalness: 0.02,
-    envMapIntensity: 0.35,
-    flatShading: false,
-    side: THREE.FrontSide,
-    emissive: new THREE.Color(0x1a2834),
-    emissiveIntensity: 0.18,
-  });
-  const bodyGeo = buildWhaleGeometry();
-  // Ensure colour attribute survived lathe + scale and reaches the material.
-  if (!bodyGeo.getAttribute('color')) {
-    throw new Error('whale body missing vertex colors');
-  }
-  bodyMat.vertexColors = true;
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  const body = new THREE.Group();
   group.add(body);
-  group.scale.setScalar(1.2);
 
-  const darkMat = new THREE.MeshStandardMaterial({
-    color: 0x3a4d5c,
-    roughness: 0.65,
-    metalness: 0.02,
-    side: THREE.DoubleSide,
-    envMapIntensity: 0.3,
-    emissive: new THREE.Color(0x1a2834),
-    emissiveIntensity: 0.14,
+  const skin = createWhaleSkin(seed, tier === 'high' ? 1024 : 512);
+  const material = new THREE.MeshStandardMaterial({
+    map: skin.map,
+    normalMap: skin.normalMap,
+    normalScale: new THREE.Vector2(0.9, 0.9),
+    roughness: 0.42,
+    metalness: 0,
+    envMapIntensity: 0.6,
   });
-  const flukeGeo = makeFluke();
-  const fluke = new THREE.Mesh(flukeGeo, darkMat);
-  // Tail is +X after the lathe is rotated. Flukes lie flat on that tip.
-  fluke.position.set(4.25, 0.02, 0);
-  fluke.scale.setScalar(0.95);
-  group.add(fluke);
 
-  // Low ridge, not a cone.
-  const dorsalGeo = new THREE.BoxGeometry(0.45, 0.08, 0.16);
-  const dorsal = new THREE.Mesh(dorsalGeo, darkMat);
-  dorsal.position.set(1.4, 0.72, 0);
-  dorsal.rotation.z = -0.5;
-  group.add(dorsal);
+  const bones = createWhaleBones();
+  body.add(bones[ROOT_BONE]!);
+  body.updateMatrixWorld(true);
+  const skeleton = new THREE.Skeleton(bones);
+  const restFlip = [
+    flipperQuaternion(1, FLIPPER_DROOP, FLIPPER_SWEEP, 0),
+    flipperQuaternion(-1, FLIPPER_DROOP, FLIPPER_SWEEP, 0),
+  ];
 
-  const finGeo = makeFin();
-  const finL = new THREE.Mesh(finGeo, darkMat);
-  finL.position.set(1.6, -0.45, 0.55);
-  finL.scale.setScalar(0.55);
-  finL.rotation.y = 0.8;
-  finL.rotation.z = -0.9;
-  group.add(finL);
-  const finR = finL.clone();
-  finR.position.z = -0.55;
-  finR.rotation.y = -0.8;
-  finR.rotation.z = 0.9;
-  group.add(finR);
+  // LOD levels share one skeleton; only one level draws per frame.
+  const lod = new THREE.LOD();
+  const levels: Array<{ detail: WhaleDetail; mesh: THREE.SkinnedMesh }> = [];
+  for (const level of WHALE_LOD[tier]) {
+    const { geometry } = buildWhaleGeometry(level.detail);
+    const mesh = new THREE.SkinnedMesh(geometry, material);
+    mesh.bind(skeleton, new THREE.Matrix4());
+    // Bends and the fluke lift reach past the bind-pose bounds.
+    mesh.frustumCulled = false;
+    lod.addLevel(mesh, level.distance);
+    levels.push({ detail: level.detail, mesh });
+  }
+  body.add(lod);
 
   // Spout: narrow mist column. Layer 1 is omitted by Water's mirror camera (layer 0 only).
   const MIST_LAYER = 1;
   const mistTex = mistTexture();
   const spoutGroup = new THREE.Group();
   spoutGroup.visible = false;
-  spoutGroup.position.set(-2.6, 0.85, 0);
   spoutGroup.layers.set(MIST_LAYER);
   const spoutSprites: THREE.Sprite[] = [];
   const SPOUT_N = 10;
@@ -269,7 +276,6 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
       toneMapped: true,
     });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(0.8, 0.7, 1);
     sprite.layers.set(MIST_LAYER);
     sprite.renderOrder = 2;
     spoutGroup.add(sprite);
@@ -277,105 +283,202 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
   }
   group.add(spoutGroup);
 
-  const spoutTex = softCircleTexture();
-  // Splash: ring + outward spray sprites.
-  const splashGeo = new THREE.RingGeometry(0.5, 2.2, 32);
-  const splashMat = new THREE.MeshBasicMaterial({
-    color: 0xeef4f8,
-    transparent: true,
-    opacity: 0,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
+  // Splash, all in world space: a crown of white water streaks, droplets thrown
+  // off its rim, a little mist, and an irregular foam patch left on the water.
+  const sprayTex = softCircleTexture();
+  const dropTex = dropletTexture();
+  const streakTex = streakTexture(seed);
+  const foamTex = foamTexture(seed, 61);
+  const washTex = foamTexture(seed, 62, 0.16);
+  const splashGeo = new THREE.PlaneGeometry(2, 2);
+  const foamMaterial = (map: THREE.Texture) =>
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      map,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      // Additive so foam can only brighten the water, never darken it.
+      blending: THREE.AdditiveBlending,
+      fog: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    });
+  const splashMat = foamMaterial(foamTex);
   const splash = new THREE.Mesh(splashGeo, splashMat);
   splash.rotation.x = -Math.PI / 2;
   splash.visible = false;
   group.add(splash);
 
-  const splashSprites: THREE.Sprite[] = [];
-  const splashSpray = new THREE.Group();
-  splashSpray.visible = false;
-  for (let i = 0; i < 20; i++) {
+  // Soft wet line where the hull meets the water while the whale is at the surface.
+  const washMat = foamMaterial(washTex);
+  const wash = new THREE.Mesh(splashGeo, washMat);
+  wash.rotation.x = -Math.PI / 2;
+  const washPivot = new THREE.Group();
+  washPivot.add(wash);
+  washPivot.visible = false;
+  group.add(washPivot);
+
+  type Spray = { sprite: THREE.Sprite; kind: 'crown' | 'drop' | 'mist'; angle: number; out: number; up: number; size: number };
+  const CROWN_N = 34;
+  const DROP_N = 16;
+  const MIST_N = 3;
+  const spray = new THREE.Group();
+  spray.visible = false;
+  const sprays: Spray[] = [];
+  for (let i = 0; i < CROWN_N + DROP_N + MIST_N; i++) {
+    const kind = i < CROWN_N ? 'crown' : i < CROWN_N + DROP_N ? 'drop' : 'mist';
     const mat = new THREE.SpriteMaterial({
-      map: spoutTex,
-      color: 0xeef4f8,
+      map: kind === 'crown' ? streakTex : kind === 'drop' ? dropTex : sprayTex,
+      color: kind === 'mist' ? 0xdde7ec : 0xe9eff2,
       transparent: true,
       opacity: 0,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      // White water should stay white; tone mapping greys it out against the sky.
+      toneMapped: kind === 'mist',
     });
     const sprite = new THREE.Sprite(mat);
-    splashSpray.add(sprite);
-    splashSprites.push(sprite);
+    // Streaks stand on the water: anchor the sprite at its base.
+    if (kind === 'crown') sprite.center.set(0.5, 0);
+    spray.add(sprite);
+    const r = (k: number) => hash(seed, i, k, 'spray') / 0x100000000;
+    const n = kind === 'crown' ? CROWN_N : kind === 'drop' ? DROP_N : MIST_N;
+    const j = kind === 'crown' ? i : kind === 'drop' ? i - CROWN_N : i - CROWN_N - DROP_N;
+    sprays.push({
+      sprite,
+      kind,
+      angle: (j / n) * Math.PI * 2 + (r(1) - 0.5) * (kind === 'crown' ? 0.4 : 0.8),
+      out: kind === 'crown' ? 0.55 + r(2) * 0.8 : kind === 'drop' ? 2 + r(2) * 3.5 : 0.5 + r(2),
+      up: kind === 'crown' ? 6.5 + r(3) * 5.5 : kind === 'drop' ? 6 + r(3) * 4 : 1.5 + r(3),
+      size: kind === 'crown' ? 1.3 + r(4) * 1.4 : kind === 'drop' ? 0.45 + r(4) * 0.5 : 1.8 + r(4) * 0.6,
+    });
   }
-  group.add(splashSpray);
+  group.add(spray);
 
-  // Back breaks the surface in swim so the default frame shows the whale.
-  const restY = -0.32;
+  // Water sheeting off the flanks as the body leaves the surface; rides on the body.
+  const SHEET_N = 8;
+  const sheet = new THREE.Group();
+  sheet.visible = false;
+  const sheetSprites: Array<{ sprite: THREE.Sprite; x: number; y: number; z: number; speed: number }> = [];
+  for (let i = 0; i < SHEET_N; i++) {
+    const r = (k: number) => hash(seed, i, k, 'sheet') / 0x100000000;
+    const mat = new THREE.SpriteMaterial({ map: streakTex, color: 0xf2f7f9, transparent: true, opacity: 0, depthWrite: false });
+    const sprite = new THREE.Sprite(mat);
+    sheet.add(sprite);
+    const side = i % 2 === 0 ? 1 : -1;
+    const x = -4 + r(1) * 5;
+    const prof = sampleProfile(clamp((x + 6) / 10.6, 0, 1));
+    sheetSprites.push({ sprite, x, y: prof.mid + (r(2) - 0.3) * 0.8, z: side * prof.width * 1.02, speed: 3 + r(3) * 3 });
+  }
+  body.add(sheet);
+  const splashFx = { age: Infinity, power: 0, x: 0, z: 0, radius: 2, exit: false, sheetAge: Infinity };
+
+  const pose = whalePose('surface', 0.45);
   const state: WhaleState = {
     phase: 'surface',
     phaseT: 0.45,
     cycle: 0,
     x: home.x,
-    y: -0.22,
+    y: pose.y,
     z: home.z,
-    heading: rng() * Math.PI * 2,
+    heading: startHeading,
+    pitch: pose.pitch,
     roll: 0,
     spout: 0,
     splash: 0,
   };
 
-  const bindY = new Float32Array(bodyGeo.attributes.position!.count);
-  for (let i = 0; i < bindY.length; i++) bindY[i] = bodyGeo.attributes.position!.getY(i);
-
   const course: WhaleCourse = { x: state.x, z: state.z, heading: state.heading, leg: state.heading };
   const pilot = createWhalePilot(seed, home, state.heading);
   let forced: WhalePhase | null = null;
   let forcedT = 0;
+  let strokePhase = (hash(seed, 0x57) / 0x100000000) * Math.PI * 2;
+  let lastBreachT = -1;
+  // Offset that eases out a jump when a forced review phase hands back to the cycle.
+  const offset = emptyPose();
+  for (const key of POSE_KEYS) offset[key] = 0;
+  const lastPose = emptyPose();
+  const target = emptyPose();
+  const angles = spineAngles(0, 0, 0);
+  const tmpQ = new THREE.Quaternion();
+  const tmpV = new THREE.Vector3();
+  const blowhole = new THREE.Vector3(BLOWHOLE_X, sampleProfile(BLOWHOLE_U).top + 0.05, 0);
+
+  function applyPose(p: WhalePose, time: number): void {
+    const bob = p.bob;
+    state.y = p.y + bob * 0.07 * Math.sin(time * 0.7);
+    state.pitch = p.pitch + bob * 0.035 * Math.sin(time * 0.55);
+    const roll = p.roll * (state.phase === 'breach' ? rollSide : 1);
+    // Slow, lazy roll while cruising near the surface.
+    state.roll = roll + bob * (0.035 * Math.sin(time * 0.21 + seed) + 0.015 * Math.sin(time * 0.9));
+
+    body.position.set(state.x, state.y, state.z);
+    whaleOrientation(state.heading, state.pitch, state.roll, body.quaternion);
+
+    spineAngles(strokePhase, p.stroke, p.arch, angles);
+    // Spine order in SPINE: H2, H1, B0, B1..B5.
+    bones[1]!.rotation.set(0, 0, angles.head[0]!);
+    bones[0]!.rotation.set(0, 0, angles.head[1]!);
+    for (let i = 0; i < 5; i++) bones[3 + i]!.rotation.set(0, 0, angles.tail[i]!);
+    // Flukes trail the stroke and tip up through the dive.
+    bones[FLUKE_BONE]!.rotation.z += p.arch * 0.1;
+
+    // Flippers sweep with the stroke and spread wide in the air.
+    const sweep = Math.sin(strokePhase + 1.1) * p.stroke;
+    for (const [index, side] of [[FLIPPER_L, 1], [FLIPPER_R, -1]] as const) {
+      flipperQuaternion(
+        side,
+        FLIPPER_DROOP + p.flipLift + 0.1 * sweep,
+        FLIPPER_SWEEP + p.flipSweep + 0.07 * Math.sin(strokePhase + 0.4) * p.stroke,
+        0.12 * sweep,
+        tmpQ,
+      );
+      bones[index]!.quaternion.copy(tmpQ);
+    }
+  }
+
+  function syncNow(time: number): void {
+    whalePose(state.phase, state.phaseT, target);
+    for (const key of POSE_KEYS) {
+      offset[key] = 0;
+      lastPose[key] = target[key];
+    }
+    applyPose(target, time);
+    body.updateMatrixWorld(true);
+  }
+
+  let clock = 0;
 
   const handle: WhaleHandle = {
     group,
     state,
-    forcePhase(phase: WhalePhase) {
+    forcePhase(phase: WhalePhase, at?: number) {
       forced = phase;
-      // Mid-rise breach (nose-up ~40°) and mid-spout for review shots.
-      const breachT = 0.22;
-      forcedT = phase === 'breach' ? PHASE_LEN.breach * breachT : phase === 'spout' ? PHASE_LEN.spout * 0.5 : 0;
-      if (phase === 'breach') {
-        const arc = Math.sin(breachT * Math.PI);
-        state.y = lerp(restY, 6.5, arc);
-        state.roll = 1.2 * arc;
-        state.phase = 'breach';
-        state.phaseT = breachT;
-        // Sync mesh immediately so review framing sees the body in air.
-        group.position.set(state.x, state.y, state.z);
-        group.rotation.order = 'YXZ';
-        group.rotation.y = state.heading;
-        group.rotation.x = lerp(1.1, -0.9, breachT);
-        group.rotation.z = state.roll;
-      }
-      if (phase === 'spout' || phase === 'surface') {
-        state.y = -0.15;
-        state.spout = 1;
-        state.phase = phase;
-        state.phaseT = phase === 'spout' ? 0.5 : 0.45;
-        group.position.set(state.x, state.y, state.z);
-        group.rotation.order = 'YXZ';
-        group.rotation.y = state.heading;
-        group.rotation.x = -0.08;
-        group.rotation.z = 0;
-      }
+      const preset = phase === 'breach' ? FORCED_BREACH_T : phase === 'spout' ? 0.5 : phase === 'surface' ? 0.45 : 0;
+      const t = typeof at === 'number' && Number.isFinite(at) ? clamp(at, 0, 0.99) : preset;
+      forcedT = PHASE_LEN[phase] * t;
+      state.phase = phase;
+      state.phaseT = t;
+      // Starting exactly at 0 still fires the exit splash on the way up.
+      lastBreachT = phase === 'breach' ? t - 1e-6 : -1;
+      // Sync the mesh now so review framing sees the right pose immediately.
+      syncNow(clock);
     },
-    update(dt: number, time: number, shore: Shore) {
+    update(rawDt: number, time: number, shore: Shore) {
+      const dt = Number.isFinite(rawDt) ? Math.max(0, rawDt) : 0;
+      clock = time;
       // Start mid-surface so t≈0 shows the back; then follow the cycle.
       const phaseOffset = PHASE_LEN.swim + PHASE_LEN.surface * 0.45;
       const schedule = forced
         ? { phase: forced, phaseT: clamp(forcedT / PHASE_LEN[forced], 0, 1), cycle: state.cycle }
         : phaseAtCycleTime(time + phaseOffset);
+      let resumed = false;
       if (forced) {
         forcedT += dt;
-        if (forcedT >= PHASE_LEN[forced]) forced = null;
+        if (forcedT >= PHASE_LEN[forced]) {
+          forced = null;
+          resumed = true;
+        }
       }
       state.phase = schedule.phase;
       state.phaseT = schedule.phaseT;
@@ -389,140 +492,196 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
         state.heading = course.heading;
       }
 
-      let targetY = restY;
-      let pitch = Math.sin(time * 0.55) * 0.05;
-      let targetRoll = Math.sin(time * 0.9) * 0.04;
-      let yDamp = 2.4;
-      state.spout = 0;
-      state.splash = damp(state.splash, 0, 1.4, dt);
+      whalePose(state.phase, state.phaseT, target);
+      if (resumed) {
+        for (const key of POSE_KEYS) offset[key] = lastPose[key] - target[key];
+      }
+      const fade = Math.exp(-1.1 * dt);
+      for (const key of POSE_KEYS) {
+        offset[key] *= fade;
+        target[key] += offset[key];
+        lastPose[key] = target[key];
+      }
+      strokePhase += dt * Math.PI * 2 * STROKE_HZ * target.rate;
+      if (target.surge !== 0) {
+        // Breach carries the whale forward along its heading, even in a forced review.
+        const fwd = whaleForward(state.heading);
+        state.x += fwd.x * target.surge * dt;
+        state.z += fwd.z * target.surge * dt;
+        course.x = state.x;
+        course.z = state.z;
+      }
+      applyPose(target, time);
 
-      switch (state.phase) {
-        case 'swim':
-          targetY = restY + Math.sin(time * 0.7) * 0.12;
-          pitch = Math.sin(time * 0.55) * 0.05;
-          break;
-        case 'surface':
-          targetY = lerp(restY, -0.25, smooth(state.phaseT));
-          pitch = -0.06 + Math.sin(time * 0.55) * 0.05;
-          break;
-        case 'spout':
-          targetY = -0.25;
-          pitch = -0.1 + Math.sin(time * 0.55) * 0.05;
-          state.spout = Math.sin(state.phaseT * Math.PI);
-          break;
-        case 'dive':
-          targetY = lerp(-0.25, restY - 0.5, smooth(state.phaseT));
-          pitch = 0.22 * (1 - state.phaseT);
-          break;
-        case 'breach': {
-          const t = state.phaseT;
-          const arc = Math.sin(t * Math.PI);
-          targetY = lerp(restY, 6.5, arc);
-          pitch = lerp(1.1, -0.9, t);
-          targetRoll = 1.2 * arc;
-          yDamp = 6;
-          if (t > 0.8) state.splash = Math.max(state.splash, (t - 0.8) / 0.2);
-          break;
-        }
-        case 'splash':
-          targetY = lerp(0.2, restY, smooth(state.phaseT));
-          state.splash = Math.max(0.35, 1 - state.phaseT);
-          pitch = 0.08;
-          yDamp = 6;
-          break;
+      // Splash events: the body bursting out, then the much larger re-entry.
+      if (state.phase === 'breach') {
+        const t = state.phaseT;
+        if (lastBreachT < BREACH_EXIT && t >= BREACH_EXIT) startSplash(0.75, true);
+        if (lastBreachT < BREACH_SPLASH && t >= BREACH_SPLASH) startSplash(1, false);
+        lastBreachT = t;
+      } else {
+        lastBreachT = -1;
       }
 
-      state.y = damp(state.y, targetY, yDamp, dt);
-      state.roll = damp(state.roll, targetRoll, yDamp, dt);
-
-      group.position.set(state.x, state.y, state.z);
-      group.rotation.order = 'YXZ';
-      group.rotation.y = state.heading;
-      group.rotation.x = pitch;
-      group.rotation.z = state.roll;
-
-      const posAttr = bodyGeo.attributes.position!;
-      const wave = Math.sin(time * 2.2) * 0.16;
-      for (let i = 0; i < posAttr.count; i++) {
-        const x = posAttr.getX(i);
-        const along = (x + 4.5) / 9;
-        const amp = along * along;
-        posAttr.setY(i, bindY[i]! + Math.sin(time * 2.2 - along * 3.2) * wave * amp * 1.2);
-      }
-      posAttr.needsUpdate = true;
-      fluke.rotation.z = Math.sin(time * 2.2 - 3.2) * 0.3;
-
-      // Thin mist column. Local sizes are multiplied by group.scale 1.2, so the
-      // world column is ~0.8 wide at the base, ~2.5 at the top, and ~5 tall.
-      // It rises over ~2.2 s of the 3.5 s spout, then disperses. Peak opacity ≤ 0.34.
-      {
-        const t = state.phase === 'spout' ? state.phaseT : 0;
-        const rising = t < 0.62;
-        const rise = clamp(t / 0.62, 0, 1);
-        const fade = rising ? rise : clamp(1 - (t - 0.62) / 0.38, 0, 1);
-        const columnH = lerp(0.35, 4.5, rise);
-        spoutGroup.visible = fade > 0.02;
-        for (let i = 0; i < spoutSprites.length; i++) {
-          const sprite = spoutSprites[i]!;
-          const mat = sprite.material as THREE.SpriteMaterial;
-          if (fade <= 0.02) {
-            mat.opacity = 0;
-            continue;
-          }
-          const u = i / Math.max(1, spoutSprites.length - 1);
-          const jitter = (hash(seed, i, 'spout') / 0x100000000 - 0.5);
-          const spread = (0.12 + u * 0.7) * (rising ? 0.28 : 0.65 + (1 - fade));
-          sprite.position.set(jitter * spread, u * columnH, jitter * 0.4 * spread);
-          const width = lerp(0.7, 2.15, u);
-          sprite.scale.set(width, lerp(1.25, 1.9, u), 1);
-          mat.opacity = fade * lerp(0.34, 0.16, u);
-        }
-      }
-
-      // Splash ring + spray.
-      const splashStrength = state.splash;
-      splash.visible = splashStrength > 0.02;
-      splash.position.set(0, -state.y + 0.04, 0);
-      splashMat.opacity = splashStrength * 0.55;
-      const ring = lerp(1, 4, splashStrength);
-      splash.scale.set(ring, ring, 1);
-
-      splashSpray.visible = splashStrength > 0.02;
-      splashSpray.position.set(0, -state.y + 0.3, 0);
-      for (let i = 0; i < splashSprites.length; i++) {
-        const sprite = splashSprites[i]!;
-        const mat = sprite.material as THREE.SpriteMaterial;
-        if (splashStrength <= 0.02) {
-          mat.opacity = 0;
-          continue;
-        }
-        const a = (i / splashSprites.length) * Math.PI * 2;
-        const reach = splashStrength * (2.5 + (hash(seed, i, 'splash') / 0x100000000) * 2.5);
-        const lift = splashStrength * (1.2 + (i % 5) * 0.35);
-        sprite.position.set(Math.cos(a) * reach, lift, Math.sin(a) * reach);
-        sprite.scale.setScalar(0.6 + splashStrength * 1.8);
-        mat.opacity = splashStrength * 0.55;
-      }
+      updateSpout();
+      updateSplash(dt);
+      updateWash(target);
+    },
+    measure() {
+      body.updateMatrixWorld(true);
+      const mesh = levels[Math.max(0, lod.getCurrentLevel())]!.mesh;
+      skeleton.update();
+      return new THREE.Box3().setFromObject(mesh, true).getSize(new THREE.Vector3());
+    },
+    detail() {
+      return levels[Math.max(0, lod.getCurrentLevel())]!.detail;
     },
     dispose() {
-      bodyGeo.dispose();
-      bodyMat.dispose();
-      flukeGeo.dispose();
-      dorsalGeo.dispose();
-      finGeo.dispose();
-      darkMat.dispose();
+      for (const level of levels) level.mesh.geometry.dispose();
+      material.dispose();
+      skin.dispose();
+      skeleton.dispose();
       splashGeo.dispose();
       splashMat.dispose();
       mistTex.dispose();
-      spoutTex.dispose();
+      sprayTex.dispose();
+      dropTex.dispose();
+      streakTex.dispose();
+      foamTex.dispose();
+      washTex.dispose();
+      washMat.dispose();
+      for (const s of sheetSprites) (s.sprite.material as THREE.Material).dispose();
       for (const sprite of spoutSprites) (sprite.material as THREE.Material).dispose();
-      for (const sprite of splashSprites) (sprite.material as THREE.Material).dispose();
+      for (const s of sprays) (s.sprite.material as THREE.Material).dispose();
     },
   };
-  return handle;
-}
 
-function smooth(t: number): number {
-  const x = clamp(t, 0, 1);
-  return x * x * (3 - 2 * x);
+  function startSplash(power: number, atNose: boolean): void {
+    body.updateMatrixWorld(true);
+    // Exit: where the rising body cuts the surface. Re-entry: under the body's centre.
+    const local = atNose ? tmpV.set(-1.2, 0, 0) : tmpV.set(-2.2, 0, 0);
+    local.applyMatrix4(body.matrixWorld);
+    splashFx.age = 0;
+    splashFx.power = power;
+    splashFx.x = local.x;
+    splashFx.z = local.z;
+    splashFx.radius = atNose ? 1.3 : 2.4;
+    splashFx.exit = atNose;
+    if (atNose) splashFx.sheetAge = 0;
+  }
+
+  function updateSpout(): void {
+    // Thin mist column rising from the blowholes; vertical in world space.
+    // ~1 m wide at the base, a bushy ~3.4 m crown and ~5.4 m tall. Peak opacity ≤ 0.5.
+    const t = state.phase === 'spout' ? state.phaseT : 0;
+    state.spout = state.phase === 'spout' ? Math.sin(t * Math.PI) : 0;
+    const rising = t < 0.62;
+    const rise = clamp(t / 0.62, 0, 1);
+    // Hold the full plume ~0.45 s after it tops out before it disperses.
+    const fade = rising ? clamp(rise * 2.5, 0, 1) : clamp(1 - (t - 0.75) / 0.25, 0, 1);
+    spoutGroup.visible = fade > 0.02;
+    if (!spoutGroup.visible) return;
+    tmpV.copy(blowhole).applyMatrix4(body.matrixWorld);
+    spoutGroup.position.set(tmpV.x, Math.max(0.05, tmpV.y), tmpV.z);
+    const columnH = lerp(0.4, 5.4, rise);
+    for (let i = 0; i < spoutSprites.length; i++) {
+      const sprite = spoutSprites[i]!;
+      const mat = sprite.material as THREE.SpriteMaterial;
+      const u = i / Math.max(1, spoutSprites.length - 1);
+      const jx = hash(seed, i, 1, 'spout') / 0x100000000 - 0.5;
+      const jz = hash(seed, i, 2, 'spout') / 0x100000000 - 0.5;
+      // Narrow stem, then a crown that spreads as it rises.
+      const spread = (0.15 + u * u * 1.6) * (rising ? 0.45 : 0.8 + (1 - fade));
+      sprite.position.set(jx * spread, u * columnH, jz * spread);
+      sprite.scale.set(lerp(0.85, 3.4, u * u), lerp(1.5, 2.6, u), 1);
+      mat.opacity = fade * lerp(0.5, 0.3, u);
+    }
+  }
+
+  function updateSplash(dt: number): void {
+    splashFx.age += dt;
+    splashFx.sheetAge += dt;
+    const age = splashFx.age;
+    const power = splashFx.power;
+    const exit = splashFx.exit;
+    // Foam lingers on the water for a few seconds after the spray falls back.
+    const foam = Number.isFinite(age) ? power * Math.exp(-age * 0.4) * clamp(age * 4, 0, 1) : 0;
+    state.splash = foam;
+    splash.visible = foam > 0.02;
+    if (splash.visible) {
+      splash.position.set(splashFx.x, 0.06, splashFx.z);
+      const size = splashFx.radius * (1.6 + age * 0.6);
+      splash.scale.set(size, size, 1);
+      splashMat.opacity = foam * 0.85;
+    }
+
+    // Exit sheeting: streaks slide down the flanks toward the tail and thin out.
+    sheet.visible = splashFx.sheetAge < 1.1;
+    if (sheet.visible) {
+      const a = splashFx.sheetAge;
+      for (const s of sheetSprites) {
+        const mat = s.sprite.material as THREE.SpriteMaterial;
+        s.sprite.position.set(s.x + s.speed * a, s.y, s.z);
+        s.sprite.scale.set(0.5, 1.6 + a * 1.5, 1);
+        mat.opacity = 0.85 * (1 - smoothstep(0.3, 1.1, a));
+      }
+    }
+
+    spray.visible = Number.isFinite(age) && age < 3;
+    if (!spray.visible) return;
+    spray.position.set(splashFx.x, 0, splashFx.z);
+    const lift = exit ? 0.45 : 1;
+    for (const s of sprays) {
+      const mat = s.sprite.material as THREE.SpriteMaterial;
+      if (s.kind === 'mist' && exit) {
+        mat.opacity = 0;
+        continue;
+      }
+      const up = s.up * lift * (0.6 + 0.4 * power);
+      const top = up * age - 0.5 * 9.81 * age * age;
+      const falling = up - 9.81 * age < 0;
+      if (s.kind === 'crown') {
+        // A ring of white sheets standing on the water: rises, then slumps back.
+        if (top <= 0.05) {
+          mat.opacity = 0;
+          continue;
+        }
+        const ring = splashFx.radius * s.out + age * (exit ? 0.8 : 2.2);
+        s.sprite.position.set(Math.cos(s.angle) * ring, 0.02, Math.sin(s.angle) * ring);
+        s.sprite.scale.set(s.size * (exit ? 0.8 : 1) * (1 + age * 0.4), top, 1);
+        // Sheets thin out as they slump; the crown is gone within ~1.8 s.
+        mat.opacity = 0.9 * (falling ? smoothstep(0, 1.5, top) : 1) * (1 - smoothstep(0.8, 1.8, age));
+        continue;
+      }
+      if (falling && top < 0) {
+        mat.opacity = 0;
+        continue;
+      }
+      // Drops are flung off the crown rim and fall in an arc; mist hangs low and small.
+      const reach = splashFx.radius + s.out * lift * (1 - Math.exp(-age * 1.5));
+      const size = Math.min(s.size * (1 + age * (s.kind === 'mist' ? 0.4 : 0.2)), 2.4);
+      const base = size * 0.6 + 0.05;
+      s.sprite.position.set(Math.cos(s.angle) * reach, Math.max(base, top + base), Math.sin(s.angle) * reach);
+      s.sprite.scale.set(size, size, 1);
+      const life = clamp(1 - age / (s.kind === 'mist' ? 2.4 : 2.2), 0, 1);
+      const settle = falling ? smoothstep(0, 1, top) : 1;
+      mat.opacity = (s.kind === 'mist' ? 0.32 : 0.9) * life * settle;
+    }
+  }
+
+  function updateWash(pose: WhalePose): void {
+    // Only while the body rides at the surface; fades through dives and breaches.
+    const w = pose.bob * clamp(1 - Math.abs(pose.y - SURFACE_Y) / 0.6, 0, 1);
+    washPivot.visible = w > 0.02;
+    if (!washPivot.visible) return;
+    // Sized so the foam band sits on the waterline footprint (rostrum to fin).
+    tmpV.set(-2.2, 0, 0).applyMatrix4(body.matrixWorld);
+    washPivot.position.set(tmpV.x, 0.05, tmpV.z);
+    washPivot.rotation.y = state.heading;
+    wash.scale.set(4.7, 1.05, 1);
+    washMat.opacity = 0.4 * w;
+  }
+
+  syncNow(0);
+  return handle;
 }

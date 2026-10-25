@@ -18,9 +18,11 @@ import { cycleDuration } from './whale.js';
 type CalmReview = {
   time: number;
   advance: (seconds: number) => void;
-  forceBreach: () => void;
+  /** Optional normalised start time; 0 starts below the surface so the exit splash is visible. */
+  forceBreach: (at?: number) => void;
   forceSpout: () => void;
-  frameWhale: (kind?: 'breach' | 'spout') => void;
+  /** Optional yaw offset from broadside, pitch and distance for close-up review. */
+  frameWhale: (kind?: 'breach' | 'spout', yawOffset?: number, pitch?: number, distance?: number) => void;
   frame: (yaw: number, pitch: number, distance: number) => void;
   setWaterVisible: (visible: boolean) => void;
   setWhaleVisible: (visible: boolean) => void;
@@ -144,7 +146,7 @@ try {
   scene.add(landMesh.group);
   ships = createShips(layout.ships);
   for (const ship of ships) scene.add(ship.group);
-  whale = createWhale(seed, layout.whaleHome);
+  whale = createWhale(seed, layout.whaleHome, { tier: quality.tier });
   scene.add(whale.group);
   birds = createBirds(seed, mobile ? 3 : 6);
   scene.add(birds.group);
@@ -246,14 +248,15 @@ function focusPoint(): THREE.Vector3 {
 }
 
 /** Side-on, close framing so the whale fills ~35–50% of screen width. */
-function frameWhaleEvent(kind: 'breach' | 'spout'): void {
+function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; pitch?: number; distance?: number } = {}): void {
   eventFrame = kind;
   const w = whale.state;
-  // Prefer a clear broadside; fall back to sun-biased yaw if heading is unstable.
-  const yaw = Number.isFinite(w.heading) ? w.heading + Math.PI * 0.55 : layout.viewYaw;
+  // Camera sits at focus + (sin yaw, cos yaw), so yaw = heading is a broadside on the
+  // whale's left; a small negative offset swings toward the head for a three-quarter view.
+  const yaw = (Number.isFinite(w.heading) ? w.heading - 0.22 : layout.viewYaw) + (view.yawOffset ?? 0);
   // Close enough that a ~12 m whale fills ~35–50% of portrait width.
-  const dist = kind === 'breach' ? 16 : 14;
-  const pitch = kind === 'breach' ? 0.12 : 0.02;
+  const dist = view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14);
+  const pitch = view.pitch ?? (kind === 'breach' ? 0.12 : 0.02);
   rig.framing.yaw = yaw;
   rig.framing.pitch = pitch;
   rig.framing.distance = dist;
@@ -276,7 +279,8 @@ function tick(now: number): void {
     last = now;
     return;
   }
-  const raw = Math.min(0.05, (now - last) / 1000);
+  // The first rAF timestamp can predate `last` (set after the synchronous build); never step backwards.
+  const raw = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   const dt = motion.matches ? 0 : raw;
   if (!motion.matches) time += dt;
@@ -325,16 +329,17 @@ if (debug) {
     advance(seconds: number) {
       if (Number.isFinite(seconds)) time += Math.max(0, seconds);
     },
-    forceBreach() {
-      whale.forcePhase('breach');
+    forceBreach(at?: number) {
+      whale.forcePhase('breach', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
       frameWhaleEvent('breach');
     },
     forceSpout() {
       whale.forcePhase('spout');
       frameWhaleEvent('spout');
     },
-    frameWhale(kind: 'breach' | 'spout' = 'breach') {
-      frameWhaleEvent(kind);
+    frameWhale(kind: 'breach' | 'spout' = 'breach', yawOffset?: number, pitch?: number, distance?: number) {
+      const finite = (v?: number) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+      frameWhaleEvent(kind, { yawOffset: finite(yawOffset), pitch: finite(pitch), distance: finite(distance) });
     },
     setWaterVisible(visible: boolean) {
       ocean.mesh.visible = visible;
@@ -361,17 +366,18 @@ if (debug) {
       rig.noteInput();
     },
     stats() {
-      const box = new THREE.Box3().setFromObject(whale.group);
-      const size = box.getSize(new THREE.Vector3());
+      const size = whale.measure();
       return {
         seed,
         time,
         tier: quality.tier,
         dpr: quality.ratio,
         phase: whale.state.phase,
+        phaseT: whale.state.phaseT,
         whale: [whale.state.x, whale.state.y, whale.state.z],
         whaleHeading: whale.state.heading,
         whaleSize: [size.x, size.y, size.z],
+        whaleDetail: whale.detail(),
         cam: [camera.position.x, camera.position.y, camera.position.z],
         focus: [rig.lookAt.x, rig.lookAt.y, rig.lookAt.z],
         dist: rig.current.distance,
@@ -388,6 +394,11 @@ if (debug) {
   if (at === 'breach') {
     time = 0;
     whale.forcePhase('breach');
+    frameWhaleEvent('breach');
+  } else if (at === 'breach-start') {
+    // Review only: rise from depth so the exit splash and the full arc can be watched.
+    time = 0;
+    whale.forcePhase('breach', 0);
     frameWhaleEvent('breach');
   } else if (at === 'spout') {
     time = 0;
