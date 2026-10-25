@@ -260,7 +260,7 @@ function applyWaterLook(
 ): THREE.DataTexture[] {
   const patched = patchShader(material.fragmentShader, [...reflectionPatches, ...(shelves ? shelfPatches() : [])]);
   if (patched === null) {
-    const message = 'calm: Water shader did not match the expected source; using the stock water.';
+    const message = 'ejm-calm: Water shader did not match the expected source; using the stock water.';
     if (import.meta.env.DEV) throw new Error(message);
     console.warn(message);
     return [];
