@@ -44,7 +44,7 @@ const ui = createUI({
   pause: togglePause,
   sound() { audio.enabled = !audio.enabled; sync(); persist(); ui.announce(audio.enabled ? 'sound on' : 'sound off'); },
   volume(value) { audio.volume = Math.max(0, Math.min(1, value)); sync(); persist(); },
-  share: () => seedURL(location.href, seed).href,
+  share: () => `${location.origin}${location.pathname}?seed=${seed >>> 0}`,
 }, look.ui);
 
 function sync() {

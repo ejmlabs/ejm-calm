@@ -6,10 +6,23 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
-  '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.woff2': 'font/woff2' };
+  '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.woff2': 'font/woff2' };
+
+// Shared with index.html meta CSP. Header adds frame-ancestors (meta cannot set it).
+export const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; worker-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+export const CSP_HEADER = `${CSP}; frame-ancestors 'none'`;
+
 const HEADERS = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
   'Cross-Origin-Opener-Policy': 'same-origin', 'Cache-Control': 'no-cache',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" };
+  'Content-Security-Policy': CSP_HEADER };
+
+const ALLOWED = new Set(['index.html', 'styles.css', 'LICENSE', 'THIRD_PARTY_NOTICES', 'favicon.ico', 'favicon.svg', 'favicon.png']);
+const ALLOWED_PREFIXES = ['src/', 'vendor/'];
+
+function allowed(relative) {
+  if (ALLOWED.has(relative)) return true;
+  return ALLOWED_PREFIXES.some((prefix) => relative === prefix.slice(0, -1) || relative.startsWith(prefix));
+}
 
 export async function startServer({ port = 8080, root = ROOT } = {}) {
   const base = await realpath(root);
@@ -18,10 +31,11 @@ export async function startServer({ port = 8080, root = ROOT } = {}) {
     if (!['GET', 'HEAD'].includes(request.method)) { response.setHeader('Allow', 'GET, HEAD'); reply(405, 'Method not allowed'); return; }
     let path;
     try { path = decodeURIComponent(request.url.split('?')[0]); } catch { reply(400, 'Invalid path'); return; }
-    if (path.includes('\0') || path.includes('\\') || path.split('/').some((part) => part.startsWith('.')) ||
-      /^\/(node_modules|tools|tests)(\/|$)/.test(path)) { reply(403, 'Forbidden'); return; }
+    if (path.includes('\0') || path.includes('\\') || path.split('/').some((part) => part.startsWith('.'))) { reply(403, 'Forbidden'); return; }
+    const relative = path === '/' ? 'index.html' : path.replace(/^\//, '');
+    if (!allowed(relative)) { reply(404, 'Not found'); return; }
     try {
-      const file = await realpath(resolve(base, `.${path === '/' ? '/index.html' : path}`));
+      const file = await realpath(resolve(base, relative));
       if (!file.startsWith(`${base}${sep}`)) { reply(403, 'Forbidden'); return; }
       if (!(await stat(file)).isFile()) { reply(404, 'Not found'); return; }
       const body = await readFile(file);

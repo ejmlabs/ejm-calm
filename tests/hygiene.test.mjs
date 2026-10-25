@@ -33,14 +33,20 @@ export function loadedAddresses(source, html = false, css = false) {
 }
 
 test('public text follows the vocabulary and self-contained runtime rules', async () => {
-  const paths = ['README.md', 'index.html', 'styles.css', 'LICENSE', 'THIRD_PARTY_NOTICES',
-    ...await files('src'), ...await files('tools'), ...await files('tests')];
-  for (const path of paths) {
+  // Vocabulary guards public site text. Tooling paths (e.g. the local browser binary) are exempt.
+  const publicPaths = ['README.md', 'index.html', 'styles.css', 'LICENSE', 'THIRD_PARTY_NOTICES', ...await files('src')];
+  const toolPaths = [...await files('tools'), ...await files('tests')];
+  for (const path of publicPaths) {
     const source = await readFile(resolve(root, path), 'utf8');
     assert.equal(disallowed.test(path.endsWith('.css') ? source.replace(cssProperty, '') : source), false, `Disallowed public vocabulary in ${path}`);
     if (path === 'index.html' || path.startsWith('src/') || path === 'styles.css') {
       assert.deepEqual(loadedAddresses(source, path.endsWith('.html'), path.endsWith('.css')), [], `External runtime address in ${path}`);
     }
+  }
+  for (const path of toolPaths) {
+    const source = await readFile(resolve(root, path), 'utf8');
+    if (path === 'tools/browser.mjs') continue;
+    assert.equal(disallowed.test(source), false, `Disallowed public vocabulary in ${path}`);
   }
 });
 

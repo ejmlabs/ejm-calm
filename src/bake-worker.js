@@ -123,9 +123,23 @@ function bakeGalaxy({ seed, size, galaxyKind }) {
   return { galaxy: pixels };
 }
 
+const KINDS = new Set(['planet', 'volume', 'noise', 'galaxy']);
+const clamp = (value, min, max, fallback) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, Math.floor(number))) : fallback;
+};
+
 self.onmessage = ({ data: request }) => {
   try {
-    const result = request.kind === 'volume' ? bakeVolume(request) : request.kind === 'noise' ? blueNoise(request) : request.kind === 'galaxy' ? bakeGalaxy(request) : bakePlanet(request);
+    if (!request || !KINDS.has(request.kind)) throw new Error('unknown bake kind');
+    const job = { ...request };
+    if (job.kind === 'planet') {
+      job.width = clamp(job.width, 16, 2048, 512);
+      job.height = clamp(job.height, 8, 1024, 256);
+    } else {
+      job.size = clamp(job.size, 8, 128, job.kind === 'volume' ? 32 : 32);
+    }
+    const result = job.kind === 'volume' ? bakeVolume(job) : job.kind === 'noise' ? blueNoise(job) : job.kind === 'galaxy' ? bakeGalaxy(job) : bakePlanet(job);
     self.postMessage({ id: request.id, ...result }, Object.values(result).map((array) => array.buffer));
-  } catch (error) { self.postMessage({ id: request.id, error: error.message }); }
+  } catch (error) { self.postMessage({ id: request?.id, error: error.message }); }
 };

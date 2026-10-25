@@ -9,8 +9,11 @@ export async function withBrowser(run) {
   const app = await startServer({ port: 0 });
   let browser;
   try {
-    browser = await chromium.launch({ executablePath: Buffer.from('L3Vzci9iaW4vZ29vZ2xlLWNocm9tZQ==', 'base64').toString(), headless: true,
-      args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
+    const executablePath = process.env.BROWSER_PATH || '/usr/bin/google-chrome';
+    const args = ['--disable-dev-shm-usage', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
+    // Opt in with BROWSER_NO_SANDBOX=1. Default keeps the sandbox on.
+    if (process.env.BROWSER_NO_SANDBOX === '1') args.unshift('--no-sandbox');
+    browser = await chromium.launch({ executablePath, headless: true, args });
     return await run(browser, app.url);
   } finally {
     await browser?.close(); await app.close();

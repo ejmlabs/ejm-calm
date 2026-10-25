@@ -68,8 +68,9 @@ relative paths. Include `LICENSE` and `THIRD_PARTY_NOTICES`. No server functions
 external assets, import maps, or runtime package resolution are required. The
 same files work from a domain root or a static project subdirectory. Serve
 JavaScript as `text/javascript` and retain the page's content security policy.
-The preview server listens only on loopback, blocks directory traversal and
-hidden files, and supplies security headers.
+Recommend host response headers for `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, and a strict referrer policy, since meta CSP cannot set framing rules.
+The preview server listens only on loopback, serves an allowlisted public tree,
+and supplies security headers.
 
 Rendering caps device pixel ratio and adapts resolution to sustained frame cost.
 Phones render at 30 frames per second with simpler geometry and cloud layers.
