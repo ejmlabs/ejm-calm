@@ -15,6 +15,8 @@ import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
 import { cycleDuration } from './whale.js';
+import { createUnderwater } from './underwater.js';
+import { FIXED_ORIGIN } from './seams.js';
 
 type CalmReview = {
   time: number;
@@ -29,6 +31,10 @@ type CalmReview = {
   setWhaleVisible: (visible: boolean) => void;
   setLandVisible: (visible: boolean) => void;
   setShipsVisible: (visible: boolean) => void;
+  /** Start the long deep dive now (whale holds position while forced). */
+  forceDeepDive: (at?: number) => void;
+  /** Debug camera `depth` metres under the surface (negative is above), looking at the whale; null releases it. */
+  peekUnderwater: (depth: number | null) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
 };
 
@@ -108,6 +114,7 @@ let buildMs = 0;
 let birds: ReturnType<typeof createBirds>;
 let layout: ReturnType<typeof layoutWorld>;
 let rig: CalmCamera;
+let underwater: ReturnType<typeof createUnderwater>;
 
 try {
   const buildStart = performance.now();
@@ -154,6 +161,7 @@ try {
   scene.add(whale.group);
   birds = createBirds(seed, mobile ? 3 : 6);
   scene.add(birds.group);
+  underwater = createUnderwater(scene, renderer, { sky, heightAt: layout.land.heightAt, origin: FIXED_ORIGIN, tier: quality.tier, seed });
   buildMs = performance.now() - buildStart;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
@@ -277,6 +285,18 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
   rig.update(8, time, true);
 }
 
+/** Debug-only camera override for reviewing the underwater view without the follow camera. */
+let peekDepth: number | null = null;
+
+function peekCamera(depth: number): void {
+  const w = whale.state;
+  const side = w.heading + Math.PI / 2;
+  const y = -depth;
+  camera.position.set(w.x + Math.cos(side) * 16, y, w.z - Math.sin(side) * 16);
+  // From below the whale, look straight at it so the surface and Snell's window fill the top of the frame.
+  camera.lookAt(w.x, y + (w.y - y) * (y < w.y ? 1 : 0.45), w.z);
+}
+
 function tick(now: number): void {
   if (disposed) return;
   frame = requestAnimationFrame(tick);
@@ -297,14 +317,16 @@ function tick(now: number): void {
 
   sky.update(dt);
   ocean.update(dt, sky.sunDirection);
-  whale.update(dt, time, layout.land);
+  whale.update(dt, time, layout.land, layout.land.heightAt(whale.state.x, whale.state.z));
   for (const ship of ships) ship.update(dt, time, layout.land);
   birds.update(time);
 
   const focus = focusPoint();
   rig.setFocus(focus.x, focus.y, focus.z);
   rig.update(dt || 1 / 60, time, motion.matches);
+  if (peekDepth !== null) peekCamera(peekDepth);
 
+  underwater.update(dt, time, camera);
   renderer.render(scene, camera);
 
   if (now - lastSave > 4000) {
@@ -358,6 +380,12 @@ if (debug) {
     setShipsVisible(visible: boolean) {
       for (const ship of ships) ship.group.visible = visible;
     },
+    forceDeepDive(at?: number) {
+      whale.forcePhase('deep', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
+    },
+    peekUnderwater(depth: number | null) {
+      peekDepth = typeof depth === 'number' && Number.isFinite(depth) ? clamp(depth, -20, 40) : null;
+    },
     frame(yaw: number, pitch: number, distance: number) {
       if (![yaw, pitch, distance].every(Number.isFinite)) return;
       yaw = clamp(yaw, -4 * Math.PI, 4 * Math.PI);
@@ -395,6 +423,8 @@ if (debug) {
         ships: layout.ships.length,
         cycle: cycleDuration(),
         exposure: renderer.toneMappingExposure,
+        submersion: underwater.signal.submersion,
+        depth: underwater.signal.depth,
       };
     },
   };
@@ -429,5 +459,6 @@ window.addEventListener('pagehide', () => {
   for (const ship of ships) ship.dispose();
   landMesh.dispose();
   birds.dispose();
+  underwater.dispose();
   renderer.dispose();
 });
