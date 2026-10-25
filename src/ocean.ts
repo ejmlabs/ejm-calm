@@ -77,7 +77,19 @@ function buildWaterNormals(seed: number, size = 256): THREE.DataTexture {
 export function createOcean(
   seed: number,
   sunDirection: THREE.Vector3,
-  options: { textureSize?: number; waterColor?: number; shelves?: { near: ShelfMap; far: ShelfMap; light?: number } } = {},
+  options: {
+    textureSize?: number;
+    waterColor?: number;
+    shelves?: { near: ShelfMap; far: ShelfMap; light?: number };
+    /** Horizon haze colour; scattered light lifts dark reflections toward it. */
+    reflectionHaze?: THREE.Color;
+    /**
+     * Gain for dark reflected land. The land is drawn without tone mapping but
+     * its reflection passes through the water's tone mapping, so it needs about
+     * 1 / exposure to match.
+     */
+    reflectionGain?: number;
+  } = {},
 ): OceanHandle {
   const textureSize = options.textureSize ?? 256;
   const normalSize = textureSize >= 512 ? 512 : 256;
@@ -106,7 +118,7 @@ export function createOcean(
   if (material.uniforms?.alpha) material.uniforms.alpha.value = 1.0;
   if (material.uniforms?.sunColor) material.uniforms.sunColor.value.set(0xe8dcc0);
 
-  const shelfTextures = options.shelves ? applyShelves(material, options.shelves) : [];
+  const shelfTextures = applyWaterLook(material, options.shelves, options.reflectionHaze, options.reflectionGain ?? 1);
 
   let time = 0;
   return {
@@ -146,14 +158,115 @@ function shelfTexture(shelf: ShelfMap): THREE.DataTexture {
   return texture;
 }
 
+export type ShaderPatch = { find: string; replace: string };
+
+/**
+ * Applies every patch to a shader source, or returns null if any target text is
+ * missing, so a three.js upgrade can never leave a half-patched shader.
+ */
+export function patchShader(source: string, patches: readonly ShaderPatch[]): string | null {
+  let out = source;
+  for (const patch of patches) {
+    if (!out.includes(patch.find)) return null;
+    out = out.replace(patch.find, () => patch.replace);
+  }
+  return out;
+}
+
+/** Calm, slightly rough water: reflections streak and lift toward the haze instead of mirroring dark land. */
+const reflectionPatches: ShaderPatch[] = [
+  {
+    find: 'uniform vec3 waterColor;',
+    replace: `uniform vec3 waterColor;
+      uniform vec3 reflectionHaze;
+      uniform float reflectionLift;
+      uniform float reflectionGain;`,
+  },
+  {
+    find: 'vec2 distortion = surfaceNormal.xz * ( 0.001 + 1.0 / distance ) * distortionScale;',
+    // Stretch the ripple vertically on screen, as wind lanes do to real reflections.
+    replace: 'vec2 distortion = surfaceNormal.xz * ( 0.0016 + 1.3 / distance ) * distortionScale * vec2( 1.0, 1.7 );',
+  },
+  {
+    find: 'vec3 reflectionSample = vec3( texture2D( mirrorSampler, mirrorCoord.xy / mirrorCoord.w + distortion ) );',
+    replace: `vec3 reflectionSample = vec3( texture2D( mirrorSampler, mirrorCoord.xy / mirrorCoord.w + distortion ) );
+      // Skylight scattered off the ripples lifts dark reflected land; bright sky stays as it is.
+      float reflectionLuma = dot( reflectionSample, vec3( 0.2126, 0.7152, 0.0722 ) );
+      float reflectionDark = 1.0 - smoothstep( 0.05, 0.6, reflectionLuma );
+      reflectionSample *= mix( 1.0, reflectionGain, reflectionDark );
+      reflectionSample = mix( reflectionSample, reflectionHaze * reflectionGain, reflectionLift * reflectionDark );`,
+  },
+];
+
 /**
  * Depth-based colour: turquoise over sandy shelves, teal over the slope,
  * open-ocean blue beyond. Texel centres map to world via min + uv * extent.
  */
-function applyShelves(
+function shelfPatches(): ShaderPatch[] {
+  return [
+    {
+      find: 'uniform vec3 waterColor;',
+      replace: `uniform vec3 waterColor;
+      uniform sampler2D shelfNear;
+      uniform sampler2D shelfFar;
+      uniform vec4 shelfNearBounds;
+      uniform vec4 shelfFarBounds;
+      uniform vec3 shallowColor;
+      uniform vec3 shelfColor;
+      uniform float shallowLight;`,
+    },
+    {
+      find: 'vec3 scatter = max( 0.0, dot( surfaceNormal, eyeDirection ) ) * waterColor;',
+      replace: `vec2 nearUv = ( worldPosition.xz - shelfNearBounds.xy ) * shelfNearBounds.zw;
+      vec2 farUv = ( worldPosition.xz - shelfFarBounds.xy ) * shelfFarBounds.zw;
+      vec2 inside = step( vec2( 0.0 ), nearUv ) * step( nearUv, vec2( 1.0 ) );
+      float shelf = mix( texture2D( shelfFar, farUv ).r, texture2D( shelfNear, nearUv ).r, inside.x * inside.y );
+      float shallow = smoothstep( 0.45, 0.85, shelf );
+      float slope = smoothstep( 0.45, 0.75, shelf );
+      vec3 tint = mix( waterColor, shelfColor, slope );
+      tint = mix( tint, shallowColor, shallow );
+      vec3 scatter = max( 0.0, dot( surfaceNormal, eyeDirection ) ) * tint;`,
+    },
+    {
+      find: 'vec3 outgoingLight = albedo;',
+      replace: `// Light coming up through clear shallows, blended under the reflection (Fresnel):
+      // strong where the view is steep, gone at grazing angles and with distance.
+      float facing = mix( 0.12, 1.0, smoothstep( 0.004, 0.03, eyeDirection.y ) );
+      float nearby = 1.0 - smoothstep( 500.0, 1500.0, distance );
+      float shelfMix = ( shallow * 0.9 + slope * 0.25 ) * facing * nearby * ( 1.0 - reflectance * 0.6 );
+      // HDR so the turquoise survives the scene's low exposure.
+      vec3 under = mix( shelfColor, shallowColor, shallow ) * shallowLight * 2.4;
+      albedo = mix( albedo, under, clamp( shelfMix, 0.0, 0.9 ) );
+      vec3 outgoingLight = albedo;`,
+    },
+  ];
+}
+
+/**
+ * Patches three's Water shader with reflection lift and (optionally) shelf tints.
+ * All or nothing: if any patch misses (a changed three.js), development builds
+ * throw and production keeps the stock water with a warning.
+ */
+function applyWaterLook(
   material: THREE.ShaderMaterial,
-  shelves: { near: ShelfMap; far: ShelfMap; light?: number },
+  shelves: { near: ShelfMap; far: ShelfMap; light?: number } | undefined,
+  haze: THREE.Color | undefined,
+  gain: number,
 ): THREE.DataTexture[] {
+  const patched = patchShader(material.fragmentShader, [...reflectionPatches, ...(shelves ? shelfPatches() : [])]);
+  if (patched === null) {
+    const message = 'calm: Water shader did not match the expected source; using the stock water.';
+    if (import.meta.env.DEV) throw new Error(message);
+    console.warn(message);
+    return [];
+  }
+  material.fragmentShader = patched;
+  material.uniforms.reflectionHaze = { value: (haze ?? new THREE.Color(0x8a9aa4)).clone() };
+  material.uniforms.reflectionLift = { value: 0.25 };
+  material.uniforms.reflectionGain = { value: Number.isFinite(gain) ? Math.min(3, Math.max(1, gain)) : 1 };
+  material.needsUpdate = true;
+  if (!shelves) return [];
+
   const near = shelfTexture(shelves.near);
   const far = shelfTexture(shelves.far);
   const bounds = (shelf: ShelfMap) => {
@@ -169,42 +282,5 @@ function applyShelves(
   material.uniforms.shallowColor = { value: new THREE.Color(0x58aaa0) };
   material.uniforms.shelfColor = { value: new THREE.Color(0x1d6f7c) };
   material.uniforms.shallowLight = { value: shelves.light ?? 1 };
-  material.fragmentShader = material.fragmentShader
-    .replace(
-      'uniform vec3 waterColor;',
-      `uniform vec3 waterColor;
-      uniform sampler2D shelfNear;
-      uniform sampler2D shelfFar;
-      uniform vec4 shelfNearBounds;
-      uniform vec4 shelfFarBounds;
-      uniform vec3 shallowColor;
-      uniform vec3 shelfColor;
-      uniform float shallowLight;`,
-    )
-    .replace(
-      'vec3 scatter = max( 0.0, dot( surfaceNormal, eyeDirection ) ) * waterColor;',
-      `vec2 nearUv = ( worldPosition.xz - shelfNearBounds.xy ) * shelfNearBounds.zw;
-      vec2 farUv = ( worldPosition.xz - shelfFarBounds.xy ) * shelfFarBounds.zw;
-      vec2 inside = step( vec2( 0.0 ), nearUv ) * step( nearUv, vec2( 1.0 ) );
-      float shelf = mix( texture2D( shelfFar, farUv ).r, texture2D( shelfNear, nearUv ).r, inside.x * inside.y );
-      float shallow = smoothstep( 0.45, 0.85, shelf );
-      float slope = smoothstep( 0.45, 0.75, shelf );
-      vec3 tint = mix( waterColor, shelfColor, slope );
-      tint = mix( tint, shallowColor, shallow );
-      vec3 scatter = max( 0.0, dot( surfaceNormal, eyeDirection ) ) * tint;`,
-    )
-        .replace(
-      'vec3 outgoingLight = albedo;',
-      `// Light coming up through clear shallows, blended under the reflection (Fresnel):
-      // strong where the view is steep, gone at grazing angles and with distance.
-      float facing = mix( 0.12, 1.0, smoothstep( 0.004, 0.03, eyeDirection.y ) );
-      float nearby = 1.0 - smoothstep( 500.0, 1500.0, distance );
-      float shelfMix = ( shallow * 0.9 + slope * 0.25 ) * facing * nearby * ( 1.0 - reflectance * 0.6 );
-      // HDR so the turquoise survives the scene's low exposure.
-      vec3 under = mix( shelfColor, shallowColor, shallow ) * shallowLight * 2.4;
-      albedo = mix( albedo, under, clamp( shelfMix, 0.0, 0.9 ) );
-      vec3 outgoingLight = albedo;`,
-    );
-  material.needsUpdate = true;
   return [near, far];
 }

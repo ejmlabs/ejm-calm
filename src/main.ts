@@ -10,6 +10,7 @@ import { createLandMesh } from './landmesh.js';
 import { nearShelf, farShelf } from './land.js';
 import { createBirds } from './birds.js';
 import { CalmCamera } from './camera.js';
+import { clamp } from './math.js';
 import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
@@ -134,6 +135,9 @@ try {
       // Low sun lights the shallows less.
       light: sky.timeOfDay === 'golden' || sky.timeOfDay === 'dusk' ? 0.55 : 1,
     },
+    reflectionHaze: sky.hazeColor,
+    // Slightly under 1 / exposure: reflections sit a touch darker than the land itself.
+    reflectionGain: 0.8 / renderer.toneMappingExposure,
   });
   scene.add(ocean.mesh);
   landMesh = createLandMesh(layout.land, {
@@ -253,10 +257,11 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
   const w = whale.state;
   // Camera sits at focus + (sin yaw, cos yaw), so yaw = heading is a broadside on the
   // whale's left; a small negative offset swings toward the head for a three-quarter view.
-  const yaw = (Number.isFinite(w.heading) ? w.heading - 0.22 : layout.viewYaw) + (view.yawOffset ?? 0);
+  // Debug overrides are clamped to the ranges the camera rig itself allows.
+  const yaw = (Number.isFinite(w.heading) ? w.heading - 0.22 : layout.viewYaw) + clamp(view.yawOffset ?? 0, -Math.PI, Math.PI);
   // Close enough that a ~12 m whale fills ~35–50% of portrait width.
-  const dist = view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14);
-  const pitch = view.pitch ?? (kind === 'breach' ? 0.12 : 0.02);
+  const dist = clamp(view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14), 6, 80);
+  const pitch = clamp(view.pitch ?? (kind === 'breach' ? 0.12 : 0.02), 0.02, 0.62);
   rig.framing.yaw = yaw;
   rig.framing.pitch = pitch;
   rig.framing.distance = dist;
@@ -354,6 +359,10 @@ if (debug) {
       for (const ship of ships) ship.group.visible = visible;
     },
     frame(yaw: number, pitch: number, distance: number) {
+      if (![yaw, pitch, distance].every(Number.isFinite)) return;
+      yaw = clamp(yaw, -4 * Math.PI, 4 * Math.PI);
+      pitch = clamp(pitch, 0.02, 0.62);
+      distance = clamp(distance, 6, 80);
       eventFrame = null;
       rig.framing.yaw = yaw;
       rig.framing.pitch = pitch;

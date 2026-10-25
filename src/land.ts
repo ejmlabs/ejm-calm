@@ -17,6 +17,8 @@ export type Land = Shore & {
   /** Signed coast field: > 0 on land, < 0 at sea. Cheap compared with heightAt. */
   maskAt: (x: number, z: number) => number;
   heightAt: (x: number, z: number, lod?: number) => number;
+  /** heightAt that also reports how much of a sea-cliff face the point is on, in [0, 1]. */
+  surfaceAt: (x: number, z: number, lod: number, out: { cliff: number }) => number;
   /** Submerged sand banks in [0, 1]: visual only, they never block navigation. */
   shoalAt: (x: number, z: number) => number;
   /** Sampled grid used for navigation and the shallow-water map. */
@@ -132,11 +134,14 @@ export function createLand(seed: number, options: LandOptions): Land {
     // Bay-scale and cove-scale octaves give headlands, bays and coves.
     const bay = fbm2(n.bay, wx / 1500, wz / 1500, 3, 2.1, 0.5);
     const coast = fbm2(n.coast, wx / 560, wz / 560, 5, 2.07, 0.52);
+    headland = bay;
     return continent * 1.05 + bay * 0.3 + coast * 0.3 - 0.03;
   }
 
   let held = 0;
   let lifted = 0;
+  // Bay-scale octave of the last mask sample: high where land juts out as a headland.
+  let headland = 0;
   function maskWarped(x: number, z: number): number {
     const r = Math.hypot(x, z);
     const ax = x - anchor.x;
@@ -171,6 +176,7 @@ export function createLand(seed: number, options: LandOptions): Land {
     }
     const hits: number[] = [];
     let islets = 0;
+    let cliffs = 0;
     for (let b = 0; b < 9; b++) {
       const yaw = options.viewYaw + (b / 8 - 0.5) * 2 * VIEW_HALF_CONE;
       const dx = -Math.sin(yaw);
@@ -180,7 +186,10 @@ export function createLand(seed: number, options: LandOptions): Land {
       for (let d = 160; d < COAST_SEARCH; d += 40) {
         warp(dx * d, dz * d);
         const land = maskWarped(dx * d, dz * d) > 0;
-        if (land && hit === COAST_SEARCH) hit = d;
+        if (land && hit === COAST_SEARCH) {
+          hit = d;
+          if (d < 2200) cliffs = Math.max(cliffs, cliffiness(dx * d, dz * d));
+        }
         if (!land && hit < COAST_SEARCH && left < 0) left = d;
         if (left > 0) {
           if (land && hit < 1100) islets++;
@@ -198,7 +207,9 @@ export function createLand(seed: number, options: LandOptions): Land {
       Math.max(0, near - 750) / 400 +
       Math.max(0, 900 - spread) / 300 +
       Math.max(0, 4 - landed) * 0.4 +
-      (islets > 0 ? 0 : 0.35)
+      (islets > 0 ? 0 : 0.35) +
+      // At least one cliffed headland on the visible coast.
+      Math.max(0, 0.6 - cliffs) * 0.6
     );
   }
 
@@ -220,15 +231,21 @@ export function createLand(seed: number, options: LandOptions): Land {
     return maskWarped(x, z);
   }
 
+  /** Cliff strength; reads the headland term of the last mask sample, so call it right after one. */
   function cliffiness(x: number, z: number): number {
-    return smoothstep(0.45, 0.75, fbm2(n.cliff, x / 800, z / 800, 2) * 0.5 + 0.5);
+    const cape = smoothstep(0.02, 0.35, headland) * 0.3;
+    return smoothstep(0.45, 0.75, fbm2(n.cliff, x / 800, z / 800, 2) * 0.5 + 0.5 + cape);
   }
 
+  const scratch = { cliff: 0 };
+
   /** `lod` > 0 drops fine octaves for the coarse far rings. */
-  function heightAt(x: number, z: number, lod = 0): number {
+  function surfaceAt(x: number, z: number, lod: number, out: { cliff: number }): number {
     warp(x, z);
     const m = maskWarped(x, z);
     const steep = cliffiness(x, z);
+    // The face runs from the waterline up to the plateau edge.
+    out.cliff = steep * smoothstep(-0.03, 0.0, m) * (1 - smoothstep(0.07, 0.12, m));
     if (m < 0) return -depthForMask(m, steep);
     const fine = Math.max(2, 5 - Math.floor(lod / 2));
     // Beach: a wide sandy strip that cliffs cut through.
@@ -238,7 +255,7 @@ export function createLand(seed: number, options: LandOptions): Land {
     const rise = m - lifted * 0.85;
     const gentle = beach + smoothstep(0.1, 0.3, rise) * 7 + Math.max(0, rise - 0.3) * 190;
     // Cliffs step up to a low headland plateau, then follow the land inland.
-    const cliffTop = smoothstep(0, 0.08, m) * (5 + 18 * steep) + Math.max(0, rise - 0.3) * 190;
+    const cliffTop = smoothstep(0, 0.08, m) * (8 + 42 * steep) + Math.max(0, rise - 0.3) * 190;
     let h = gentle + (cliffTop - gentle) * steep;
     const inland = smoothstep(0.25, 0.65, rise);
     const natural = m - held - lifted;
@@ -257,6 +274,10 @@ export function createLand(seed: number, options: LandOptions): Land {
     // Sink the outer rim so the mesh edge vanishes under the haze.
     const rim = 1 - smoothstep(6200, 7800, r);
     return h * rim;
+  }
+
+  function heightAt(x: number, z: number, lod = 0): number {
+    return surfaceAt(x, z, lod, scratch);
   }
 
   function shoalAt(x: number, z: number): number {
@@ -292,6 +313,7 @@ export function createLand(seed: number, options: LandOptions): Land {
     anchor,
     maskAt,
     heightAt,
+    surfaceAt,
     shoalAt,
     grid,
     clearance(x, z) {
