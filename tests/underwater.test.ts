@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { SURFACE_BAND, waterSignal } from '../src/seams.js';
 import { WATER_IOR, WATER_LOOK, acesFilmic, airAngle, blendFog, criticalAngle, radianceFor, surfaceLight, waterTint, type FogState } from '../src/underwater-optics.js';
-import { VISUAL_FLOOR, floorCentre, visualFloor } from '../src/underwater-floor.js';
+import { floorCentre, visualFloor } from '../src/underwater-floor.js';
 
 test('water signal is 0 above the band, 1 below, and smooth and monotonic across it', () => {
   assert.equal(waterSignal(SURFACE_BAND + 0.01).submersion, 0);
@@ -101,11 +101,11 @@ test('radiance solver round-trips display colours through ACES, including dark d
 });
 
 test('seafloor patch: drawn floor never sits above the real one and centres snap deterministically', () => {
-  for (const h of [-200, -60, -34, -12, -1, 0.5]) {
+  for (const h of [-60, -34, -12, -1, 0.5]) {
     const v = visualFloor(h);
-    assert.ok(v >= -VISUAL_FLOOR - 0.2);
-    if (h >= -VISUAL_FLOOR) assert.ok(v <= h && v > h - 0.2);
+    assert.ok(v <= h && v > h - 0.2);
   }
+  assert.ok(visualFloor(300) <= 2);
   assert.equal(floorCentre(0, 2), 0);
   assert.equal(floorCentre(7.9, 2), 4);
   assert.equal(floorCentre(-9, 2), -4);

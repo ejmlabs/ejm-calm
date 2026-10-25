@@ -81,3 +81,27 @@ float causticLayer( vec2 p, float period, float t ) {
   return line * sqrt( line );
 }
 `;
+
+/**
+ * Scenery scale 0..1 so nothing ever hides the whale or pops: shrinks
+ * instances near the camera, in the corridor from the camera to the whale,
+ * and grows them in from the edge of the streamed radius `uFar`. `base` is the
+ * instance foot (render space) and `height` its extent upward. Mirrors
+ * sceneryFade() in underwater-life.ts.
+ */
+export const GLSL_SCENERY = /* glsl */ `
+uniform vec3 uWhale;
+uniform float uFar;
+
+float sceneryFade( vec3 base, float height ) {
+  vec3 a = cameraPosition;
+  vec3 ab = uWhale - a;
+  float t = clamp( dot( base.xz - a.xz, ab.xz ) / max( dot( ab.xz, ab.xz ), 1e-4 ), 0.0, 1.0 );
+  vec3 p = vec3( base.x, clamp( a.y + ab.y * t, base.y, base.y + height ), base.z );
+  float s = clamp( dot( p - a, ab ) / max( dot( ab, ab ), 1e-4 ), 0.0, 1.0 );
+  float corridor = smoothstep( 2.0, 4.5, distance( p, a + ab * s ) );
+  float near = smoothstep( 4.0, 7.0, distance( p, a ) );
+  float far = 1.0 - smoothstep( uFar - 14.0, uFar - 2.0, distance( base.xz, a.xz ) );
+  return corridor * near * far;
+}
+`;
