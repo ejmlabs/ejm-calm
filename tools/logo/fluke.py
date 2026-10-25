@@ -44,20 +44,15 @@ def outline(oy=0, tipr=11, stem_w=36, stem_end=232, notch=9):
         d += f"C{q(m(t[i][1]))} {q(m(t[i][0]))} {q(m(prev))}"
     return d + "Z"
 
-def a(simple=False, oy=0):
-    """Tail with two ripple ribbons either side of the peduncle."""
-    if simple:
-        return [outline(oy, tipr=12, stem_w=40, stem_end=222, notch=10)]
-    return [outline(oy), pill(26, 220 + oy, 56, 30), pill(174, 220 + oy, 56, 30)]
+def tail(oy=0):
+    """The one clean tail used everywhere (v4): favicon geometry (40 stem, r12 tips, 10 notch).
+    It is crisper at small sizes than the 36-wide mark-weight stem and keeps every file identical."""
+    return [outline(oy, tipr=12, stem_w=40, stem_end=222, notch=10)]
 
-def b(simple=False, oy=0):
-    """No ripples."""
-    return [outline(oy, **({"tipr": 12, "stem_w": 40, "stem_end": 222, "notch": 10} if simple else {}))]
-
+a = b = lambda simple=False, oy=0: tail(oy)
 VARIANTS = {"a": a, "b": b}
 
-def bbox_shift(fn):
-    """Vertical shift that centres fn()'s ink on the 256 grid (measured from a resvg raster)."""
+def _raster(fn):
     import subprocess, tempfile
     from PIL import Image
     from build import wrap, paths
@@ -65,5 +60,23 @@ def bbox_shift(fn):
         src, png = os.path.join(t, "m.svg"), os.path.join(t, "m.png")
         open(src, "w").write(wrap(256, 256, "m", paths(fn(oy=0), "#000")))
         subprocess.run(["resvg-js", "--fit-width", "1024", src, png], check=True, capture_output=True)
-        box = Image.open(png).getchannel("A").getbbox()
-    return round(128 - (box[1] + box[3]) / 8, 1)
+        return Image.open(png).getchannel("A")
+
+def metrics(fn=tail):
+    """(bbox centre y, ink centroid y, bbox) in 256 units, measured from a resvg raster."""
+    al = _raster(fn); box = al.getbbox(); px = al.load()
+    W, H = al.size; sy = sm = 0
+    for y in range(H):
+        n = sum(1 for x in range(W) if px[x, y] > 127)
+        sy += n * y; sm += n
+    return (box[1] + box[3]) / 8, sy / sm / 4, [v / 4 for v in box]
+
+OPTICAL = 0.5   # share of the way from bbox centre to ink centroid (blade is heavy, stem light)
+
+def optical_cy(fn=tail):
+    b, c, _ = metrics(fn)
+    return b + OPTICAL * (c - b)
+
+def bbox_shift(fn=tail, target=128):
+    """Vertical shift that puts the optical centre of fn()'s ink at `target` on the 256 grid."""
+    return round(target - optical_cy(fn), 1)

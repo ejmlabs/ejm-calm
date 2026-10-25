@@ -90,3 +90,14 @@ v2's renders are kept as `previews/fluke-explorations/v2-longhorn-mark.svg` and 
 ribbon broken by the stem (relay-like). The icons carry the ripples at 76% and are busy below ~192 px; use favicon.svg there.
 
 **v3.1 (final polish).** Per Pass 2 of REVIEW-FLUKE.md: the ripple pills moved 10 units lower (now flush with the stem end, clearance to the stem unchanged) so they no longer sit in the blade's shadow and read as a face; the peduncle now has vertical flanks ending in a true semicircle (r18 on the mark, r20 on the favicon) instead of a flared, slightly bulbous end; and the leading edge was pulled up ~4 units mid-span to thin the blade, which lightens it toward the family without raising the trailing edge, so no horn reading returns. Nothing else in the concept changed.
+
+---
+
+# v4 (clean tail)
+
+Owner decision: drop the water bars; every fluke file uses the same clean tail.
+- **One geometry.** `tools/logo/fluke.py:tail()` is the favicon tail (40-wide stem, r12 tips, 10-unit notch, stem end 222). It is crisper at 16/32 px than the 36-wide mark-weight stem and keeps all nine files identical, so the 256-grid marks use it too. Ripples and the `simple` variants are gone. Marks ~0.6 KB, logos ~2.6 KB.
+- **Centering.** Horizontal is mirror-symmetric (ink x 17.8..238.2, ~18 clearance). Vertical is optical: halfway between bbox centre and ink centroid (blade is heavy, stem light), measured from a resvg raster (`optical_cy`).
+- **Icons.** Tail ink width is 76% of the tile (scale ~0.885), like the cli/ide icons; before, the 0.76 was applied to the 256 grid and the ink was only ~65%. Favicon stays at 0.92 of the grid.
+- **Lockup.** Mark at 1:1 (136 tall vs 120 x-height, 159 ascender), optical centre on the x-height centre (y=145), so the stem dips a little below the baseline. Gap mark ink -> "c" ink is 48 (family 40-56); wordmark x0 is derived in `build.py` (Manrope 600, size 216, baseline 205 unchanged).
+- **Previews.** Contact sheet bottom row compares v3.1 (bars) to v4; v3.1 snapshots are kept in `previews/fluke-explorations/v3.1-bars-*.svg`.

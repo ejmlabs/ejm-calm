@@ -7,7 +7,7 @@ FONT = "/workspace/agents/work/site-polish/packages/tokens/assets/fonts/Manrope-
 SAGE, FOREST, INK, PAPER, MIST = "#8A9A7B", "#29443B", "#202721", "#F6F5EF", "#E8EDE3"
 PV = os.path.join(ROOT, "previews"); os.makedirs(PV, exist_ok=True)
 L = lambda n: os.path.join(ROOT, "logos", "fluke", n + ".svg")
-OLD = "/tmp/fluke-v1"
+OLD = os.path.join(PV, "fluke-explorations")   # v3.1-with-bars snapshots
 
 def inner(path):
     s = open(path).read()
@@ -83,18 +83,21 @@ def contact():
     ex = x
     for sz, m in ((16, 8), (32, 4), (48, 3)):
         g, _ = place(L("favicon"), ex, y + 280, sz * m); o += g; ex += sz * m + 30
-    # old vs new
+    # v3.1 (with water bars) vs v4 (clean tail)
     y = 1290; o += f'<rect x="40" y="{y}" width="{W-80}" height="460" fill="{PAPER}"/>'
-    o += lab(90, y + 40, "OLD (V1) -> NEW", INK)
-    g, _ = place(os.path.join(OLD, "mark.svg"), 90, y + 70, 200); o += g
+    o += lab(90, y + 40, "V3.1 (WATER BARS) -> V4 (CLEAN TAIL)", INK)
+    v = lambda n: os.path.join(OLD, f"v3.1-bars-{n}.svg")
+    g, _ = place(v("mark-sage"), 90, y + 70, 200); o += g
     o += txt(330, y + 190, "&#8594;", INK, 60)
     g, _ = place(L("mark-sage"), 420, y + 70, 200); o += g
-    g, _ = place(os.path.join(OLD, "favicon.svg"), 720, y + 70, 200); o += g
+    g, _ = place(v("favicon"), 720, y + 70, 200); o += g
     o += txt(960, y + 190, "&#8594;", INK, 60)
     g, _ = place(L("favicon"), 1050, y + 70, 200); o += g
-    f, _ = favs(1330, y + 270, PAPER, INK, (16, 32), path=os.path.join(OLD, "favicon.svg"), gap=34); o += f
-    f, _ = favs(1500, y + 270, PAPER, INK, (16, 32), gap=34); o += f
-    o += lab(1330, y + 330, "OLD", INK) + lab(1500, y + 330, "NEW", INK)
+    g, _ = place(v("logo-primary"), 1330, y + 60, 110); o += g
+    g, _ = place(L("logo-primary"), 1330, y + 200, 110); o += g
+    f, _ = favs(1330, y + 400, PAPER, INK, (16, 32), path=v("favicon"), gap=34); o += f
+    f, _ = favs(1500, y + 400, PAPER, INK, (16, 32), gap=34); o += f
+    o += lab(1330, y + 440, "v3.1", INK) + lab(1500, y + 440, "v4", INK)
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">{o}</svg>'
 
 for dark in (False, True):

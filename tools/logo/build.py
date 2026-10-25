@@ -167,24 +167,31 @@ def tile(ds, bg, fg, scale, title="calm by ejmlabs icon", size=1024):
     return wrap(size, size, title, f'<rect width="{size}" height="{size}" fill="{bg}"/>'
                 f'<g transform="translate({f(o)} {f(o)}) scale({f(k)})">' + paths(ds, fg) + "</g>")
 
+XH_CENTRE = 145      # centre of the wordmark's x-height band (x-top 85, baseline 205)
+GAP = 48             # mark ink -> "c" ink, within the family's 40-56
+ICON_INK = 0.76      # tail ink width as a share of the icon tile, like the cli/ide icons
+
 def build():
-    from fluke import a as fluke_a, bbox_shift
-    oy = bbox_shift(fluke_a)
-    mark = fluke_a(oy=oy)
-    fav = fluke_a(True, oy=bbox_shift(lambda **kw: fluke_a(True, **kw)))
+    from fluke import tail, bbox_shift, metrics
+    mark = tail(oy=bbox_shift(tail))                      # optically centred on the 256 grid
+    lock = tail(oy=bbox_shift(tail, XH_CENTRE))           # optically centred on the x-height
+    _, _, box = metrics(tail)
+    ink_w = box[2] - box[0]
+    glyph_paths("c")                                      # loads the font
+    gn = _font.getBestCmap()[ord("c")]
+    c_bearing = _font["hmtx"][gn][1] * 216 / _font["head"].unitsPerEm   # left side bearing of "c"
+    x0 = round(box[2] + GAP - c_bearing)
     d = os.path.join(ROOT, "logos", "fluke"); os.makedirs(d, exist_ok=True)
-    for old in ("mark.svg",):
-        p = os.path.join(d, old)
-        if os.path.exists(p): os.remove(p)
     def w(name, s): open(os.path.join(d, name), "w").write(s)
     for fill, nm in ((SAGE, "sage"), (INK, "ink"), (PAPER, "paper")):
         w(f"mark-{nm}.svg", wrap(256, 256, f"calm by ejmlabs, {nm} symbol", paths(mark, fill)))
-    w("logo-primary.svg", logo(mark, SAGE, INK, "primary"))
-    w("logo-ink.svg", logo(mark, INK, INK, "ink"))
-    w("logo-paper.svg", logo(mark, PAPER, PAPER, "paper"))
-    w("icon-forest.svg", tile(mark, FOREST, PAPER, 0.76))
-    w("icon-sage.svg", tile(mark, SAGE, INK, 0.76))
-    w("favicon.svg", tile(fav, SAGE, INK, 0.92))
+    w("logo-primary.svg", logo(lock, SAGE, INK, "primary", x0))
+    w("logo-ink.svg", logo(lock, INK, INK, "ink", x0))
+    w("logo-paper.svg", logo(lock, PAPER, PAPER, "paper", x0))
+    k = ICON_INK * 256 / ink_w
+    w("icon-forest.svg", tile(mark, FOREST, PAPER, k))
+    w("icon-sage.svg", tile(mark, SAGE, INK, k))
+    w("favicon.svg", tile(mark, SAGE, INK, 0.92))
 
 if __name__ == "__main__":
     build()
