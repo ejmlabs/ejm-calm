@@ -1,7 +1,7 @@
 # calm
 
 A calm, beautiful, seeded ocean scene from **ejmlabs, an open source lab**.
-A whale surfaces and breaches, sailboats drift, and islands sit on the horizon.
+A whale surfaces and breaches, sailboats drift, and long hazy coastlines run to the horizon.
 Everything is generated locally from one number. No accounts, tracking,
 analytics, or runtime network requests beyond this site's static files.
 
@@ -9,7 +9,7 @@ Open it on a phone and leave it beside you. Drag to look around; the camera
 eases back to a slow cinematic drift.
 
 Each `?seed=` value rebuilds the same sea: time of day, whale behaviour, ship
-placement, and island silhouettes. Sound is optional and off by default.
+placement, and the continents, coasts and mountains. Sound is optional and off by default.
 
 ## Controls
 

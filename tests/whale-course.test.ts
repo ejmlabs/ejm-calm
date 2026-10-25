@@ -2,11 +2,13 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { fork } from '../src/rng.js';
-import { layoutWorld, type IslandSpec } from '../src/terrain.js';
+import { layoutWorld } from '../src/terrain.js';
+import { circleShore, type Circle, type Shore } from '../src/shore.js';
 import {
   WHALE_ISLAND_MARGIN,
   WHALE_MAX_TURN_RATE,
   createWhalePilot,
+  headingToward,
   shortestAngle,
   whaleForward,
   type WhaleCourse,
@@ -21,7 +23,7 @@ function initialHeading(seed: number): number {
   return fork(seed, 'whale')() * Math.PI * 2;
 }
 
-function simulate(seed: number, islands: IslandSpec[], dt = DT, seconds = DURATION) {
+function simulate(seed: number, shore: Shore, dt = DT, seconds = DURATION) {
   const world = layoutWorld(seed);
   const heading = initialHeading(seed);
   const pilot = createWhalePilot(seed, world.whaleHome, heading);
@@ -31,9 +33,9 @@ function simulate(seed: number, islands: IslandSpec[], dt = DT, seconds = DURATI
   const zs = new Float64Array(steps);
   let turned = 0;
   let prev = course.heading;
-  let minIsland = Infinity;
+  let minClear = Infinity;
   for (let i = 0; i < steps; i++) {
-    pilot.step(course, dt, i * dt, islands);
+    pilot.step(course, dt, i * dt, shore);
     const delta = Math.abs(shortestAngle(prev, course.heading));
     assert.ok(delta <= pilot.params.turnRate * dt + 1e-8, `seed ${seed} turn ${delta} > limit`);
     assert.ok(Number.isFinite(course.heading) && Math.abs(course.heading) <= Math.PI + 1e-8);
@@ -42,11 +44,9 @@ function simulate(seed: number, islands: IslandSpec[], dt = DT, seconds = DURATI
     prev = course.heading;
     xs[i] = course.x;
     zs[i] = course.z;
-    for (const island of islands) {
-      const d = Math.hypot(course.x - island.x, course.z - island.z);
-      if (d < minIsland) minIsland = d;
-      assert.ok(d >= island.radius + WHALE_ISLAND_MARGIN - 1e-4, `seed ${seed} clipped island ${island.id}`);
-    }
+    const gap = shore.clearance(course.x, course.z);
+    if (gap < minClear) minClear = gap;
+    assert.ok(gap >= WHALE_ISLAND_MARGIN - 1e-3, `seed ${seed} came within ${gap.toFixed(1)} m of land`);
   }
   let minX = Infinity;
   let maxX = -Infinity;
@@ -80,7 +80,7 @@ function simulate(seed: number, islands: IslandSpec[], dt = DT, seconds = DURATI
     const d = Math.hypot(xs[i]! - world.whaleHome.x, zs[i]! - world.whaleHome.z);
     if (d > maxHome) maxHome = d;
   }
-  return { pilot, course, turned, diagonal, endDist, maxHome, meanR, stdR, minIsland, world };
+  return { pilot, course, turned, diagonal, endDist, maxHome, meanR, stdR, minClear, world };
 }
 
 test('whale mesh heading points the head along whaleForward', () => {
@@ -94,11 +94,11 @@ test('whale mesh heading points the head along whaleForward', () => {
   }
 });
 
-test('whale cruise travels without spinning, for several seeds', () => {
+test('whale cruise travels without spinning and stays in open water, for several seeds', () => {
   assert.ok(WHALE_MAX_TURN_RATE <= 0.25);
   for (const seed of SEEDS) {
     const world = layoutWorld(seed);
-    const stats = simulate(seed, world.islands);
+    const stats = simulate(seed, world.land);
     assert.equal(stats.pilot.params.turnRate, WHALE_MAX_TURN_RATE);
     // A few full rotations is ~3 turns. Stay well under that.
     assert.ok(stats.turned < Math.PI * 2 * 2, `seed ${seed} heading travel ${stats.turned.toFixed(2)} rad`);
@@ -108,14 +108,15 @@ test('whale cruise travels without spinning, for several seeds', () => {
     assert.ok(stats.maxHome < stats.pilot.params.leash + 28, `seed ${seed} left the frame ${stats.maxHome.toFixed(1)}`);
     const circular = stats.meanR < 36 && stats.stdR < stats.meanR * 0.12;
     assert.equal(circular, false, `seed ${seed} small circle r=${stats.meanR.toFixed(1)} sd=${stats.stdR.toFixed(2)}`);
-    assert.ok(stats.minIsland > 40, `seed ${seed} island dist ${stats.minIsland.toFixed(1)}`);
+    // Open water: the whole cruise stays well off the coast.
+    assert.ok(stats.minClear > 120, `seed ${seed} closest approach to land ${stats.minClear.toFixed(1)}`);
     assert.ok(stats.endDist > 8 || stats.diagonal > 70, `seed ${seed} displacement ${stats.endDist.toFixed(1)}`);
   }
 });
 
 test('whale course is deterministic per seed and steps clear of a blocking island', () => {
-  const once = simulate(42, layoutWorld(42).islands, DT, 30);
-  const twice = simulate(42, layoutWorld(42).islands, DT, 30);
+  const once = simulate(42, layoutWorld(42).land, DT, 30);
+  const twice = simulate(42, layoutWorld(42).land, DT, 30);
   assert.equal(once.course.x, twice.course.x);
   assert.equal(once.course.z, twice.course.z);
   assert.equal(once.course.heading, twice.course.heading);
@@ -125,20 +126,13 @@ test('whale course is deterministic per seed and steps clear of a blocking islan
   const pilot = createWhalePilot(5, home, heading);
   const course: WhaleCourse = { x: 0, z: 0, heading, leg: heading };
   // Heading 0 faces −X. Park an island on that line.
-  const island: IslandSpec = {
-    id: 9,
-    x: -42,
-    z: 0,
-    radius: 12,
-    height: 6,
-    mountain: false,
-    seed: 5,
-  };
+  const island: Circle = { x: -42, z: 0, radius: 12 };
+  const shore = circleShore([island]);
   let min = Infinity;
   const steps = Math.round(50 / DT);
   for (let i = 0; i < steps; i++) {
     const prev = course.heading;
-    pilot.step(course, DT, i * DT, [island]);
+    pilot.step(course, DT, i * DT, shore);
     assert.ok(Math.abs(shortestAngle(prev, course.heading)) <= WHALE_MAX_TURN_RATE * DT + 1e-8);
     const d = Math.hypot(course.x - island.x, course.z - island.z);
     if (d < min) min = d;
@@ -148,9 +142,38 @@ test('whale course is deterministic per seed and steps clear of a blocking islan
 });
 
 test('whale cruise stays close across 30fps and 60fps', () => {
-  const islands = layoutWorld(42).islands;
-  const a = simulate(42, islands, 1 / 60, 90);
-  const b = simulate(42, islands, 1 / 30, 90);
+  const land = layoutWorld(42).land;
+  const a = simulate(42, land, 1 / 60, 90);
+  const b = simulate(42, land, 1 / 30, 90);
   const gap = Math.hypot(a.course.x - b.course.x, a.course.z - b.course.z);
   assert.ok(gap < 8, `frame-rate gap ${gap.toFixed(2)}`);
+});
+
+test('whale heading for a real coastline turns away and never beaches', () => {
+  const land = layoutWorld(7).land;
+  // Find open water about 60 m off the coast, facing the land.
+  let start: { x: number; z: number } | null = null;
+  for (let r = 300; r < 1500 && !start; r += 10) {
+    for (let a = 0; a < Math.PI * 2; a += 0.05) {
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      const gap = land.clearance(x, z);
+      if (gap > 55 && gap < 65) {
+        start = { x, z };
+        break;
+      }
+    }
+  }
+  assert.ok(start, 'found a start near the coast');
+  const away = land.away(start.x, start.z);
+  const heading = headingToward(-away.x, -away.z);
+  const pilot = createWhalePilot(7, start, heading);
+  const course: WhaleCourse = { x: start.x, z: start.z, heading, leg: heading };
+  for (let i = 0; i < Math.round(60 / DT); i++) {
+    const prev = course.heading;
+    pilot.step(course, DT, i * DT, land);
+    assert.ok(Math.abs(shortestAngle(prev, course.heading)) <= WHALE_MAX_TURN_RATE * DT + 1e-8);
+    assert.ok(land.clearance(course.x, course.z) >= WHALE_ISLAND_MARGIN - 1e-3, 'stayed off the beach');
+    assert.ok(land.heightAt(course.x, course.z) < 0, 'stayed in the water');
+  }
 });

@@ -3,10 +3,11 @@ import { resolveSeed, seedURL, nextSeed } from './seed.js';
 import { createQuality, updateQuality } from './quality.js';
 import { layoutWorld } from './terrain.js';
 import { createOcean } from './ocean.js';
-import { createSky } from './sky.js';
+import { createSky, HAZE_ANGLES } from './sky.js';
 import { createWhale } from './whale.js';
 import { createShips } from './ships.js';
-import { createIslands } from './islands.js';
+import { createLandMesh } from './landmesh.js';
+import { nearShelf, farShelf } from './land.js';
 import { createBirds } from './birds.js';
 import { CalmCamera } from './camera.js';
 import { createUI } from './ui.js';
@@ -23,7 +24,7 @@ type CalmReview = {
   frame: (yaw: number, pitch: number, distance: number) => void;
   setWaterVisible: (visible: boolean) => void;
   setWhaleVisible: (visible: boolean) => void;
-  setIslandsVisible: (visible: boolean) => void;
+  setLandVisible: (visible: boolean) => void;
   setShipsVisible: (visible: boolean) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
 };
@@ -99,12 +100,14 @@ let sky: ReturnType<typeof createSky>;
 let ocean: ReturnType<typeof createOcean>;
 let whale: ReturnType<typeof createWhale>;
 let ships: ReturnType<typeof createShips>;
-let islands: ReturnType<typeof createIslands>;
+let landMesh: ReturnType<typeof createLandMesh>;
+let buildMs = 0;
 let birds: ReturnType<typeof createBirds>;
 let layout: ReturnType<typeof layoutWorld>;
 let rig: CalmCamera;
 
 try {
+  const buildStart = performance.now();
   sky = createSky(seed, renderer, scene);
   layout = layoutWorld(seed, sky.sunAzimuthDeg);
   const savedFraming = memory?.framing;
@@ -120,16 +123,32 @@ try {
     portrait,
     saved: framing,
   });
-  ocean = createOcean(seed, sky.sunDirection, { textureSize: quality.waterSize, waterColor: 0x1c5470 });
+  ocean = createOcean(seed, sky.sunDirection, {
+    textureSize: quality.waterSize,
+    waterColor: 0x1c5470,
+    shelves: {
+      near: nearShelf(layout.land),
+      far: farShelf(layout.land),
+      // Low sun lights the shallows less.
+      light: sky.timeOfDay === 'golden' || sky.timeOfDay === 'dusk' ? 0.55 : 1,
+    },
+  });
   scene.add(ocean.mesh);
-  islands = createIslands(layout.islands, quality.islandSegments, sky.horizonColor);
-  for (const island of islands) scene.add(island.group);
+  landMesh = createLandMesh(layout.land, {
+    segments: quality.landSegments,
+    sunDirection: sky.sunDirection,
+    hazeColor: sky.hazeColor,
+    hazeDensity: sky.hazeDensity,
+    hazeGradient: { angles: HAZE_ANGLES, colors: sky.hazeGradient },
+  });
+  scene.add(landMesh.group);
   ships = createShips(layout.ships);
   for (const ship of ships) scene.add(ship.group);
   whale = createWhale(seed, layout.whaleHome);
   scene.add(whale.group);
   birds = createBirds(seed, mobile ? 3 : 6);
   scene.add(birds.group);
+  buildMs = performance.now() - buildStart;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
   ui.error(message);
@@ -269,8 +288,8 @@ function tick(now: number): void {
 
   sky.update(dt);
   ocean.update(dt, sky.sunDirection);
-  whale.update(dt, time, layout.islands);
-  for (const ship of ships) ship.update(dt, time, layout.islands);
+  whale.update(dt, time, layout.land);
+  for (const ship of ships) ship.update(dt, time, layout.land);
   birds.update(time);
 
   const focus = focusPoint();
@@ -323,8 +342,8 @@ if (debug) {
     setWhaleVisible(visible: boolean) {
       whale.group.visible = visible;
     },
-    setIslandsVisible(visible: boolean) {
-      for (const island of islands) island.group.visible = visible;
+    setLandVisible(visible: boolean) {
+      landMesh.group.visible = visible;
     },
     setShipsVisible(visible: boolean) {
       for (const ship of ships) ship.group.visible = visible;
@@ -356,7 +375,8 @@ if (debug) {
         cam: [camera.position.x, camera.position.y, camera.position.z],
         focus: [rig.lookAt.x, rig.lookAt.y, rig.lookAt.z],
         dist: rig.current.distance,
-        islands: layout.islands.length,
+        landTriangles: landMesh.triangles,
+        buildMs: Math.round(buildMs),
         ships: layout.ships.length,
         cycle: cycleDuration(),
         exposure: renderer.toneMappingExposure,
@@ -387,7 +407,7 @@ window.addEventListener('pagehide', () => {
   sky.dispose();
   whale.dispose();
   for (const ship of ships) ship.dispose();
-  for (const island of islands) island.dispose();
+  landMesh.dispose();
   birds.dispose();
   renderer.dispose();
 });

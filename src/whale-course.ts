@@ -2,13 +2,12 @@ import type { NoiseFunction2D } from 'simplex-noise';
 import { fork } from './rng.js';
 import { makeNoise2D } from './noise.js';
 import { clamp, smoothstep } from './math.js';
-import type { IslandSpec } from './terrain.js';
-import { clampShipClearOfIslands } from './terrain.js';
+import { clampClearOfLand, type Shore } from './shore.js';
 
 /** Hard cap on |Δheading| / dt. Gentle enough that a turn reads as a curve, not a spin. */
 export const WHALE_MAX_TURN_RATE = 0.2;
 
-/** Hard clearance passed to clampShipClearOfIslands. */
+/** Hard clearance from land passed to clampClearOfLand. */
 export const WHALE_ISLAND_MARGIN = 20;
 
 export type WhaleCourse = {
@@ -81,36 +80,34 @@ export function createWhaleCourseNoise(seed: number): NoiseFunction2D {
   return makeNoise2D(seed, 11);
 }
 
-function avoidIslands(
+/** How far ahead of the hard margin the whale starts to bend away from land. */
+const LAND_INFLUENCE = 34;
+
+function avoidLand(
   x: number,
   z: number,
   heading: number,
   desired: number,
-  islands: readonly IslandSpec[],
+  shore: Shore,
 ): number {
-  let steer = desired;
+  const gap = shore.clearance(x, z);
+  const influence = WHALE_ISLAND_MARGIN + LAND_INFLUENCE;
+  if (!(gap < influence)) return desired;
+  const away = shore.away(x, z);
+  // Direction toward the land is the reverse of the way out.
+  const ndx = -away.x;
+  const ndz = -away.z;
   const fwd = whaleForward(heading);
-  for (const island of islands) {
-    const dx = island.x - x;
-    const dz = island.z - z;
-    const dist = Math.hypot(dx, dz);
-    const influence = island.radius + WHALE_ISLAND_MARGIN + 34;
-    if (dist >= influence || dist < 1e-3) continue;
-    const closeness = 1 - dist / influence;
-    const ndx = dx / dist;
-    const ndz = dz / dist;
-    const ahead = fwd.x * ndx + fwd.z * ndz;
-    if (ahead < 0.05 && closeness < 0.5) continue;
-    // Arc around the nearer side; when very close, head straight away.
-    const left = headingToward(-ndz, ndx);
-    const right = headingToward(ndz, -ndx);
-    const tangent = Math.abs(shortestAngle(steer, left)) <= Math.abs(shortestAngle(steer, right)) ? left : right;
-    const away = headingToward(-ndx, -ndz);
-    const flee = closeness > 0.72 ? away : tangent;
-    const weight = clamp(closeness * (0.45 + 0.9 * clamp(ahead, 0, 1)), 0, 1);
-    steer += shortestAngle(steer, flee) * weight;
-  }
-  return steer;
+  const closeness = clamp(1 - (gap - WHALE_ISLAND_MARGIN * 0.5) / (influence - WHALE_ISLAND_MARGIN * 0.5), 0, 1);
+  const ahead = fwd.x * ndx + fwd.z * ndz;
+  if (ahead < 0.05 && closeness < 0.5) return desired;
+  // Follow the coast on the nearer side; when very close, head straight out.
+  const left = headingToward(-ndz, ndx);
+  const right = headingToward(ndz, -ndx);
+  const tangent = Math.abs(shortestAngle(desired, left)) <= Math.abs(shortestAngle(desired, right)) ? left : right;
+  const flee = closeness > 0.72 ? headingToward(away.x, away.z) : tangent;
+  const weight = clamp(closeness * (0.45 + 0.9 * clamp(ahead, 0, 1)), 0, 1);
+  return desired + shortestAngle(desired, flee) * weight;
 }
 
 /**
@@ -124,7 +121,7 @@ export function stepWhaleCourse(
   course: WhaleCourse,
   dt: number,
   time: number,
-  islands: readonly IslandSpec[],
+  shore: Shore,
   params: WhaleCourseParams,
   noise: NoiseFunction2D,
 ): void {
@@ -154,7 +151,7 @@ export function stepWhaleCourse(
   if (urgency > 0) {
     desired += shortestAngle(desired, homeH) * urgency;
   }
-  desired = avoidIslands(course.x, course.z, course.heading, desired, islands);
+  desired = avoidLand(course.x, course.z, course.heading, desired, shore);
 
   const delta = shortestAngle(course.heading, desired);
   const maxStep = params.turnRate * dt;
@@ -164,7 +161,7 @@ export function stepWhaleCourse(
   course.x += fwd.x * params.speed * dt;
   course.z += fwd.z * params.speed * dt;
 
-  const cleared = clampShipClearOfIslands(course.x, course.z, islands as IslandSpec[], WHALE_ISLAND_MARGIN);
+  const cleared = clampClearOfLand(course.x, course.z, shore, WHALE_ISLAND_MARGIN);
   course.x = cleared.x;
   course.z = cleared.z;
 
@@ -178,7 +175,7 @@ export function stepWhaleCourse(
 
 export type WhalePilot = {
   params: WhaleCourseParams;
-  step: (course: WhaleCourse, dt: number, time: number, islands: readonly IslandSpec[]) => void;
+  step: (course: WhaleCourse, dt: number, time: number, shore: Shore) => void;
 };
 
 export function createWhalePilot(
@@ -190,8 +187,8 @@ export function createWhalePilot(
   const noise = createWhaleCourseNoise(seed);
   return {
     params,
-    step(course, dt, time, islands) {
-      stepWhaleCourse(course, dt, time, islands, params, noise);
+    step(course, dt, time, shore) {
+      stepWhaleCourse(course, dt, time, shore, params, noise);
     },
   };
 }

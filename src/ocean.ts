@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Water } from 'three/addons/objects/Water.js';
 import { makeNoise4D, fbm4 } from './noise.js';
 import { hash } from './rng.js';
+import type { ShelfMap } from './land.js';
 
 export type OceanHandle = {
   water: Water;
@@ -76,7 +77,7 @@ function buildWaterNormals(seed: number, size = 256): THREE.DataTexture {
 export function createOcean(
   seed: number,
   sunDirection: THREE.Vector3,
-  options: { textureSize?: number; waterColor?: number } = {},
+  options: { textureSize?: number; waterColor?: number; shelves?: { near: ShelfMap; far: ShelfMap; light?: number } } = {},
 ): OceanHandle {
   const textureSize = options.textureSize ?? 256;
   const normalSize = textureSize >= 512 ? 512 : 256;
@@ -99,11 +100,13 @@ export function createOcean(
 
   const material = water.material as THREE.ShaderMaterial;
   if (material.uniforms?.size) material.uniforms.size.value = 1.2;
-  if (material.uniforms?.distortionScale) material.uniforms.distortionScale.value = 3.2;
+  if (material.uniforms?.distortionScale) material.uniforms.distortionScale.value = 4.2;
   // Slightly muted water so the far plane fades into fog without a bright seam.
   if (material.uniforms?.waterColor) material.uniforms.waterColor.value.set(0x1a4e68);
   if (material.uniforms?.alpha) material.uniforms.alpha.value = 1.0;
   if (material.uniforms?.sunColor) material.uniforms.sunColor.value.set(0xe8dcc0);
+
+  const shelfTextures = options.shelves ? applyShelves(material, options.shelves) : [];
 
   let time = 0;
   return {
@@ -121,6 +124,7 @@ export function createOcean(
     dispose() {
       geometry.dispose();
       normals.dispose();
+      for (const texture of shelfTextures) texture.dispose();
       (water.material as THREE.Material).dispose();
       const mirror = (water as unknown as { mirror?: THREE.WebGLRenderTarget }).mirror
         ?? (water.material as THREE.ShaderMaterial).uniforms?.mirrorSampler?.value;
@@ -129,4 +133,78 @@ export function createOcean(
       }
     },
   };
+}
+
+function shelfTexture(shelf: ShelfMap): THREE.DataTexture {
+  const texture = new THREE.DataTexture(shelf.data, shelf.size, shelf.size, THREE.RedFormat, THREE.UnsignedByteType);
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearFilter;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Depth-based colour: turquoise over sandy shelves, teal over the slope,
+ * open-ocean blue beyond. Texel centres map to world via min + uv * extent.
+ */
+function applyShelves(
+  material: THREE.ShaderMaterial,
+  shelves: { near: ShelfMap; far: ShelfMap; light?: number },
+): THREE.DataTexture[] {
+  const near = shelfTexture(shelves.near);
+  const far = shelfTexture(shelves.far);
+  const bounds = (shelf: ShelfMap) => {
+    // Map world XZ onto texel centres.
+    const texel = shelf.extent / (shelf.size - 1);
+    const span = texel * shelf.size;
+    return new THREE.Vector4(shelf.min - texel * 0.5, shelf.min - texel * 0.5, 1 / span, 1 / span);
+  };
+  material.uniforms.shelfNear = { value: near };
+  material.uniforms.shelfFar = { value: far };
+  material.uniforms.shelfNearBounds = { value: bounds(shelves.near) };
+  material.uniforms.shelfFarBounds = { value: bounds(shelves.far) };
+  material.uniforms.shallowColor = { value: new THREE.Color(0x58aaa0) };
+  material.uniforms.shelfColor = { value: new THREE.Color(0x1d6f7c) };
+  material.uniforms.shallowLight = { value: shelves.light ?? 1 };
+  material.fragmentShader = material.fragmentShader
+    .replace(
+      'uniform vec3 waterColor;',
+      `uniform vec3 waterColor;
+      uniform sampler2D shelfNear;
+      uniform sampler2D shelfFar;
+      uniform vec4 shelfNearBounds;
+      uniform vec4 shelfFarBounds;
+      uniform vec3 shallowColor;
+      uniform vec3 shelfColor;
+      uniform float shallowLight;`,
+    )
+    .replace(
+      'vec3 scatter = max( 0.0, dot( surfaceNormal, eyeDirection ) ) * waterColor;',
+      `vec2 nearUv = ( worldPosition.xz - shelfNearBounds.xy ) * shelfNearBounds.zw;
+      vec2 farUv = ( worldPosition.xz - shelfFarBounds.xy ) * shelfFarBounds.zw;
+      vec2 inside = step( vec2( 0.0 ), nearUv ) * step( nearUv, vec2( 1.0 ) );
+      float shelf = mix( texture2D( shelfFar, farUv ).r, texture2D( shelfNear, nearUv ).r, inside.x * inside.y );
+      float shallow = smoothstep( 0.45, 0.85, shelf );
+      float slope = smoothstep( 0.45, 0.75, shelf );
+      vec3 tint = mix( waterColor, shelfColor, slope );
+      tint = mix( tint, shallowColor, shallow );
+      vec3 scatter = max( 0.0, dot( surfaceNormal, eyeDirection ) ) * tint;`,
+    )
+        .replace(
+      'vec3 outgoingLight = albedo;',
+      `// Light coming up through clear shallows, blended under the reflection (Fresnel):
+      // strong where the view is steep, gone at grazing angles and with distance.
+      float facing = mix( 0.12, 1.0, smoothstep( 0.004, 0.03, eyeDirection.y ) );
+      float nearby = 1.0 - smoothstep( 500.0, 1500.0, distance );
+      float shelfMix = ( shallow * 0.9 + slope * 0.25 ) * facing * nearby * ( 1.0 - reflectance * 0.6 );
+      // HDR so the turquoise survives the scene's low exposure.
+      vec3 under = mix( shelfColor, shallowColor, shallow ) * shallowLight * 2.4;
+      albedo = mix( albedo, under, clamp( shelfMix, 0.0, 0.9 ) );
+      vec3 outgoingLight = albedo;`,
+    );
+  material.needsUpdate = true;
+  return [near, far];
 }

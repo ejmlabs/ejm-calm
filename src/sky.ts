@@ -13,6 +13,11 @@ export type SkyHandle = {
   sunDirection: THREE.Vector3;
   sunAzimuthDeg: number;
   horizonColor: THREE.Color;
+  /** Display colour of the sky just above the horizon; distant land hazes toward it. */
+  hazeColor: THREE.Color;
+  /** Sky colours at HAZE_ANGLES; a peak hazes toward the sky right behind it. */
+  hazeGradient: THREE.Color[];
+  hazeDensity: number;
   timeOfDay: TimeOfDay;
   envMap: THREE.Texture | null;
   update: (dt: number) => void;
@@ -26,6 +31,27 @@ const presets: Record<TimeOfDay, { elevation: number; azimuth: number; turbidity
   afternoon: { elevation: 38, azimuth: 200, turbidity: 2.0, rayleigh: 1.4, mie: 0.0028, exposure: 0.46, mieG: 0.78 },
   dusk: { elevation: 4, azimuth: 250, turbidity: 5.5, rayleigh: 2.2, mie: 0.0035, exposure: 0.45, mieG: 0.8 },
 };
+
+/** Elevation angles (degrees above the horizon) of the measured sky colours below. */
+export const HAZE_ANGLES = [0.3, 2, 5, 10, 16];
+
+/** Sky colour at each HAZE_ANGLES elevation, measured per preset looking sunward (sRGB). */
+const hazeHex: Record<TimeOfDay, number[]> = {
+  golden: [0x554644, 0x5c5347, 0x536253, 0x3a5e63, 0x274f66],
+  morning: [0xd4d9da, 0xccd9da, 0xb7d2da, 0x92bfd6, 0x6fa6ce],
+  afternoon: [0xeaeeee, 0xe5edee, 0xd7e8ee, 0xbbdaea, 0x9cc8e5],
+  dusk: [0x4b4041, 0x554a43, 0x515a4b, 0x3e5c5a, 0x2b5261],
+};
+
+/** Land haze density: low sun scatters more, so far ranges fade sooner. */
+const hazeDensity: Record<TimeOfDay, number> = {
+  golden: 0.00044,
+  morning: 0.00028,
+  afternoon: 0.00026,
+  dusk: 0.0005,
+};
+
+export const FOG_DENSITY = 0.00034;
 
 export function pickTimeOfDay(seed: number): TimeOfDay {
   const rng = fork(seed, 'tod');
@@ -92,7 +118,8 @@ export function createSky(
   const waterFog = new THREE.Color(0x163e54);
   horizonColor.lerp(waterFog, 0.42);
 
-  scene.fog = new THREE.FogExp2(horizonColor.getHex(), 0.0031);
+  // Thin haze: coasts stay readable for kilometres and melt into the horizon.
+  scene.fog = new THREE.FogExp2(horizonColor.getHex(), FOG_DENSITY);
   scene.background = null;
 
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -120,6 +147,9 @@ export function createSky(
     sunDirection,
     sunAzimuthDeg: azimuth,
     horizonColor,
+    hazeColor: new THREE.Color().setHex(hazeHex[timeOfDay][0]!, THREE.SRGBColorSpace),
+    hazeGradient: hazeHex[timeOfDay].map((value) => new THREE.Color().setHex(value, THREE.SRGBColorSpace)),
+    hazeDensity: hazeDensity[timeOfDay],
     timeOfDay,
     envMap,
     update(dt: number) {
@@ -131,7 +161,7 @@ export function createSky(
       sun.position.copy(sunDirection).multiplyScalar(200);
       const fog = scene.fog as THREE.FogExp2 | null;
       if (fog) {
-        fog.density = lerp(0.0017, 0.002, 0.5 + 0.5 * Math.sin(time * 0.015));
+        fog.density = lerp(FOG_DENSITY * 0.92, FOG_DENSITY * 1.08, 0.5 + 0.5 * Math.sin(time * 0.015));
       }
     },
     dispose() {

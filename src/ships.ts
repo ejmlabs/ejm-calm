@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { fork } from './rng.js';
-import type { IslandSpec, ShipSpec } from './terrain.js';
-import { clampShipClearOfIslands } from './terrain.js';
+import { SHIP_LAND_MARGIN, type ShipSpec } from './terrain.js';
+import { clampClearOfLand, type Shore } from './shore.js';
 
 export type ShipHandle = {
   group: THREE.Group;
   spec: ShipSpec;
-  update: (dt: number, time: number, islands: IslandSpec[]) => void;
+  update: (dt: number, time: number, shore: Shore) => void;
   dispose: () => void;
 };
 
@@ -154,12 +154,12 @@ export function createShips(specs: ShipSpec[]): ShipHandle[] {
     return {
       group,
       spec,
-      update(dt: number, time: number, islands: IslandSpec[]) {
+      update(dt: number, time: number, shore: Shore) {
         heading += dt * 0.015 * (spec.kind === 'sloop' ? 1 : 0.7);
         const speed = drift * dt;
         x += Math.sin(heading) * speed;
         z += Math.cos(heading) * speed;
-        const cleared = clampShipClearOfIslands(x, z, islands, 14);
+        const cleared = clampClearOfLand(x, z, shore, SHIP_LAND_MARGIN * 0.6);
         x = cleared.x;
         z = cleared.z;
         const limit = 280;

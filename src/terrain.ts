@@ -1,16 +1,7 @@
 import { fork, hash } from './rng.js';
-import { fbm2, makeNoise2D, ridged2 } from './noise.js';
 import { clamp, distance2 } from './math.js';
-
-export type IslandSpec = {
-  id: number;
-  x: number;
-  z: number;
-  radius: number;
-  height: number;
-  mountain: boolean;
-  seed: number;
-};
+import { createLand, type Land } from './land.js';
+import { clampClearOfLand } from './shore.js';
 
 export type ShipSpec = {
   id: number;
@@ -23,7 +14,7 @@ export type ShipSpec = {
 };
 
 export type WorldLayout = {
-  islands: IslandSpec[];
+  land: Land;
   ships: ShipSpec[];
   whaleHome: { x: number; z: number };
   /** Camera yaw (radians): subjects in look direction (−sin, −cos). */
@@ -65,45 +56,6 @@ export function inPortraitViewCone(
   return angle <= halfConeRad;
 }
 
-export function sampleIslandHeight(
-  island: IslandSpec,
-  localX: number,
-  localZ: number,
-): number {
-  const noise = makeNoise2D(island.seed, 1);
-  const ridge = makeNoise2D(island.seed, 2);
-  const r = Math.hypot(localX, localZ) / Math.max(1, island.radius);
-  if (r >= 1) return 0;
-  const falloff = Math.pow(1 - r * r, 1.65);
-  const base = fbm2(noise, localX * 0.035, localZ * 0.035, 5);
-  const ridges = island.mountain ? ridged2(ridge, localX * 0.02, localZ * 0.02, 4) : 0;
-  const height = (0.35 + 0.45 * (base * 0.5 + 0.5) + 0.55 * ridges) * island.height * falloff;
-  return Math.max(0, height);
-}
-
-/** Build a finite heightfield for one island. Heights are world Y above water. */
-export function buildHeightfield(
-  island: IslandSpec,
-  segments: number,
-): { size: number; heights: Float32Array; maxHeight: number } {
-  const size = island.radius * 2.2;
-  const count = segments + 1;
-  const heights = new Float32Array(count * count);
-  let maxHeight = 0;
-  for (let iz = 0; iz < count; iz++) {
-    for (let ix = 0; ix < count; ix++) {
-      const u = ix / segments;
-      const v = iz / segments;
-      const lx = (u - 0.5) * size;
-      const lz = (v - 0.5) * size;
-      const h = sampleIslandHeight(island, lx, lz);
-      heights[iz * count + ix] = h;
-      if (h > maxHeight) maxHeight = h;
-    }
-  }
-  return { size, heights, maxHeight };
-}
-
 function placeAway(
   rng: () => number,
   existing: Array<{ x: number; z: number; radius: number }>,
@@ -113,6 +65,7 @@ function placeAway(
   attempts = 48,
   /** When set, place along camera yaw convention (−sin/−cos). */
   yawBias?: { center: number; spread: number },
+  water: (x: number, z: number) => boolean = () => true,
 ): { x: number; z: number } | null {
   for (let i = 0; i < attempts; i++) {
     const angle = yawBias
@@ -122,7 +75,7 @@ function placeAway(
     // Camera convention: lookDir = (−sin θ, −cos θ).
     const x = -Math.sin(angle) * dist;
     const z = -Math.cos(angle) * dist;
-    let ok = true;
+    let ok = water(x, z);
     for (const other of existing) {
       if (distance2(x, z, other.x, other.z) < other.radius + clearance) {
         ok = false;
@@ -139,13 +92,13 @@ function shortestAngle(a: number, b: number): number {
 }
 
 /**
- * Subject-derived camera yaw: hero ship primary, nearest-in-front island secondary.
+ * Subject-derived camera yaw: hero ship primary, nearest-in-front coast secondary.
  * Sun azimuth is only a tiebreak.
  */
 export function computeViewYaw(
   whale: { x: number; z: number },
   hero: { x: number; z: number },
-  islands: IslandSpec[],
+  landmarks: ReadonlyArray<{ x: number; z: number }>,
   sunAzimuthDeg: number,
 ): number {
   const sunYaw = (sunAzimuthDeg * Math.PI) / 180;
@@ -164,20 +117,20 @@ export function computeViewYaw(
       ? Math.atan2(-heroDx / heroLen, -heroDz / heroLen)
       : sunYaw;
 
-  // Nearest island already roughly in front of the hero heading (ignore behind-camera blobs).
-  let nearest: IslandSpec | null = null;
+  // Nearest landmark already roughly in front of the hero heading (ignore anything behind).
+  let nearest: { x: number; z: number } | null = null;
   let nearestD = Infinity;
   const front = lookDirXZ(yaw);
-  for (const island of islands) {
-    const dx = island.x - focus.x;
-    const dz = island.z - focus.z;
+  for (const mark of landmarks) {
+    const dx = mark.x - focus.x;
+    const dz = mark.z - focus.z;
     const len = Math.hypot(dx, dz);
     if (len < 1e-3) continue;
     const dot = (dx / len) * front.x + (dz / len) * front.z;
     if (dot < 0.55) continue; // outside ~±57°
     if (len < nearestD) {
       nearestD = len;
-      nearest = island;
+      nearest = mark;
     }
   }
 
@@ -199,14 +152,40 @@ export function computeViewYaw(
   return yaw;
 }
 
-export function layoutWorld(seed: number, sunAzimuthDeg = 185): WorldLayout {
+/** Nearest land in front of the focus, marching rays across the portrait cone. */
+export function coastAhead(
+  land: Land,
+  yaw: number,
+  focus: { x: number; z: number },
+  maxDist = 2600,
+  halfConeRad = (30 * Math.PI) / 180,
+): { x: number; z: number; dist: number } | null {
+  let best: { x: number; z: number; dist: number } | null = null;
+  for (let i = 0; i <= 12; i++) {
+    const a = yaw + (i / 12 - 0.5) * 2 * halfConeRad;
+    const dir = lookDirXZ(a);
+    for (let d = 60; d <= maxDist; d += 30) {
+      if (best && d >= best.dist) break;
+      const x = focus.x + dir.x * d;
+      const z = focus.z + dir.z * d;
+      if (land.maskAt(x, z) > 0) {
+        best = { x, z, dist: d };
+        break;
+      }
+    }
+  }
+  return best;
+}
+
+/** Ships keep this much water between hull and coast. */
+export const SHIP_LAND_MARGIN = 40;
+
+export function layoutWorld(seed: number, sunAzimuthDeg = 185, options: { gridSize?: number } = {}): WorldLayout {
   const rng = fork(seed, 'layout');
   const sunYaw = (sunAzimuthDeg * Math.PI) / 180;
-  const islandCount = 2 + Math.floor(rng() * 3); // 2–4
-  const islands: IslandSpec[] = [];
   const occupied: Array<{ x: number; z: number; radius: number }> = [];
 
-  // Whale first (near origin), then hero along sun, then silhouette island in that cone.
+  // Whale first (near origin), then hero along sun; land is then anchored in that view.
   const whalePos = placeAway(rng, occupied, 8, 36, 22) ?? { x: 10, z: -16 };
   occupied.push({ x: whalePos.x, z: whalePos.z, radius: 16 });
 
@@ -222,59 +201,34 @@ export function layoutWorld(seed: number, sunAzimuthDeg = 185): WorldLayout {
     60,
     { center: sunYaw, spread: (14 * Math.PI) / 180 },
   ) ?? pointAlongYaw(sunYaw, 95, whalePos);
-  {
-    const kind: ShipSpec['kind'] = rng() > 0.4 ? 'tall' : 'sloop';
-    const spec: ShipSpec = {
-      id: 0,
-      x: heroPos.x,
-      z: heroPos.z,
-      heading: sunYaw + Math.PI * 0.5,
-      scale: kind === 'tall' ? 1.35 * (1.1 + rng() * 0.25) : 1.0 + rng() * 0.25,
-      kind,
-      seed: hash(seed, 'ship', 0),
-    };
-    ships.push(spec);
-    occupied.push({ x: spec.x, z: spec.z, radius: 14 });
-  }
+  const heroKind: ShipSpec['kind'] = rng() > 0.4 ? 'tall' : 'sloop';
+  ships.push({
+    id: 0,
+    x: heroPos.x,
+    z: heroPos.z,
+    heading: sunYaw + Math.PI * 0.5,
+    scale: heroKind === 'tall' ? 1.35 * (1.1 + rng() * 0.25) : 1.0 + rng() * 0.25,
+    kind: heroKind,
+    seed: hash(seed, 'ship', 0),
+  });
 
-  // Provisional subject yaw (hero-primary) before islands.
+  // Provisional subject yaw (hero-primary) anchors the land ahead of the camera.
   let viewYaw = computeViewYaw(whalePos, ships[0]!, [], sunAzimuthDeg);
+  const land = createLand(seed, { viewYaw, gridSize: options.gridSize });
 
-  for (let i = 0; i < islandCount; i++) {
-    const mountain = i === 0 || (i === islandCount - 1 && rng() > 0.4);
-    // Near silhouette stays small so its peak is under ~40% of a phone frame.
-    const radius = mountain ? (i === 0 ? 32 + rng() * 10 : 48 + rng() * 22) : 24 + rng() * 16;
-    const inCone = i === 0;
-    const minR = inCone ? 280 : 340 + i * 40;
-    const maxR = inCone ? 380 : 620 + i * 30;
-    const bias = inCone
-      ? { center: viewYaw, spread: (14 * Math.PI) / 180 }
-      : { center: viewYaw + (i % 2 === 0 ? 1.1 : -1.1), spread: (50 * Math.PI) / 180 };
-    const fallbackYaw = inCone ? viewYaw : viewYaw + (i % 2 === 0 ? 1.2 : -1.2);
-    const pos = placeAway(
-      rng,
-      occupied,
-      minR,
-      maxR,
-      radius + 55,
-      80,
-      bias,
-    ) ?? pointAlongYaw(fallbackYaw, (minR + maxR) / 2);
-    const spec: IslandSpec = {
-      id: i,
-      x: pos.x,
-      z: pos.z,
-      radius,
-      height: mountain ? (i === 0 ? 16 + rng() * 10 : 28 + rng() * 18) : 7 + rng() * 8,
-      mountain,
-      seed: hash(seed, 'island', i),
-    };
-    islands.push(spec);
-    occupied.push({ x: spec.x, z: spec.z, radius: spec.radius * 1.15 });
+  // The harbour is open water, but make sure of it.
+  const whaleHome = clampClearOfLand(whalePos.x, whalePos.z, land, SHIP_LAND_MARGIN + 60);
+  {
+    const hero = ships[0]!;
+    const clear = clampClearOfLand(hero.x, hero.z, land, SHIP_LAND_MARGIN);
+    hero.x = clear.x;
+    hero.z = clear.z;
+    occupied.push({ x: hero.x, z: hero.z, radius: 14 });
   }
 
+  const water = (x: number, z: number) => land.clearance(x, z) > SHIP_LAND_MARGIN;
   for (let i = 1; i < shipCount; i++) {
-    const pos = placeAway(rng, occupied, 50, 220, 18);
+    const pos = placeAway(rng, occupied, 50, 220, 18, 48, undefined, water);
     if (!pos) continue;
     const kind: ShipSpec['kind'] = rng() > 0.55 ? 'tall' : 'sloop';
     const spec: ShipSpec = {
@@ -290,81 +244,17 @@ export function layoutWorld(seed: number, sunAzimuthDeg = 185): WorldLayout {
     occupied.push({ x: spec.x, z: spec.z, radius: 12 });
   }
 
-  viewYaw = computeViewYaw(whalePos, ships[0]!, islands, sunAzimuthDeg);
+  // Keep the yaw the land was composed for; pulling toward a coast afterwards
+  // would drift the frame off the scored composition.
+  viewYaw = computeViewYaw(whaleHome, ships[0]!, [], sunAzimuthDeg);
 
   // Re-aim hero heading so sails read sideways to the camera.
   ships[0]!.heading = viewYaw + Math.PI * 0.5 + (rng() - 0.5) * 0.25;
 
   return {
-    islands,
+    land,
     ships,
-    whaleHome: whalePos,
+    whaleHome,
     viewYaw,
   };
-}
-
-export function islandsOverlap(a: IslandSpec, b: IslandSpec): boolean {
-  return distance2(a.x, a.z, b.x, b.z) < a.radius + b.radius;
-}
-
-export function shipHitsIsland(ship: ShipSpec, island: IslandSpec, margin = 10): boolean {
-  return distance2(ship.x, ship.z, island.x, island.z) < island.radius + margin;
-}
-
-export function clampShipClearOfIslands(
-  x: number,
-  z: number,
-  islands: IslandSpec[],
-  margin = 12,
-): { x: number; z: number } {
-  let cx = x;
-  let cz = z;
-  for (const island of islands) {
-    const d = distance2(cx, cz, island.x, island.z);
-    const need = island.radius + margin;
-    if (d < need && d > 1e-4) {
-      const push = (need - d) / d;
-      cx += (cx - island.x) * push;
-      cz += (cz - island.z) * push;
-    } else if (d <= 1e-4) {
-      cx = island.x + need;
-      cz = island.z;
-    }
-  }
-  return { x: cx, z: cz };
-}
-
-const SAND: [number, number, number] = [0xb8 / 255, 0xa8 / 255, 0x88 / 255]; // #b8a888
-const FOREST_LO: [number, number, number] = [0x2f / 255, 0x4a / 255, 0x2c / 255]; // #2f4a2c
-const FOREST_HI: [number, number, number] = [0x3d / 255, 0x5a / 255, 0x34 / 255]; // #3d5a34
-const ROCK_LO: [number, number, number] = [0x5e / 255, 0x5a / 255, 0x52 / 255]; // #5e5a52
-const ROCK_HI: [number, number, number] = [0x6f / 255, 0x66 / 255, 0x5a / 255]; // #6f665a
-
-function mixRgb(
-  a: [number, number, number],
-  b: [number, number, number],
-  t: number,
-): [number, number, number] {
-  const u = clamp(t, 0, 1);
-  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
-}
-
-/** Muted forest / grey-brown rock. Sand only in a thin waterline band. No snow. */
-export function waterlineColor(
-  height: number,
-  maxHeight: number,
-  slopeY = 1,
-  _opts?: { allowSnow?: boolean },
-): [number, number, number] {
-  const t = clamp(height / Math.max(0.001, maxHeight), 0, 1);
-  const forest = mixRgb(FOREST_LO, FOREST_HI, t);
-  // Steep faces and high peaks drift to rock; gentle slopes stay forest.
-  const steep = clamp((0.82 - slopeY) / 0.42, 0, 1);
-  const peak = clamp((t - 0.62) / 0.3, 0, 1);
-  const rockAmt = clamp(steep * 0.85 + peak * 0.55, 0, 1);
-  const rock = mixRgb(ROCK_LO, ROCK_HI, t);
-  const land = mixRgb(forest, rock, rockAmt);
-  // Thin sand only at the waterline, blended out by ~1.4 m.
-  if (height < 1.4) return mixRgb(SAND, land, clamp(height / 1.4, 0, 1));
-  return land;
 }

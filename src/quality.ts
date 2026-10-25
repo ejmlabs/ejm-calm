@@ -25,7 +25,7 @@ export type QualityState = {
   initialTier: QualityTier;
   software: boolean;
   waterSize: number;
-  islandSegments: number;
+  landSegments: number;
   changed: string | null;
 };
 
@@ -37,7 +37,7 @@ export function selectQualityTier({ mobile = false, software = false, cores = 8,
 const names: QualityTier[] = ['low', 'medium', 'high'];
 const caps: Record<QualityTier, number> = { high: 2, medium: 1.5, low: 1.25 };
 const waterSizes: Record<QualityTier, number> = { high: 512, medium: 256, low: 256 };
-const islandSegs: Record<QualityTier, number> = { high: 96, medium: 64, low: 48 };
+const landSegs: Record<QualityTier, number> = { high: 128, medium: 112, low: 96 };
 
 export function createQuality({
   mobile = false,
@@ -65,7 +65,7 @@ export function createQuality({
     initialTier: tier,
     software,
     waterSize: waterSizes[tier],
-    islandSegments: islandSegs[tier],
+    landSegments: landSegs[tier],
     changed: null,
   };
 }
@@ -88,7 +88,7 @@ export function updateQuality(state: QualityState, milliseconds: number): boolea
       state.maximum = Math.min(state.dpr, caps[state.tier]);
       state.ratio = Math.min(state.ratio, state.maximum);
       state.waterSize = waterSizes[state.tier];
-      state.islandSegments = islandSegs[state.tier];
+      state.landSegments = landSegs[state.tier];
       state.changed = 'tier';
     } else {
       state.ratio = Math.max(state.minimum, state.ratio - 0.15);
@@ -99,7 +99,7 @@ export function updateQuality(state: QualityState, milliseconds: number): boolea
       state.tier = names[names.indexOf(state.tier) + 1]!;
       state.maximum = Math.min(state.dpr, caps[state.tier]);
       state.waterSize = waterSizes[state.tier];
-      state.islandSegments = islandSegs[state.tier];
+      state.landSegments = landSegs[state.tier];
       state.changed = 'tier';
     }
   }

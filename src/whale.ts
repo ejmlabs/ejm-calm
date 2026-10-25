@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { fork, hash } from './rng.js';
 import { clamp, damp, lerp, smoothstep } from './math.js';
-import type { IslandSpec } from './terrain.js';
+import type { Shore } from './shore.js';
 import { createWhalePilot, type WhaleCourse } from './whale-course.js';
 
 export type WhalePhase = 'swim' | 'surface' | 'spout' | 'dive' | 'breach' | 'splash';
@@ -22,7 +22,7 @@ export type WhaleState = {
 export type WhaleHandle = {
   group: THREE.Group;
   state: WhaleState;
-  update: (dt: number, time: number, islands: IslandSpec[]) => void;
+  update: (dt: number, time: number, shore: Shore) => void;
   forcePhase: (phase: WhalePhase) => void;
   dispose: () => void;
 };
@@ -367,7 +367,7 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
         group.rotation.z = 0;
       }
     },
-    update(dt: number, time: number, islands: IslandSpec[]) {
+    update(dt: number, time: number, shore: Shore) {
       // Start mid-surface so t≈0 shows the back; then follow the cycle.
       const phaseOffset = PHASE_LEN.swim + PHASE_LEN.surface * 0.45;
       const schedule = forced
@@ -383,7 +383,7 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
 
       // Freeze the cruise while a review phase is forced so event framing stays locked.
       if (!forced) {
-        pilot.step(course, dt, time, islands);
+        pilot.step(course, dt, time, shore);
         state.x = course.x;
         state.z = course.z;
         state.heading = course.heading;
