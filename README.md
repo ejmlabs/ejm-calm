@@ -39,16 +39,21 @@ so visiting cells in a different order produces the same world.
 
 ## Run locally
 
-Use a current Node.js release and run `npm run serve`, then open
-<http://127.0.0.1:8080>. Choose another port with `npm run serve -- 8081`.
-There is no bundler or build step. The browser needs WebGL 2.
+Use a current Node.js release. Install with `npm install`. For day-to-day work,
+`npm run dev` starts the Vite development server on <http://127.0.0.1:8080>.
+`npm run serve` typechecks, runs `vite build`, then previews `dist/` on loopback
+(choose another port with `npm run serve -- 8081`). The browser needs WebGL 2.
 
-`npm test` checks pure generation, flight, storage, seeds, and quality logic.
-`npm run test:browser` checks desktop and mobile rendering and controls.
-`npm run shots` captures desktop and mobile views in `shots/`, including a
-390×844 mobile viewport at DPR 3. Browser checks use the already installed
-browser automation dependency and the system browser executable; the browser may
-need permission to run outside a restricted environment.
+TypeScript sources live under `src/` and import `three` and `simplex-noise` from
+npm. `npm run typecheck` runs `tsc --noEmit`; `npm run build` typechecks then
+produces `dist/` via Vite.
+
+`npm test` runs unit tests with Vitest (generation, flight, storage, seeds,
+quality, and related pure modules). `npm run test:browser` builds then checks
+desktop and mobile rendering and controls. `npm run shots` builds then captures
+desktop and mobile views in `shots/`, including a 390×844 mobile viewport at
+DPR 3. Browser checks use Playwright Core and the system browser executable;
+the browser may need permission to run outside a restricted environment.
 
 The full capture waits for surface bakes and exposure, then writes hero frames
 for seeds `42`, `7`, `1234`, and `98765` at desktop 1440×900 and mobile
@@ -63,18 +68,20 @@ reference views. Local review URLs accept `?seed=42&debug=1&debugRegion=ember`
 
 ## Static deployment
 
-`npm run build` copies the public tree into `dist/` and writes `dist/_headers`
-with the content security policy, framing, sniffing and referrer headers.
-`wrangler.jsonc` serves `dist/` as static assets at fly.ejmlabs.com.
+`npm run build` typechecks, then Vite emits `dist/` (`index.html`, hashed
+`assets/*`, `LICENSE`, `THIRD_PARTY_NOTICES`, and `public/_headers`). Cloudflare
+Pages-style `_headers` sets CSP, framing, sniffing, referrer, and immutable
+caching for `/assets/*`. `wrangler.jsonc` serves `dist/` as static assets at
+fly.ejmlabs.com.
 
-Serve `index.html`, `styles.css`, `src/`, and `vendor/three/` together, preserving
-relative paths. Include `LICENSE` and `THIRD_PARTY_NOTICES`. No server functions,
+Serve the `dist/` tree as produced: `index.html`, `assets/`, `LICENSE`, and
+`THIRD_PARTY_NOTICES` (plus `styles.css` if present). No server functions,
 external assets, import maps, or runtime package resolution are required. The
 same files work from a domain root or a static project subdirectory. Serve
 JavaScript as `text/javascript` and retain the page's content security policy.
 Recommend host response headers for `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, and a strict referrer policy, since meta CSP cannot set framing rules.
-The preview server listens only on loopback, serves an allowlisted public tree,
-and supplies security headers.
+The preview server listens only on loopback, serves an allowlisted Vite output
+tree, and supplies security headers.
 
 Rendering caps device pixel ratio and adapts resolution to sustained frame cost.
 Phones render at 30 frames per second with simpler geometry and cloud layers.

@@ -6,13 +6,25 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "serve": "node tools/serve.mjs",
-    "test": "node --test tests/*.test.mjs",
-    "test:browser": "node tools/smoke.mjs",
-    "shots": "node tools/shots.mjs",
-    "build": "node tools/build.mjs"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:browser": "npm run build && npx tsx tools/smoke.ts",
+    "shots": "npm run build && npx tsx tools/shots.ts",
+    "serve": "npm run build && npx tsx tools/serve.ts",
+    "dev": "vite"
   },
   "devDependencies": {
-    "playwright-core": "^1.64.1"
+    "@types/node": "20.19.43",
+    "@types/three": "0.186.0",
+    "playwright-core": "1.64.1",
+    "tsx": "4.20.5",
+    "typescript": "5.9.3",
+    "vite": "6.4.5",
+    "vitest": "4.1.12"
+  },
+  "dependencies": {
+    "simplex-noise": "4.0.3",
+    "three": "0.186.1"
   }
 }

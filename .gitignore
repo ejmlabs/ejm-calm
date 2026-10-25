@@ -10,3 +10,5 @@ CLAUDE.md
 AGENTS.md
 .orch/
 .claude/
+.build/
+feedback/
