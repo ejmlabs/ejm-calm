@@ -166,6 +166,25 @@ function softCircleTexture(): THREE.CanvasTexture {
   return texture;
 }
 
+/** Soft disc. Center stays under 1 so stacked sprites cannot climb to white. */
+function mistTexture(): THREE.CanvasTexture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.85)');
+  gradient.addColorStop(0.35, 'rgba(255,255,255,0.28)');
+  gradient.addColorStop(0.7, 'rgba(255,255,255,0.06)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export function createWhale(seed: number, home: { x: number; z: number }): WhaleHandle {
   const rng = fork(seed, 'whale');
   const group = new THREE.Group();
@@ -226,30 +245,39 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
   finR.rotation.z = 0.9;
   group.add(finR);
 
-  // Spout: 14 sprites from the blowhole, large enough to read at ~40 m.
-  const spoutTex = softCircleTexture();
+  // Spout: narrow mist column. Layer 1 is omitted by Water's mirror camera (layer 0 only).
+  const MIST_LAYER = 1;
+  const mistTex = mistTexture();
   const spoutGroup = new THREE.Group();
   spoutGroup.visible = false;
-  spoutGroup.position.set(3.2, 0.7, 0);
+  spoutGroup.position.set(-2.6, 0.85, 0);
+  spoutGroup.layers.set(MIST_LAYER);
   const spoutSprites: THREE.Sprite[] = [];
-  for (let i = 0; i < 16; i++) {
+  const SPOUT_N = 10;
+  for (let i = 0; i < SPOUT_N; i++) {
     const mat = new THREE.SpriteMaterial({
-      map: spoutTex,
-      color: 0xf4f8fc,
+      map: mistTex,
+      color: 0xb4c3cc,
       transparent: true,
       opacity: 0,
       depthWrite: false,
+      // The ocean draws the water plane over anything that fails the depth test,
+      // which clips the column back down to a sky wisp. Draw the mist after the
+      // water and skip the depth test so the plume stays in front of the surface.
       depthTest: false,
-      blending: THREE.AdditiveBlending,
-      toneMapped: false,
+      blending: THREE.NormalBlending,
+      toneMapped: true,
     });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.setScalar(1.2);
+    sprite.scale.set(0.8, 0.7, 1);
+    sprite.layers.set(MIST_LAYER);
+    sprite.renderOrder = 2;
     spoutGroup.add(sprite);
     spoutSprites.push(sprite);
   }
   group.add(spoutGroup);
 
+  const spoutTex = softCircleTexture();
   // Splash: ring + outward spray sprites.
   const splashGeo = new THREE.RingGeometry(0.5, 2.2, 32);
   const splashMat = new THREE.MeshBasicMaterial({
@@ -435,23 +463,31 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
       posAttr.needsUpdate = true;
       fluke.rotation.z = Math.sin(time * 2.2 - 3.2) * 0.3;
 
-      // Spout plume — tall enough to read at cinematic distance.
-      spoutGroup.visible = state.spout > 0.02;
-      for (let i = 0; i < spoutSprites.length; i++) {
-        const sprite = spoutSprites[i]!;
-        const mat = sprite.material as THREE.SpriteMaterial;
-        const life = state.spout;
-        if (life <= 0.02) {
-          mat.opacity = 0;
-          continue;
+      // Thin mist column. Local sizes are multiplied by group.scale 1.2, so the
+      // world column is ~0.8 wide at the base, ~2.5 at the top, and ~5 tall.
+      // It rises over ~2.2 s of the 3.5 s spout, then disperses. Peak opacity ≤ 0.34.
+      {
+        const t = state.phase === 'spout' ? state.phaseT : 0;
+        const rising = t < 0.62;
+        const rise = clamp(t / 0.62, 0, 1);
+        const fade = rising ? rise : clamp(1 - (t - 0.62) / 0.38, 0, 1);
+        const columnH = lerp(0.35, 4.5, rise);
+        spoutGroup.visible = fade > 0.02;
+        for (let i = 0; i < spoutSprites.length; i++) {
+          const sprite = spoutSprites[i]!;
+          const mat = sprite.material as THREE.SpriteMaterial;
+          if (fade <= 0.02) {
+            mat.opacity = 0;
+            continue;
+          }
+          const u = i / Math.max(1, spoutSprites.length - 1);
+          const jitter = (hash(seed, i, 'spout') / 0x100000000 - 0.5);
+          const spread = (0.12 + u * 0.7) * (rising ? 0.28 : 0.65 + (1 - fade));
+          sprite.position.set(jitter * spread, u * columnH, jitter * 0.4 * spread);
+          const width = lerp(0.7, 2.15, u);
+          sprite.scale.set(width, lerp(1.25, 1.9, u), 1);
+          mat.opacity = fade * lerp(0.34, 0.16, u);
         }
-        const u = i / spoutSprites.length;
-        const rise = life * (4.5 + u * 2.5);
-        const drift = (hash(seed, i, 'spout') / 0x100000000 - 0.5) * life * 1.4;
-        sprite.position.set(drift * 0.6, rise, drift);
-        const s = lerp(1.0, 3.2, life * (0.35 + u * 0.65));
-        sprite.scale.setScalar(s);
-        mat.opacity = life * (1 - u * 0.3) * 0.85;
       }
 
       // Splash ring + spray.
@@ -488,6 +524,7 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
       darkMat.dispose();
       splashGeo.dispose();
       splashMat.dispose();
+      mistTex.dispose();
       spoutTex.dispose();
       for (const sprite of spoutSprites) (sprite.material as THREE.Material).dispose();
       for (const sprite of splashSprites) (sprite.material as THREE.Material).dispose();

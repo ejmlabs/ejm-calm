@@ -63,15 +63,14 @@ await withBrowser(async (browser, base) => {
     `${directory}mobile-spout.png`,
     { debug: '1' },
     async (page) => {
+      // Natural phone camera. First spout peaks ~5 s (phase offset); seek there, not a close debug frame.
       await page.evaluate(() => {
-        (window as unknown as { __calmReview?: CalmReview }).__calmReview?.forceSpout?.();
+        const review = (window as unknown as { __calmReview?: CalmReview }).__calmReview;
+        const now = review?.time ?? 0;
+        const target = 5.1;
+        if (now < target) review?.advance?.(target - now);
       });
-      await page.waitForTimeout(400);
-      // Re-snap after a couple of ticks so pose + camera agree.
-      await page.evaluate(() => {
-        (window as unknown as { __calmReview?: CalmReview }).__calmReview?.frameWhale?.('spout');
-      });
-      await page.waitForTimeout(350);
+      await page.waitForTimeout(500);
     },
   );
 

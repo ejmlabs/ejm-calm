@@ -92,6 +92,8 @@ renderer.autoClear = true;
 const scene = new THREE.Scene();
 const portrait = window.innerHeight > window.innerWidth;
 const camera = new THREE.PerspectiveCamera(portrait ? 62 : 48, 1, 0.5, 12000);
+// Layer 1 is the spout mist. Water's mirror camera stays on layer 0, so the plume is not reflected.
+camera.layers.enable(1);
 
 let sky: ReturnType<typeof createSky>;
 let ocean: ReturnType<typeof createOcean>;

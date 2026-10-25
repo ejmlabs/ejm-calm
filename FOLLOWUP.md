@@ -1,5 +1,7 @@
 # Follow-up
 
+- Spout was over-bright (additive sprites above the tone-map white point, plus a matching blob in the water mirror). This pass makes it a short translucent mist column on layer 1 so the Water mirror skips it. Monitor it on a device.
+- Cloudflare zone injects its Web Analytics beacon / inline script. The strict CSP blocks it (harmless console errors). Disable RUM/beacon injection on the zone if those errors should go away.
 - Horizon seam under ACES can still show a thin bright water/sky line.
 - Desktop seed 1234 still frames the whale very close, so the head reads as a rounded end-on mass. Pull the default camera back slightly if that crop should show the full side profile.
 - Islands use an unlit material so the muted palette survives ACES. They have no slope shading. A lit look that still holds #2f4a2c / #5e5a52 is unfinished.
