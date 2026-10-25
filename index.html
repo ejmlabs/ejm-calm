@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; worker-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; worker-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <meta name="referrer" content="no-referrer" />
     <meta name="color-scheme" content="dark" />
@@ -15,10 +15,11 @@
       name="description"
       content="A calm, procedurally generated ocean with a whale, ships and islands. Sit and watch."
     />
-    <link
-      rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a3a52'/%3E%3Cpath d='M8 40c8-6 16-6 24 0s16 6 24 0' fill='none' stroke='%239ec5d8' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='46' cy='18' r='5' fill='%23f0d9a8'/%3E%3C/svg%3E"
-    />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <link rel="stylesheet" href="styles.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
@@ -36,7 +37,8 @@
       <noscript><p class="noscript">JavaScript is needed for this scene.</p></noscript>
     </div>
 
-    <p id="title" aria-hidden="true">calm</p>
+    <p id="title" aria-hidden="true">
+      <svg class="mark" viewBox="18 63 221 141" focusable="false"><path d="M128 103.8C119 103.8 113 94.8 100 93.8C86 92.8 76 91.8 64 86.8C50 80.8 40 75.8 32 69.8C22.4 62.6 16.8 69 18 85.8C18 111.8 46 131.8 84 137.8C100 140.8 108 151.8 108 171.8L108 182.8A20 20 0 0 0 148 182.8L148 171.8C148 151.8 156 140.8 172 137.8C210 131.8 238 111.8 238 85.8C239.2 69 233.6 62.6 224 69.8C216 75.8 206 80.8 192 86.8C180 91.8 170 92.8 156 93.8C143 94.8 137 103.8 128 103.8Z" /></svg>calm</p>
 
     <aside id="about" role="dialog" aria-modal="false" aria-labelledby="aboutTitle" inert>
       <button id="aboutClose" type="button" class="icon" aria-label="Close" title="Close">

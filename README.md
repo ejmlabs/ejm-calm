@@ -59,3 +59,6 @@ import maps, or runtime package resolution are required.
 
 MIT © ejmlabs. See `LICENSE` and `THIRD_PARTY_NOTICES` for three.js and
 simplex-noise.
+
+The whale-tail mark (favicon, touch icon and the mark above the title) is the
+ejmlabs calm logo, drawn in the ejm-ui palette. No wordmark or font is shipped.

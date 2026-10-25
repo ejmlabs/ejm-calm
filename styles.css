@@ -143,6 +143,15 @@ a {
   pointer-events: none;
   transition: opacity 0.8s ease;
 }
+#title .mark {
+  display: block;
+  width: 2.1rem;
+  height: auto;
+  margin: 0 auto 0.5rem;
+  fill: currentColor;
+  opacity: 0.8;
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.4));
+}
 #title.is-idle {
   opacity: 0.28;
 }
