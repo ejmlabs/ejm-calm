@@ -7,7 +7,14 @@ import type { ShelfMap } from './land.js';
 export type OceanHandle = {
   water: Water;
   mesh: THREE.Mesh;
-  update: (dt: number, sunDirection: THREE.Vector3) => void;
+  /** With a camera, the plane follows it (render space) while ripples stay fixed to the world. */
+  update: (dt: number, sunDirection: THREE.Vector3, camera?: THREE.Camera) => void;
+  /** World X/Z of render (0, 0); keeps ripples and shelf maps on the world after a recentre. */
+  setOrigin: (x: number, z: number) => void;
+  /** Swaps in shelf maps baked elsewhere in the world (maps are in world coordinates). */
+  setShelves: (shelves: { near?: ShelfMap; far?: ShelfMap }) => void;
+  /** The whale's body origin in render coordinates, drawn as a soft silhouette under the surface. */
+  setWhale: (x: number, y: number, z: number, heading: number) => void;
   setSize: (textureSize: number) => void;
   dispose: () => void;
 };
@@ -119,16 +126,60 @@ export function createOcean(
   if (material.uniforms?.sunColor) material.uniforms.sunColor.value.set(0xe8dcc0);
 
   const shelfTextures = applyWaterLook(material, options.shelves, options.reflectionHaze, options.reflectionGain ?? 1);
+  const maps = { near: options.shelves?.near, far: options.shelves?.far };
+  const origin = { x: 0, z: 0 };
+
+  function place(): void {
+    const uniforms = material.uniforms;
+    // Ripple texture offsets for the origin, reduced to their period in float64 so the GPU never sees large numbers.
+    const size = uniforms.size?.value ?? 1;
+    const fract = (v: number) => v - Math.floor(v);
+    const ox = origin.x * size;
+    const oz = origin.z * size;
+    uniforms.rippleShiftA?.value.set(fract(ox / 103), fract(oz / 103), fract(ox / 107), fract(oz / 107));
+    uniforms.rippleShiftB?.value.set(fract(ox / 8907), fract(oz / 9803), fract(ox / 1091), fract(oz / 1027));
+    if (maps.near && uniforms.shelfNearBounds) uniforms.shelfNearBounds.value.copy(shelfBounds(maps.near, origin));
+    if (maps.far && uniforms.shelfFarBounds) uniforms.shelfFarBounds.value.copy(shelfBounds(maps.far, origin));
+  }
+  place();
 
   let time = 0;
   return {
     water,
     mesh: water,
-    update(dt: number, sun: THREE.Vector3) {
+    update(dt: number, sun: THREE.Vector3, camera?: THREE.Camera) {
       time += dt;
       const uniforms = (water.material as THREE.ShaderMaterial).uniforms;
       if (uniforms.time) uniforms.time.value = time * 0.35;
       if (uniforms.sunDirection) uniforms.sunDirection.value.copy(sun).normalize();
+      if (camera) {
+        water.position.x = camera.position.x;
+        water.position.z = camera.position.z;
+      }
+    },
+    setWhale(x: number, y: number, z: number, heading: number) {
+      material.uniforms.whaleBody?.value.set(x, z, heading, y);
+    },
+    setOrigin(x: number, z: number) {
+      origin.x = x;
+      origin.z = z;
+      place();
+    },
+    setShelves(next: { near?: ShelfMap; far?: ShelfMap }) {
+      const uniforms = material.uniforms;
+      for (const which of ['near', 'far'] as const) {
+        const shelf = next[which];
+        const name = which === 'near' ? 'shelfNear' : 'shelfFar';
+        if (!shelf || !uniforms[name]) continue;
+        const old = uniforms[name].value as THREE.DataTexture;
+        const texture = shelfTexture(shelf);
+        uniforms[name].value = texture;
+        const at = shelfTextures.indexOf(old);
+        if (at >= 0) shelfTextures[at] = texture;
+        old.dispose();
+        maps[which] = shelf;
+      }
+      place();
     },
     setSize(_textureSize: number) {
       // Water render target size is fixed at construction; quality changes adjust DPR instead.
@@ -158,6 +209,13 @@ function shelfTexture(shelf: ShelfMap): THREE.DataTexture {
   return texture;
 }
 
+/** Maps render XZ onto a world-coordinate shelf map's texel centres. */
+export function shelfBounds(shelf: ShelfMap, origin: { x: number; z: number }): THREE.Vector4 {
+  const texel = shelf.extent / (shelf.size - 1);
+  const span = texel * shelf.size;
+  return new THREE.Vector4(shelf.min - texel * 0.5 - origin.x, (shelf.minZ ?? shelf.min) - texel * 0.5 - origin.z, 1 / span, 1 / span);
+}
+
 export type ShaderPatch = { find: string; replace: string };
 
 /**
@@ -175,6 +233,14 @@ export function patchShader(source: string, patches: readonly ShaderPatch[]): st
 
 /** Calm, slightly rough water: reflections streak and lift toward the haze instead of mirroring dark land. */
 const reflectionPatches: ShaderPatch[] = [
+  // Ripples are sampled in render space; these shifts carry the floating origin so they never jump.
+  { find: 'vec2 uv0 = ( uv / 103.0 )', replace: 'vec2 uv0 = ( uv / 103.0 ) + rippleShiftA.xy' },
+  { find: 'vec2 uv1 = uv / 107.0', replace: 'vec2 uv1 = uv / 107.0 + rippleShiftA.zw' },
+  { find: 'vec2 uv2 = uv / vec2( 8907.0, 9803.0 )', replace: 'vec2 uv2 = uv / vec2( 8907.0, 9803.0 ) + rippleShiftB.xy' },
+  { find: 'vec2 uv3 = uv / vec2( 1091.0, 1027.0 )', replace: 'vec2 uv3 = uv / vec2( 1091.0, 1027.0 ) + rippleShiftB.zw' },
+  { find: 'vec4 getNoise( vec2 uv ) {', replace: `uniform vec4 rippleShiftA;
+				uniform vec4 rippleShiftB;
+				vec4 getNoise( vec2 uv ) {` },
   {
     find: 'uniform vec3 waterColor;',
     replace: `uniform vec3 waterColor;
@@ -196,6 +262,40 @@ const reflectionPatches: ShaderPatch[] = [
       float reflectionDark = 1.0 - smoothstep( 0.05, 0.6, reflectionLuma );
       reflectionSample *= mix( 1.0, reflectionGain, reflectionDark );
       reflectionSample = mix( reflectionSample, reflectionHaze * reflectionGain, reflectionLift * reflectionDark );`,
+  },
+];
+
+/**
+ * The mirror-like surface hides anything below y = 0, so a whale cruising just
+ * under it would vanish from the chase camera. Draw it through the water as a
+ * soft, rippled, depth-faded silhouette, as a whale reads from a boat. Shape:
+ * body origin with the head 6 m ahead and the tail stock 4.6 m behind
+ * (whale-model), forward = whaleForward(heading).
+ */
+const whalePatches: ShaderPatch[] = [
+  {
+    find: 'uniform vec3 waterColor;',
+    replace: `uniform vec3 waterColor;
+      uniform vec4 whaleBody;`,
+  },
+  {
+    find: 'vec3 outgoingLight = albedo;',
+    replace: `{
+        vec2 fwd = vec2( -cos( whaleBody.z ), sin( whaleBody.z ) );
+        vec2 rel = worldPosition.xz - whaleBody.xy + surfaceNormal.xz * 0.6;
+        float along = dot( rel, fwd );
+        float across = abs( dot( rel, vec2( -fwd.y, fwd.x ) ) );
+        float s = clamp( ( along + 4.6 ) / 10.6, 0.0, 1.0 );
+        float halfWidth = 1.75 * sqrt( max( 0.0, sin( 3.14159 * ( 0.12 + 0.8 * s ) ) ) );
+        float ends = smoothstep( -5.2, -4.2, along ) * ( 1.0 - smoothstep( 5.4, 6.2, along ) );
+        float body = ( 1.0 - smoothstep( halfWidth * 0.55, halfWidth * 1.05, across ) ) * ends;
+        float fluke = ( 1.0 - smoothstep( 0.8, 2.2, across ) ) * smoothstep( -6.6, -5.6, along ) * ( 1.0 - smoothstep( -5.2, -4.4, along ) );
+        // Clearer near the surface, gone when deep or airborne; weaker at grazing angles where the mirror wins.
+        float clear = exp( -max( 0.0, -whaleBody.w - 1.2 ) / 3.5 ) * ( 1.0 - smoothstep( -0.6, 0.4, whaleBody.w ) );
+        float view = mix( 0.65, 1.0, smoothstep( 0.03, 0.3, eyeDirection.y ) );
+        albedo = mix( albedo, albedo * 0.3 + waterColor * 0.15, max( body, fluke * 0.8 ) * clear * view * 0.85 );
+      }
+      vec3 outgoingLight = albedo;`,
   },
 ];
 
@@ -258,7 +358,7 @@ function applyWaterLook(
   haze: THREE.Color | undefined,
   gain: number,
 ): THREE.DataTexture[] {
-  const patched = patchShader(material.fragmentShader, [...reflectionPatches, ...(shelves ? shelfPatches() : [])]);
+  const patched = patchShader(material.fragmentShader, [...reflectionPatches, ...(shelves ? shelfPatches() : []), ...whalePatches]);
   if (patched === null) {
     const message = 'ejm-calm: Water shader did not match the expected source; using the stock water.';
     if (import.meta.env.DEV) throw new Error(message);
@@ -266,6 +366,10 @@ function applyWaterLook(
     return [];
   }
   material.fragmentShader = patched;
+  material.uniforms.rippleShiftA = { value: new THREE.Vector4() };
+  material.uniforms.rippleShiftB = { value: new THREE.Vector4() };
+  // Far below the floor until the first setWhale, so nothing shows.
+  material.uniforms.whaleBody = { value: new THREE.Vector4(0, 0, 0, -1e4) };
   material.uniforms.reflectionHaze = { value: (haze ?? new THREE.Color(0x8a9aa4)).clone() };
   material.uniforms.reflectionLift = { value: 0.25 };
   material.uniforms.reflectionGain = { value: Number.isFinite(gain) ? Math.min(3, Math.max(1, gain)) : 1 };
@@ -274,16 +378,10 @@ function applyWaterLook(
 
   const near = shelfTexture(shelves.near);
   const far = shelfTexture(shelves.far);
-  const bounds = (shelf: ShelfMap) => {
-    // Map world XZ onto texel centres.
-    const texel = shelf.extent / (shelf.size - 1);
-    const span = texel * shelf.size;
-    return new THREE.Vector4(shelf.min - texel * 0.5, shelf.min - texel * 0.5, 1 / span, 1 / span);
-  };
   material.uniforms.shelfNear = { value: near };
   material.uniforms.shelfFar = { value: far };
-  material.uniforms.shelfNearBounds = { value: bounds(shelves.near) };
-  material.uniforms.shelfFarBounds = { value: bounds(shelves.far) };
+  material.uniforms.shelfNearBounds = { value: shelfBounds(shelves.near, { x: 0, z: 0 }) };
+  material.uniforms.shelfFarBounds = { value: shelfBounds(shelves.far, { x: 0, z: 0 }) };
   material.uniforms.shallowColor = { value: new THREE.Color(0x58aaa0) };
   material.uniforms.shelfColor = { value: new THREE.Color(0x1d6f7c) };
   material.uniforms.shallowLight = { value: shelves.light ?? 1 };

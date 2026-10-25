@@ -142,9 +142,23 @@ function buildShipMesh(spec: ShipSpec): { group: THREE.Group; sails: THREE.Mesh[
   return { group, sails, sailBindZ, disposables };
 }
 
-export function createShips(specs: ShipSpec[]): ShipHandle[] {
-  return specs.map((spec) => {
+export type ShipOptions = {
+  /** World point the ship drifts around, and how far it may wander from it. */
+  anchor?: { x: number; z: number };
+  leash?: number;
+  /** Only nudge off the coast where this says the shore is cheap to read (nav tile built). */
+  shoreReady?: (x: number, z: number) => boolean;
+};
+
+export function createShips(specs: ShipSpec[], options: ShipOptions = {}): ShipHandle[] {
+  return specs.map((spec) => createShip(spec, options));
+}
+
+export function createShip(spec: ShipSpec, options: ShipOptions = {}): ShipHandle {
+  {
     const { group, sails, sailBindZ, disposables } = buildShipMesh(spec);
+    const anchor = options.anchor ?? { x: 0, z: 0 };
+    const leash = options.leash ?? 280;
     let x = spec.x;
     let z = spec.z;
     let heading = spec.heading;
@@ -159,14 +173,15 @@ export function createShips(specs: ShipSpec[]): ShipHandle[] {
         const speed = drift * dt;
         x += Math.sin(heading) * speed;
         z += Math.cos(heading) * speed;
-        const cleared = clampClearOfLand(x, z, shore, SHIP_LAND_MARGIN * 0.6);
-        x = cleared.x;
-        z = cleared.z;
-        const limit = 280;
-        if (Math.hypot(x, z) > limit) {
+        if (!options.shoreReady || options.shoreReady(x, z)) {
+          const cleared = clampClearOfLand(x, z, shore, SHIP_LAND_MARGIN * 0.6);
+          x = cleared.x;
+          z = cleared.z;
+        }
+        if (Math.hypot(x - anchor.x, z - anchor.z) > leash) {
           heading += Math.PI * 0.6;
-          x *= 0.96;
-          z *= 0.96;
+          x = anchor.x + (x - anchor.x) * 0.96;
+          z = anchor.z + (z - anchor.z) * 0.96;
         }
 
         const bob = Math.sin(time * 1.1 + bobPhase) * 0.12;
@@ -197,5 +212,5 @@ export function createShips(specs: ShipSpec[]): ShipHandle[] {
         for (const d of disposables) d.dispose();
       },
     };
-  });
+  }
 }

@@ -1,27 +1,32 @@
 import * as THREE from 'three';
 import { clamp, lerp, smoothstep } from './math.js';
 
-export type WhalePhase = 'swim' | 'surface' | 'spout' | 'dive' | 'breach' | 'splash';
+export type WhalePhase = 'swim' | 'surface' | 'spout' | 'dive' | 'deep' | 'breach' | 'splash';
 
 export const PHASE_LEN: Record<WhalePhase, number> = {
   swim: 18,
   surface: 6,
   spout: 3.5,
   dive: 5,
+  deep: 38,
   breach: 5.5,
   splash: 2.5,
 };
 
-export const PHASE_ORDER: WhalePhase[] = ['swim', 'surface', 'spout', 'dive', 'swim', 'surface', 'spout', 'dive', 'breach', 'splash', 'dive'];
+export const PHASE_ORDER: WhalePhase[] = ['swim', 'surface', 'spout', 'dive', 'deep', 'swim', 'surface', 'spout', 'dive', 'breach', 'splash', 'dive'];
 
 /**
  * Body-origin heights and resting trim. Near the surface the whale rides
- * slightly nose-up with its tail stock sagging: only the head crown, blowholes,
- * a low back line and the fin break the water (about 0.2–0.3 m); the tail stays under.
+ * slightly nose-up with its tail stock sagging: the head crown, blowholes,
+ * back line and fin break the water; the tail stays under.
  */
 export const DEEP_Y = -4.5;
-export const SWIM_Y = -1.4;
-export const SURFACE_Y = -1.3;
+export const SWIM_Y = -0.4;
+/** Cruising depth of the long dive between surfacings. */
+export const DEEP_DIVE_Y = -14;
+/** Smallest gap kept between the body origin and the seafloor. */
+export const FLOOR_CLEARANCE = 3;
+export const SURFACE_Y = -0.7;
 export const SWIM_PITCH = 0.04;
 export const SURFACE_PITCH = 0.085;
 export const REST_ARCH = -0.4;
@@ -161,6 +166,18 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
       out.flipLift = -0.1 * bump(x, 0, 0.3, 0.6, 1);
       break;
     }
+    case 'deep': {
+      // Sound down from the dive, glide along at depth with a slow undulation, then climb back.
+      const down = bump(x, 0, 0.2, 0.8, 1);
+      out.y = lerp(DEEP_Y, DEEP_DIVE_Y, down) + 0.9 * Math.sin(Math.PI * 4 * x) * bump(x, 0.12, 0.3, 0.7, 0.88);
+      out.pitch = -0.22 * bump(x, 0, 0.06, 0.12, 0.22) + 0.24 * bump(x, 0.78, 0.86, 0.92, 1) - 0.05 * Math.cos(Math.PI * 4 * x) * bump(x, 0.12, 0.3, 0.7, 0.88);
+      const glide = bump(x, 0.18, 0.3, 0.7, 0.82);
+      out.stroke = 1 - 0.3 * glide;
+      out.rate = 1 - 0.25 * glide;
+      out.flipSweep = 0.08 * glide;
+      out.bob = 0;
+      break;
+    }
     case 'breach': {
       out.y = breachHeight(x);
       const air = bump(x, BREACH_EXIT - 0.06, BREACH_EXIT + 0.03, BREACH_SPLASH - 0.02, BREACH_SPLASH + 0.08);
@@ -196,6 +213,25 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
       break;
   }
   return out;
+}
+
+/** Width of the blend into the floor limit, metres. */
+const FLOOR_SOFT = 1.5;
+
+/**
+ * Keeps the body origin at least FLOOR_CLEARANCE above the seafloor. A C1 soft
+ * maximum (never below max(y, limit)) eases the whale onto a rising floor
+ * instead of stopping it dead. Over very shallow ground the limit is capped
+ * below the surface-riding height so the floor never lifts the whale out.
+ */
+export function floorLimit(y: number, floorY: number | undefined): number {
+  if (floorY === undefined || !Number.isFinite(floorY)) return y;
+  const limit = Math.min(floorY + FLOOR_CLEARANCE, SURFACE_Y - FLOOR_SOFT);
+  const u = y - limit;
+  // Tolerance: surface riding sits exactly on the blend edge and must pass through untouched.
+  if (u >= FLOOR_SOFT - 1e-9) return y;
+  if (u <= -FLOOR_SOFT) return limit;
+  return limit + ((u + FLOOR_SOFT) * (u + FLOOR_SOFT)) / (4 * FLOOR_SOFT);
 }
 
 export const POSE_KEYS: Array<keyof WhalePose> = ['y', 'pitch', 'roll', 'arch', 'stroke', 'rate', 'flipLift', 'flipSweep', 'bob', 'surge'];

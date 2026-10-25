@@ -58,3 +58,21 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+Sound recordings
+Files: assets/audio (per-file sources, authors and edits in assets/audio/SOURCES.md)
+
+Released under CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/):
+- Joseph Sardin, BigSoundBank (https://bigsoundbank.com/) and LaSonotheque.org:
+  sea waves, beach surf, wind, boat decks, underwater, ocean liner horn, splashes,
+  breath and steam hiss.
+- Spyrogumas: humpback whale song (Wikimedia Commons, Humpbackwhale2.ogg).
+- Sonothèque ADVL: European herring gull, xeno-canto 707075 (Wikimedia Commons).
+
+Public domain:
+- avphillips (PDSounds): herring gull calls (Wikimedia Commons, Gull_1.ogg).
+- US National Park Service: western gull, Golden Gate National Recreation Area
+  (Wikimedia Commons).
+
+The recordings were trimmed, filtered, looped, layered and re-encoded for this project.

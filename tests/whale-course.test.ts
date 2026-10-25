@@ -104,13 +104,12 @@ test('whale cruise travels without spinning and stays in open water, for several
     assert.ok(stats.turned < Math.PI * 2 * 2, `seed ${seed} heading travel ${stats.turned.toFixed(2)} rad`);
     // Extent shows a cruise, not a tight orbit around one point.
     assert.ok(stats.diagonal > 50, `seed ${seed} diagonal ${stats.diagonal.toFixed(1)}`);
-    assert.ok(stats.maxHome > 32, `seed ${seed} max home dist ${stats.maxHome.toFixed(1)}`);
-    assert.ok(stats.maxHome < stats.pilot.params.leash + 28, `seed ${seed} left the frame ${stats.maxHome.toFixed(1)}`);
+    // No home leash: the whale is on a journey and keeps going.
+    assert.ok(stats.endDist > 120, `seed ${seed} displacement ${stats.endDist.toFixed(1)}`);
     const circular = stats.meanR < 36 && stats.stdR < stats.meanR * 0.12;
     assert.equal(circular, false, `seed ${seed} small circle r=${stats.meanR.toFixed(1)} sd=${stats.stdR.toFixed(2)}`);
-    // Open water: the whole cruise stays well off the coast.
-    assert.ok(stats.minClear > 120, `seed ${seed} closest approach to land ${stats.minClear.toFixed(1)}`);
-    assert.ok(stats.endDist > 8 || stats.diagonal > 70, `seed ${seed} displacement ${stats.endDist.toFixed(1)}`);
+    // The opening minutes stay well off the coast.
+    assert.ok(stats.minClear > 60, `seed ${seed} closest approach to land ${stats.minClear.toFixed(1)}`);
   }
 });
 

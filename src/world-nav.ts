@@ -1,0 +1,263 @@
+import type { Shore } from './shore.js';
+
+/**
+ * Navigation field valid anywhere: the signed coast distance on a fixed world
+ * lattice, built in square tiles on demand. Each tile's distance transform runs
+ * over a padded window, so values are exact up to `saturation` metres and
+ * clamped beyond. A tile is a pure function of its coordinates, so anything
+ * steered by it is independent of build order and frame timing; prefetching
+ * only decides when the work happens.
+ */
+export type NavField = Shore & {
+  /** Signed metres to the coast: > 0 at sea, < 0 on land, clamped to ±saturation. */
+  distanceAt: (x: number, z: number) => number;
+  /** Whether the tile holding (x, z) is built (reading it would not stall). */
+  ready: (x: number, z: number) => boolean;
+  /** Builds missing tiles within `radius` of (x, z), nearest first, for at most `budgetMs`; true once all are built. */
+  prefetch: (x: number, z: number, radius: number, budgetMs: number) => boolean;
+  readonly min: number;
+  readonly cell: number;
+  readonly saturation: number;
+  stats: () => { tiles: number; blocks: number };
+};
+
+export type NavOptions = {
+  /** World X/Z of lattice index 0. */
+  min: number;
+  cell: number;
+  /** Cells per tile side. */
+  tile?: number;
+  /** Cells of padding around a tile for its distance transform (at most `tile`). */
+  pad?: number;
+  maxTiles?: number;
+  now?: () => number;
+  /** Mask samples already computed elsewhere on the same lattice (must equal fround(maskAt)). */
+  known?: (i: number, j: number) => number | undefined;
+};
+
+export function createNavField(maskAt: (x: number, z: number) => number, options: NavOptions): NavField {
+  const { min, cell } = options;
+  const T = options.tile ?? 64;
+  const P = Math.min(T, options.pad ?? 32);
+  const maxTiles = options.maxTiles ?? 160;
+  const maxBlocks = maxTiles + 64;
+  const now = options.now ?? (() => performance.now());
+  const saturation = P * cell;
+  const span = T + 1;
+  const W = T + 2 * P + 1;
+
+  /** Mask samples of a T×T block of lattice points (rounded to float32 so any builder agrees). */
+  const blocks = new Map<string, Float32Array>();
+  const tiles = new Map<string, Float32Array>();
+  let pending: { key: string; bx: number; bz: number; data: Float32Array; row: number } | null = null;
+
+  function touch<V>(map: Map<string, V>, key: string, value: V, cap: number): void {
+    map.delete(key);
+    map.set(key, value);
+    while (map.size > cap) map.delete(map.keys().next().value!);
+  }
+
+  function blockRows(job: NonNullable<typeof pending>, until: () => boolean): boolean {
+    const x0 = job.bx * T;
+    const z0 = job.bz * T;
+    while (job.row < T) {
+      const j = z0 + job.row;
+      const z = min + j * cell;
+      for (let i = 0; i < T; i++) {
+        job.data[job.row * T + i] = options.known?.(x0 + i, j) ?? Math.fround(maskAt(min + (x0 + i) * cell, z));
+      }
+      job.row++;
+      if (until()) break;
+    }
+    return job.row >= T;
+  }
+
+  function block(bx: number, bz: number): Float32Array {
+    const key = `${bx}:${bz}`;
+    const hit = blocks.get(key);
+    if (hit) {
+      touch(blocks, key, hit, maxBlocks);
+      return hit;
+    }
+    const job = pending && pending.key === key ? pending : { key, bx, bz, data: new Float32Array(T * T), row: 0 };
+    blockRows(job, () => false);
+    if (pending === job) pending = null;
+    touch(blocks, key, job.data, maxBlocks);
+    return job.data;
+  }
+
+  const toLand = new Float64Array(W * W);
+  const toSea = new Float64Array(W * W);
+  const f = new Float64Array(W);
+  const d = new Float64Array(W);
+  const v = new Int32Array(W);
+  const zz = new Float64Array(W + 1);
+
+  function buildTile(tx: number, tz: number): Float32Array {
+    const i0 = tx * T - P;
+    const j0 = tz * T - P;
+    const inf = 1e20;
+    for (let bz = Math.floor(j0 / T); bz <= Math.floor((j0 + W - 1) / T); bz++) {
+      for (let bx = Math.floor(i0 / T); bx <= Math.floor((i0 + W - 1) / T); bx++) {
+        const data = block(bx, bz);
+        const ia = Math.max(i0, bx * T);
+        const ib = Math.min(i0 + W - 1, bx * T + T - 1);
+        const ja = Math.max(j0, bz * T);
+        const jb = Math.min(j0 + W - 1, bz * T + T - 1);
+        for (let j = ja; j <= jb; j++) {
+          for (let i = ia; i <= ib; i++) {
+            const land = data[(j - bz * T) * T + (i - bx * T)]! > 0;
+            const k = (j - j0) * W + (i - i0);
+            toLand[k] = land ? 0 : inf;
+            toSea[k] = land ? inf : 0;
+          }
+        }
+      }
+    }
+    squaredDistance(toLand, W, f, d, v, zz);
+    squaredDistance(toSea, W, f, d, v, zz);
+    const out = new Float32Array(span * span);
+    for (let j = 0; j < span; j++) {
+      for (let i = 0; i < span; i++) {
+        const k = (j + P) * W + (i + P);
+        const value = toLand[k]! > 0 ? Math.sqrt(toLand[k]!) * cell : -Math.sqrt(toSea[k]!) * cell;
+        out[j * span + i] = Math.max(-saturation, Math.min(saturation, value));
+      }
+    }
+    return out;
+  }
+
+  function tile(tx: number, tz: number): Float32Array {
+    const key = `${tx}:${tz}`;
+    let t = tiles.get(key);
+    if (!t) t = buildTile(tx, tz);
+    touch(tiles, key, t, maxTiles);
+    return t;
+  }
+
+  function distanceAt(x: number, z: number): number {
+    const fx = (x - min) / cell;
+    const fz = (z - min) / cell;
+    if (!Number.isFinite(fx) || !Number.isFinite(fz)) return saturation;
+    const tx = Math.floor(fx / T);
+    const tz = Math.floor(fz / T);
+    const t = tile(tx, tz);
+    const lx = Math.min(T - 1e-9, fx - tx * T);
+    const lz = Math.min(T - 1e-9, fz - tz * T);
+    const x0 = Math.floor(lx);
+    const z0 = Math.floor(lz);
+    const ax = lx - x0;
+    const az = lz - z0;
+    const k = z0 * span + x0;
+    const a = t[k]! + (t[k + 1]! - t[k]!) * ax;
+    const b = t[k + span]! + (t[k + span + 1]! - t[k + span]!) * ax;
+    return a + (b - a) * az;
+  }
+
+  function maskAway(x: number, z: number): { x: number; z: number } {
+    const e = cell * 2;
+    const gx = maskAt(x - e, z) - maskAt(x + e, z);
+    const gz = maskAt(x, z - e) - maskAt(x, z + e);
+    const len = Math.hypot(gx, gz);
+    return len > 1e-9 ? { x: gx / len, z: gz / len } : { x: 1, z: 0 };
+  }
+
+  return {
+    min,
+    cell,
+    saturation,
+    distanceAt,
+    clearance(x, z) {
+      // Texel centres sit about half a cell either side of the coast.
+      return distanceAt(x, z) - cell * 0.5;
+    },
+    away(x, z) {
+      const e = cell;
+      const gx = distanceAt(x + e, z) - distanceAt(x - e, z);
+      const gz = distanceAt(x, z + e) - distanceAt(x, z - e);
+      const len = Math.hypot(gx, gz);
+      if (len > 1e-6) return { x: gx / len, z: gz / len };
+      // Deep inland or far out at sea the clamped field is flat: fall back to the coast mask's slope.
+      return maskAway(x, z);
+    },
+    ready(x, z) {
+      const tx = Math.floor((x - min) / cell / T);
+      const tz = Math.floor((z - min) / cell / T);
+      return tiles.has(`${tx}:${tz}`);
+    },
+    prefetch(x, z, radius, budgetMs) {
+      const start = now();
+      const over = () => now() - start > budgetMs;
+      const size = T * cell;
+      const fx = (x - min) / size;
+      const fz = (z - min) / size;
+      const reach = Math.ceil(radius / size);
+      const wanted: Array<{ tx: number; tz: number; d: number }> = [];
+      for (let tz = Math.floor(fz) - reach; tz <= Math.floor(fz) + reach; tz++) {
+        for (let tx = Math.floor(fx) - reach; tx <= Math.floor(fx) + reach; tx++) {
+          const d = Math.hypot(tx + 0.5 - fx, tz + 0.5 - fz) * size;
+          if (d <= radius + size * 0.71 && !tiles.has(`${tx}:${tz}`)) wanted.push({ tx, tz, d });
+        }
+      }
+      wanted.sort((a, b) => a.d - b.d || a.tz - b.tz || a.tx - b.tx);
+      for (const { tx, tz } of wanted) {
+        // Fill this tile's blocks a row at a time; the distance transform itself is cheap.
+        for (let bz = tz - 1; bz <= tz + 1; bz++) {
+          for (let bx = tx - 1; bx <= tx + 1; bx++) {
+            const key = `${bx}:${bz}`;
+            if (blocks.has(key)) continue;
+            if (!pending || pending.key !== key) pending = { key, bx, bz, data: new Float32Array(T * T), row: 0 };
+            if (!blockRows(pending, over)) return false;
+            touch(blocks, key, pending.data, maxBlocks);
+            pending = null;
+            if (over()) return false;
+          }
+        }
+        tile(tx, tz);
+        if (over()) return false;
+      }
+      return true;
+    },
+    stats() {
+      return { tiles: tiles.size, blocks: blocks.size };
+    },
+  };
+}
+
+/** Exact squared Euclidean distance transform (Felzenszwalb–Huttenlocher) of a size² grid, in place. */
+export function squaredDistance(
+  grid: Float64Array,
+  size: number,
+  f = new Float64Array(size),
+  d = new Float64Array(size),
+  v = new Int32Array(size),
+  z = new Float64Array(size + 1),
+): void {
+  const pass = (offset: number, stride: number) => {
+    for (let i = 0; i < size; i++) f[i] = grid[offset + i * stride]!;
+    let k = 0;
+    v[0] = 0;
+    z[0] = -Infinity;
+    z[1] = Infinity;
+    for (let q = 1; q < size; q++) {
+      let s = ((f[q]! + q * q) - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+      while (s <= z[k]!) {
+        k--;
+        s = ((f[q]! + q * q) - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!);
+      }
+      k++;
+      v[k] = q;
+      z[k] = s;
+      z[k + 1] = Infinity;
+    }
+    k = 0;
+    for (let q = 0; q < size; q++) {
+      while (z[k + 1]! < q) k++;
+      const dq = q - v[k]!;
+      d[q] = dq * dq + f[v[k]!]!;
+    }
+    for (let i = 0; i < size; i++) grid[offset + i * stride] = d[i]!;
+  };
+  for (let row = 0; row < size; row++) pass(row * size, 1);
+  for (let col = 0; col < size; col++) pass(col, size);
+}
