@@ -185,7 +185,8 @@ const reflectionPatches: ShaderPatch[] = [
   {
     find: 'vec2 distortion = surfaceNormal.xz * ( 0.001 + 1.0 / distance ) * distortionScale;',
     // Stretch the ripple vertically on screen, as wind lanes do to real reflections.
-    replace: 'vec2 distortion = surfaceNormal.xz * ( 0.0016 + 1.3 / distance ) * distortionScale * vec2( 1.0, 1.7 );',
+    // Clamp the near term so close reflections (the whale) ripple instead of breaking up.
+    replace: 'vec2 distortion = surfaceNormal.xz * ( 0.0016 + min( 1.3 / distance, 0.012 ) ) * distortionScale * vec2( 1.0, 1.7 );',
   },
   {
     find: 'vec3 reflectionSample = vec3( texture2D( mirrorSampler, mirrorCoord.xy / mirrorCoord.w + distortion ) );',
@@ -221,8 +222,9 @@ function shelfPatches(): ShaderPatch[] {
       vec2 farUv = ( worldPosition.xz - shelfFarBounds.xy ) * shelfFarBounds.zw;
       vec2 inside = step( vec2( 0.0 ), nearUv ) * step( nearUv, vec2( 1.0 ) );
       float shelf = mix( texture2D( shelfFar, farUv ).r, texture2D( shelfNear, nearUv ).r, inside.x * inside.y );
-      float shallow = smoothstep( 0.45, 0.85, shelf );
-      float slope = smoothstep( 0.45, 0.75, shelf );
+      // Wide, overlapping ramps: deep blue eases through teal into turquoise.
+      float shallow = smoothstep( 0.4, 1.0, shelf );
+      float slope = smoothstep( 0.15, 0.75, shelf );
       vec3 tint = mix( waterColor, shelfColor, slope );
       tint = mix( tint, shallowColor, shallow );
       vec3 scatter = max( 0.0, dot( surfaceNormal, eyeDirection ) ) * tint;`,
@@ -231,12 +233,14 @@ function shelfPatches(): ShaderPatch[] {
       find: 'vec3 outgoingLight = albedo;',
       replace: `// Light coming up through clear shallows, blended under the reflection (Fresnel):
       // strong where the view is steep, gone at grazing angles and with distance.
-      float facing = mix( 0.12, 1.0, smoothstep( 0.004, 0.03, eyeDirection.y ) );
-      float nearby = 1.0 - smoothstep( 500.0, 1500.0, distance );
-      float shelfMix = ( shallow * 0.9 + slope * 0.25 ) * facing * nearby * ( 1.0 - reflectance * 0.6 );
+      // The camera sits a few metres up, so everything past ~100 m crowds into a thin band
+      // above the horizon: fade with the view angle so that band never reads as a stripe.
+      float facing = smoothstep( 0.003, 0.06, eyeDirection.y );
+      float nearby = 1.0 - smoothstep( 300.0, 1400.0, distance );
+      float shelfMix = ( shallow * 0.9 + slope * 0.35 ) * facing * nearby * ( 1.0 - reflectance * 0.7 );
       // HDR so the turquoise survives the scene's low exposure.
-      vec3 under = mix( shelfColor, shallowColor, shallow ) * shallowLight * 2.4;
-      albedo = mix( albedo, under, clamp( shelfMix, 0.0, 0.9 ) );
+      vec3 under = mix( shelfColor, shallowColor, shallow ) * shallowLight * 2.1;
+      albedo = mix( albedo, under, clamp( shelfMix, 0.0, 0.8 ) );
       vec3 outgoingLight = albedo;`,
     },
   ];
