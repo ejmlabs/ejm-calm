@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Render previews + contact sheet. Run after build.py."""
-import os, re, subprocess, sys
+"""Render fluke previews + contact sheet. Run after build.py.  Needs resvg-js and Pillow."""
+import os, re, subprocess
+from PIL import Image
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FONT = "/workspace/agents/work/site-polish/packages/tokens/assets/fonts/Manrope-Variable.ttf"
 SAGE, FOREST, INK, PAPER, MIST = "#8A9A7B", "#29443B", "#202721", "#F6F5EF", "#E8EDE3"
-DIRS = ["breach", "fluke", "swell"]
 PV = os.path.join(ROOT, "previews"); os.makedirs(PV, exist_ok=True)
+L = lambda n: os.path.join(ROOT, "logos", "fluke", n + ".svg")
+OLD = "/tmp/fluke-v1"
 
 def inner(path):
     s = open(path).read()
@@ -15,61 +17,90 @@ def inner(path):
 
 def place(path, x, y, h):
     w, hh, body = inner(path); k = h / hh
-    return f'<g transform="translate({x} {y}) scale({k:.4f})">{body}</g>', w * k
+    return f'<g transform="translate({x:.1f} {y:.1f}) scale({k:.4f})">{body}</g>', w * k
 
 def render(svg, out, w=None):
     tmp = out + ".svg"; open(tmp, "w").write(svg)
-    cmd = ["resvg-js", "--font-file", FONT]
-    if w: cmd += ["--fit-width", str(w)]
-    subprocess.run(cmd + [tmp, out], check=True); os.remove(tmp)
+    cmd = ["resvg-js", "--font-file", FONT] + (["--fit-width", str(w)] if w else [])
+    subprocess.run(cmd + [tmp, out], check=True, capture_output=True); os.remove(tmp)
 
-def tile(path, x, y, s, bg, mark_path_fill=None):
-    g, _ = place(path, x, y, s)
-    return g
+def txt(x, y, s, fill, size=22, anchor="start"):
+    return (f'<text x="{x}" y="{y}" font-family="IBM Plex Mono, monospace" font-size="{size}" fill="{fill}" '
+            f'text-anchor="{anchor}">{s}</text>')
 
-def board(d, dark):
-    bg, prim = (INK, "logo-paper") if dark else (PAPER, "logo-primary")
-    L = lambda n: os.path.join(ROOT, "logos", d, n + ".svg")
+def favs(x, y, bg_label, label_fill, sizes=(16, 32, 48), path=None, gap=28):
+    """Favicons at real size (bottom-aligned at y)."""
+    o = ""
+    for sz in sizes:
+        g, _ = place(path or L("favicon"), x, y - sz, sz); o += g
+        o += txt(x + sz / 2, y + 22, sz, label_fill, 14, "middle"); x += sz + gap
+    return o, x
+
+def board(dark):
+    bg, prim, mk = (INK, "logo-paper", "mark-paper") if dark else (PAPER, "logo-primary", "mark-ink")
     W, H = 1600, 900
-    out = f'<rect width="{W}" height="{H}" fill="{bg}"/>'
-    g, w = place(L(prim), 0, 0, 280); out += f'<g transform="translate({(W-w)/2} 130)">{g}</g>'
-    # row: mark variants + favicon tile
-    xs = 330; y = 580; s = 150
-    variants = ["mark-paper"] if dark else ["mark-ink"]
-    items = [("mark", None), (variants[0], None)]
-    x = (W - (3*s + 2*60 + 3*0))/2 - 0
-    x = 380
-    for n, _ in items:
-        g, _w = place(L(n), x, y, s); out += g; x += s + 60
-    g, _w = place(L("favicon"), x, y, s); out += g; x += s + 60
-    # small favicon sizes
-    for sz in (48, 32, 16):
-        g, _w = place(L("favicon"), x, y + s - sz, sz); out += g; x += sz + 24
-    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">{out}</svg>'
-
-def contact():
-    W, H = 2400, 1700
-    o = f'<rect width="{W}" height="{H*0.5}" fill="{PAPER}"/><rect y="{H*0.5}" width="{W}" height="{H*0.5}" fill="{INK}"/>'
-    for i, d in enumerate(DIRS):
-        L = lambda n: os.path.join(ROOT, "logos", d, n + ".svg")
-        cx = 100 + i * 760
-        for row, (dark) in enumerate((False, True)):
-            y0 = row * H / 2
-            g, w = place(L("logo-paper" if dark else "logo-primary"), cx, y0 + 140, 190); o += g
-            x = cx
-            for n in (["mark", "mark-paper"] if dark else ["mark", "mark-ink"]):
-                g, _ = place(L(n), x, y0 + 480, 150); o += g; x += 190
-            g, _ = place(L("favicon"), x, y0 + 480, 150); o += g; x += 190
-            for sz in (48, 32, 16):
-                g, _ = place(L("favicon"), x, y0 + 630 - sz, sz); o += g; x += sz + 14
-        o += f'<text x="{cx}" y="{H/2-40}" font-family="Manrope" font-weight="600" font-size="30" fill="{FOREST}">{d}</text>'
-        o += f'<text x="{cx}" y="{H-40}" font-family="Manrope" font-weight="600" font-size="30" fill="{SAGE}">{d}</text>'
+    o = f'<rect width="{W}" height="{H}" fill="{bg}"/>'
+    g, w = place(L(prim), 0, 0, 300); o += f'<g transform="translate({(W-w)/2:.1f} 110)">{g}</g>'
+    x = 380; y = 570; s = 170
+    for n in (["mark-paper"] if dark else ["mark-sage", "mark-ink"]):
+        g, _ = place(L(n), x, y, s); o += g; x += s + 50
+    g, _ = place(L("icon-sage" if dark else "icon-forest"), x, y, s); o += g; x += s + 70
+    g, _ = place(L("favicon"), x, y, s); o += g; x += s + 70
+    f, _ = favs(x, y + s - 30, bg, PAPER if dark else INK); o += f
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">{o}</svg>'
 
-for d in DIRS:
-    for dark in (False, True):
-        render(board(d, dark), os.path.join(PV, f"{d}-{'dark' if dark else 'light'}.png"))
-    for sz in (16, 32, 48):
-        subprocess.run(["resvg-js", "--fit-width", str(sz), os.path.join(ROOT, "logos", d, "favicon.svg"),
-                        os.path.join(PV, f"{d}-favicon-{sz}.png")], check=True)
+def contact():
+    W, H = 2400, 1800
+    o = f'<rect width="{W}" height="{H}" fill="{MIST}"/>'
+    # lockups: three on light (left), three on dark (right)
+    pw, ph = 1140, 330
+    for col, (bg, items) in enumerate(((PAPER, ["logo-primary", "logo-ink", "logo-primary"]),
+                                       (INK, ["logo-paper", "logo-paper", "logo-paper"]))):
+        x0 = 40 + col * 1180
+        o += f'<rect x="{x0}" y="40" width="{pw}" height="{ph*2+30}" fill="{bg}" rx="0"/>'
+    lab = lambda x, y, s, c: txt(x, y, s, c, 18)
+    for col, (names, labels, c1, c2) in enumerate((
+            (["logo-primary", "logo-ink"], ["PRIMARY (SAGE + INK)", "INK"], INK, FOREST),
+            (["logo-paper"], ["PAPER"], PAPER, SAGE))):
+        x0 = 40 + col * 1180
+        for i, n in enumerate(names):
+            g, w = place(L(n), 0, 0, 220)
+            o += f'<g transform="translate({x0 + (pw-w)/2:.1f} {80 + i*(ph+30)})">{g}</g>' + lab(x0+30, 80+i*(ph+30)+ph-60, labels[i], c1)
+    # dark panel second lockup: sage-mark variant on ink for contrast check
+    g, w = place(L("logo-paper"), 0, 0, 120); o += f'<g transform="translate({1220+ (pw-w)/2:.1f} {80+ph+30+40})">{g}</g>'
+    # marks + icons row
+    y = 790; o += f'<rect x="40" y="{y}" width="{W-80}" height="470" fill="{PAPER}"/>'
+    x = 90
+    for n, bg in (("mark-sage", None), ("mark-ink", None), ("mark-paper", INK)):
+        if bg: o += f'<rect x="{x-20}" y="{y+30}" width="220" height="220" fill="{bg}"/>'
+        g, _ = place(L(n), x, y + 50, 180); o += g + lab(x, y + 290, n.upper().replace("-", " "), INK); x += 250
+    for n in ("icon-forest", "icon-sage", "favicon"):
+        g, _ = place(L(n), x, y + 50, 180); o += g + lab(x, y + 290, n.upper().replace("-", " "), INK); x += 250
+    # favicons at real size (+8x enlarged nearest-neighbour inserted separately)
+    x += 40; o += lab(x, y + 50, "FAVICON AT REAL SIZE", INK)
+    f, x2 = favs(x, y + 190, PAPER, INK, (16, 32, 48), gap=34); o += f
+    o += lab(x, y + 250, "ENLARGED 8x / 4x / 3x", INK)
+    ex = x
+    for sz, m in ((16, 8), (32, 4), (48, 3)):
+        g, _ = place(L("favicon"), ex, y + 280, sz * m); o += g; ex += sz * m + 30
+    # old vs new
+    y = 1290; o += f'<rect x="40" y="{y}" width="{W-80}" height="460" fill="{PAPER}"/>'
+    o += lab(90, y + 40, "OLD (V1) -> NEW", INK)
+    g, _ = place(os.path.join(OLD, "mark.svg"), 90, y + 70, 200); o += g
+    o += txt(330, y + 190, "&#8594;", INK, 60)
+    g, _ = place(L("mark-sage"), 420, y + 70, 200); o += g
+    g, _ = place(os.path.join(OLD, "favicon.svg"), 720, y + 70, 200); o += g
+    o += txt(960, y + 190, "&#8594;", INK, 60)
+    g, _ = place(L("favicon"), 1050, y + 70, 200); o += g
+    f, _ = favs(1330, y + 270, PAPER, INK, (16, 32), path=os.path.join(OLD, "favicon.svg"), gap=34); o += f
+    f, _ = favs(1500, y + 270, PAPER, INK, (16, 32), gap=34); o += f
+    o += lab(1330, y + 330, "OLD", INK) + lab(1500, y + 330, "NEW", INK)
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">{o}</svg>'
+
+for dark in (False, True):
+    render(board(dark), os.path.join(PV, f"fluke-{'dark' if dark else 'light'}.png"))
+for sz in (16, 32, 48):
+    subprocess.run(["resvg-js", "--fit-width", str(sz), L("favicon"), os.path.join(PV, f"fluke-favicon-{sz}.png")], check=True, capture_output=True)
+for n in ("icon-forest", "icon-sage"):
+    subprocess.run(["resvg-js", "--fit-width", "512", L(n), os.path.join(PV, f"fluke-{n}.png")], check=True, capture_output=True)
 render(contact(), os.path.join(PV, "contact-sheet.png"))

@@ -155,33 +155,36 @@ def wrap(w, h, title, body, vb=None):
 def paths(ds, fill):
     return "".join(f'<path fill="{fill}" d="{d}"/>' for d in ds)
 
-def logo(ds, mark_fill, word_fill, name, simple=False):
-    base = BASE[name]; size = 200
-    wd, xe = glyph_paths(size=size, x0=256 + 30, base=base)
-    W = int(math.ceil(xe + 8))
-    return wrap(W, 256, f"calm, primary logo ({name})",
+def logo(ds, mark_fill, word_fill, kind, x0=284):
+    wd, xe = glyph_paths(size=216, x0=x0, base=205)
+    W = int(math.ceil(xe + 16))
+    return wrap(W, 256, f"calm by ejmlabs, {kind} logo",
                 paths(ds, mark_fill) + f'<path fill="{word_fill}" d="{wd}"/>')
 
-BASE = {"breach": 190, "fluke": 190, "swell": 190}
-
-def favicon(ds):
-    s = 0.76; o = 128 * (1 - s)
-    return wrap(256, 256, "calm favicon",
-                f'<rect width="256" height="256" fill="{FOREST}"/><g transform="translate({f(o)} {f(o)}) scale({s})">'
-                + paths(ds, PAPER) + "</g>")
+def tile(ds, bg, fg, scale, title="calm by ejmlabs icon", size=1024):
+    """Square tile (rx=0, as the family), mark centred and scaled to `scale` of the tile."""
+    k = size / 256 * scale; o = size / 2 - 128 * k
+    return wrap(size, size, title, f'<rect width="{size}" height="{size}" fill="{bg}"/>'
+                f'<g transform="translate({f(o)} {f(o)}) scale({f(k)})">' + paths(ds, fg) + "</g>")
 
 def build():
-    for name, fn in DIRS.items():
-        ds = fn()
-        d = os.path.join(ROOT, "logos", name); os.makedirs(d, exist_ok=True)
-        w = lambda fn_, s: open(os.path.join(d, fn_), "w").write(s)
-        t = f"calm mark ({name})"
-        w("mark.svg", wrap(256, 256, t, paths(ds, SAGE)))
-        w("mark-ink.svg", wrap(256, 256, t, paths(ds, INK)))
-        w("mark-paper.svg", wrap(256, 256, t, paths(ds, PAPER)))
-        w("logo-primary.svg", logo(ds, SAGE, INK, name))
-        w("logo-paper.svg", logo(ds, PAPER, PAPER, name))
-        w("favicon.svg", favicon(fn(simple=True)))
+    from fluke import a as fluke_a, bbox_shift
+    oy = bbox_shift(fluke_a)
+    mark = fluke_a(oy=oy)
+    fav = fluke_a(True, oy=bbox_shift(lambda **kw: fluke_a(True, **kw)))
+    d = os.path.join(ROOT, "logos", "fluke"); os.makedirs(d, exist_ok=True)
+    for old in ("mark.svg",):
+        p = os.path.join(d, old)
+        if os.path.exists(p): os.remove(p)
+    def w(name, s): open(os.path.join(d, name), "w").write(s)
+    for fill, nm in ((SAGE, "sage"), (INK, "ink"), (PAPER, "paper")):
+        w(f"mark-{nm}.svg", wrap(256, 256, f"calm by ejmlabs, {nm} symbol", paths(mark, fill)))
+    w("logo-primary.svg", logo(mark, SAGE, INK, "primary"))
+    w("logo-ink.svg", logo(mark, INK, INK, "ink"))
+    w("logo-paper.svg", logo(mark, PAPER, PAPER, "paper"))
+    w("icon-forest.svg", tile(mark, FOREST, PAPER, 0.76))
+    w("icon-sage.svg", tile(mark, SAGE, INK, 0.76))
+    w("favicon.svg", tile(fav, SAGE, INK, 0.92))
 
 if __name__ == "__main__":
     build()
