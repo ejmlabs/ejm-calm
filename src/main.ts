@@ -15,6 +15,7 @@ import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
 import { cycleDuration } from './whale.js';
+import { FIXED_ORIGIN, waterSignal } from './seams.js';
 
 type CalmReview = {
   time: number;
@@ -60,7 +61,7 @@ const quality = createQuality({
   memory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 8,
 });
 
-const audio = new OceanAudio(memory?.sound ?? { enabled: false, volume: 0.35 });
+const audio = new OceanAudio(memory?.sound ?? { enabled: false, volume: 0.35 }, seed);
 const ui = createUI({
   share: () => `${location.origin}${location.pathname}?seed=${seed >>> 0}`,
   newSeed() {
@@ -305,6 +306,7 @@ function tick(now: number): void {
   rig.setFocus(focus.x, focus.y, focus.z);
   rig.update(dt || 1 / 60, time, motion.matches);
 
+  audio.update(dt, { camera, signal: waterSignal(camera.position.y), whale: whale.state, ships, shore: layout.land, origin: FIXED_ORIGIN });
   renderer.render(scene, camera);
 
   if (now - lastSave > 4000) {
@@ -395,6 +397,7 @@ if (debug) {
         ships: layout.ships.length,
         cycle: cycleDuration(),
         exposure: renderer.toneMappingExposure,
+        audio: audio.stats(),
       };
     },
   };
@@ -422,6 +425,7 @@ window.addEventListener('pagehide', () => {
   disposed = true;
   if (frame !== null) cancelAnimationFrame(frame);
   persist();
+  audio.dispose();
   ui.dispose();
   ocean.dispose();
   sky.dispose();

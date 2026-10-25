@@ -34,7 +34,7 @@ test('static server provides module MIME types and rejects traversal and unsuppo
     assert.equal(script.status, 200); assert.match(String(script.headers['content-type'] ?? ''), /text\/javascript/);
     assert.equal(script.headers['x-content-type-options'], 'nosniff');
     assert.match(csp, /script-src 'self'/);
-    assert.match(csp, /connect-src 'none'/);
+    assert.match(csp, /connect-src 'self'/);
     assert.match(csp, /worker-src 'self'/);
     assert.match(csp, /frame-ancestors 'none'/);
     assert.doesNotMatch(csp, /unsafe-inline/);
