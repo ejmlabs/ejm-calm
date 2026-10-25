@@ -1,8 +1,7 @@
 # calm logo brief + ejmlabs brand research
 
-Status: brief only. The design session that was meant to run this was blocked
-(Claude Code reports "Your organization has disabled Claude subscription access
-for Claude Code"), so no logo directions have been made yet.
+Status: brief only. The design session that was meant to run this did not
+happen, so no logo directions had been made when this was written.
 
 ## Product
 calm (calm.ejmlabs.com) is a procedurally generated three.js scene: a humpback
