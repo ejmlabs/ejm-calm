@@ -5,7 +5,9 @@ import { createWorldOrigin, recenterDelta, RECENTER_RADIUS, ORIGIN_SNAP } from '
 import { createLand } from '../src/land.js';
 import { layoutWorld } from '../src/terrain.js';
 import { shipSpecsForCell } from '../src/world-ships.js';
-import { selectTiles } from '../src/landmesh.js';
+import * as THREE from 'three';
+import { createLandStream, selectTiles } from '../src/landmesh.js';
+import { createWorld } from '../src/world.js';
 import { buildTile, tileSize } from '../src/world-tiles.js';
 import { makeNoise2D } from '../src/noise.js';
 import { createNavField } from '../src/world-nav.js';
@@ -259,3 +261,161 @@ test('the journey is deterministic and close across 30 and 60 fps', () => {
   const gap = Math.hypot(a.course.x - c.course.x, a.course.z - c.course.z);
   assert.ok(gap < 40, `frame-rate gap after 10 minutes ${gap.toFixed(1)} m`);
 }, 60000);
+
+// Streaming at the whale's fastest pace, on the main-thread builder (one tile per frame).
+const FPS = 30;
+const FAST = 12;
+const streamLand = layoutWorld(42);
+
+function landStreamAt(x: number, z: number) {
+  const stream = createLandStream(streamLand.land, { segments: 48, sunDirection: new THREE.Vector3(0.3, 0.6, 0.2), hazeColor: new THREE.Color(0xc8d8e0) });
+  stream.prime(x, z);
+  return stream;
+}
+
+/** A gently winding fast course: speed eases between 7 and 12 m/s, heading drifts. */
+function course(seconds: number, from = streamLand.whaleHome, heading = 0.6) {
+  const out: Array<{ x: number; z: number; vx: number; vz: number }> = [];
+  let { x, z } = from;
+  for (let i = 0; i <= seconds * FPS; i++) {
+    const t = i / FPS;
+    const speed = FAST - 2.5 * (1 + Math.sin(t * 0.07));
+    const a = heading + 0.6 * Math.sin(t * 0.011) + 0.25 * Math.sin(t * 0.043);
+    const vx = Math.sin(a) * speed;
+    const vz = Math.cos(a) * speed;
+    out.push({ x, z, vx, vz });
+    x += vx / FPS;
+    z += vz / FPS;
+  }
+  return out;
+}
+
+test('land tiles ahead are built before the view needs them at 12 m/s', () => {
+  const path = course(120);
+  const stream = landStreamAt(path[0]!.x, path[0]!.z);
+  let split = new Set<string>();
+  let needed = new Set<string>();
+  let late = 0;
+  let fresh = 0;
+  path.forEach((p, i) => {
+    stream.update(p.x, p.z, 1 / FPS, p.vx, p.vz);
+    // What the view at the camera itself (no lead) asks for, fine tiles only.
+    const next = new Set<string>();
+    const now = new Set(selectTiles(p.x, p.z, split, next).filter((key) => parseChunkKey(key).lod <= 1));
+    split = next;
+    for (const key of now) {
+      const c = parseChunkKey(key);
+      const s = tileSize(c.lod);
+      const ahead = ((c.cx + 0.5) * s - p.x) * p.vx + ((c.cz + 0.5) * s - p.z) * p.vz > 0;
+      if (needed.has(key) || !ahead || i < 20 * FPS) continue;
+      fresh++;
+      if (stream.tileState(key) !== 'on') late++;
+    }
+    needed = now;
+  });
+  assert.ok(fresh > 20, `${fresh} tiles came into view`);
+  assert.equal(late, 0, `${late}/${fresh} fine tiles were not solid when the view reached them`);
+  assert.ok(stream.stats().ready > 0, 'tiles further ahead are held ready');
+  stream.dispose();
+});
+
+test('land arrivals trickle: few per frame and never on a fixed beat', () => {
+  const path = course(90);
+  const stream = landStreamAt(path[0]!.x, path[0]!.z);
+  const done: number[] = [];
+  let before = stream.stats();
+  path.forEach((p, i) => {
+    stream.update(p.x, p.z, 1 / FPS, p.vx, p.vz);
+    const after = stream.stats();
+    assert.ok(after.tiles - before.tiles <= 2, `frame ${i} placed ${after.tiles - before.tiles} tiles`);
+    if (after.completed > before.completed) done.push(i);
+    before = after;
+  });
+  const gaps = done.slice(1).map((f, i) => f - done[i]!);
+  assert.ok(gaps.length > 30, `${gaps.length} completions`);
+  const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  const sd = Math.sqrt(gaps.reduce((a, b) => a + (b - mean) ** 2, 0) / gaps.length);
+  assert.ok(new Set(gaps).size >= 5 && sd / mean > 0.3, `gaps not periodic (cv ${(sd / mean).toFixed(2)})`);
+  stream.dispose();
+});
+
+test('a 10 minute fast run never shows a hole in the land inside the haze', () => {
+  const path = course(600);
+  const stream = landStreamAt(path[0]!.x, path[0]!.z);
+  let holes = 0;
+  for (const p of path) {
+    stream.update(p.x, p.z, 1 / FPS, p.vx, p.vz);
+    if (stream.stats().holes) holes++;
+  }
+  const end = path[path.length - 1]!;
+  assert.ok(Math.hypot(end.x - path[0]!.x, end.z - path[0]!.z) > 4000, 'travelled far');
+  assert.equal(holes, 0, `${holes} frames with a hole`);
+  stream.dispose();
+});
+
+test('streamed tiles do not depend on speed or route', () => {
+  const end = { x: streamLand.whaleHome.x + 2400, z: streamLand.whaleHome.z + 1800 };
+  const settle = (stream: ReturnType<typeof landStreamAt>) => {
+    for (let i = 0; i < 40 * FPS; i++) stream.update(end.x, end.z, 1 / FPS);
+    const out = new Map<string, number>();
+    for (const child of stream.group.children) {
+      const mesh = child as THREE.Mesh;
+      const pos = mesh.geometry.getAttribute('position').array;
+      let sum = 0;
+      let extent = 0;
+      for (let k = 0; k < pos.length; k += 7) sum += pos[k]!;
+      for (let k = 0; k < pos.length; k += 3) extent = Math.max(extent, pos[k]!);
+      out.set(`${mesh.position.x}:${mesh.position.z}:${extent}`, sum);
+    }
+    return out;
+  };
+  const fast = landStreamAt(streamLand.whaleHome.x, streamLand.whaleHome.z);
+  for (let i = 0; i <= 250 * FPS; i++) {
+    const t = Math.min(1, i / (250 * FPS));
+    fast.update(streamLand.whaleHome.x + 2400 * t, streamLand.whaleHome.z + 1800 * t, 1 / FPS, 9.6, 7.2);
+  }
+  const direct = landStreamAt(end.x, end.z);
+  const a = settle(fast);
+  const b = settle(direct);
+  // Split hysteresis may leave a different mix of levels; every tile both hold is identical.
+  const shared = [...b.keys()].filter((key) => a.has(key));
+  assert.ok(shared.length > 20 && shared.length > b.size * 0.7, `${shared.length}/${b.size} shared`);
+  for (const key of shared) assert.equal(a.get(key), b.get(key), key);
+  fast.dispose();
+  direct.dispose();
+});
+
+test('a fast world update stays within its frame budget and keeps ships and navigation ahead', () => {
+  const scene = new THREE.Scene();
+  const gray = new THREE.Color(0xc8d8e0);
+  const world = createWorld(42, streamLand, scene, {
+    sunDirection: new THREE.Vector3(0.3, 0.6, 0.2),
+    hazeColor: gray,
+    hazeDensity: 0.00026,
+    hazeGradient: { angles: [0, 90], colors: [gray, gray] },
+    shallowLight: 1,
+    reflectionGain: 1,
+    waterSize: 64,
+    landSegments: 48,
+    mobile: false,
+  });
+  const camera = new THREE.PerspectiveCamera();
+  const path = course(150);
+  const ms: number[] = [];
+  let navAhead = 0;
+  path.forEach((p, i) => {
+    world.update(p.x, p.z, camera, 1 / FPS, i / FPS);
+    camera.position.set(p.x - world.origin.x - p.vx * 2, 4, p.z - world.origin.z - p.vz * 2);
+    if (i > 2 * FPS) ms.push(world.stats().streamMs as number);
+    if (i > 10 * FPS && world.land.nav.ready(p.x + p.vx * 30, p.z + p.vz * 30)) navAhead++;
+  });
+  ms.sort((a, b) => a - b);
+  const p95 = ms[Math.floor(ms.length * 0.95)]!;
+  assert.ok(p95 < 4, `p95 streaming ${p95.toFixed(2)} ms`);
+  const stats = world.stats();
+  assert.equal(stats.coverageMisses, 0);
+  assert.ok(Math.abs((stats.whaleSpeed as number) - Math.hypot(path.at(-1)!.vx, path.at(-1)!.vz)) < 1);
+  assert.ok(navAhead > (path.length - 10 * FPS) * 0.95, 'navigation is built 30 s ahead');
+  assert.ok((stats.shipCells as number) > 4);
+  world.dispose();
+});

@@ -8,6 +8,7 @@ import { createWorldOrigin, type WorldOrigin } from './world-origin.js';
 import type { Shore } from './shore.js';
 import type { ShipHandle } from './ships.js';
 import type { WorkerRequest } from './world-worker.js';
+import { damp } from './math.js';
 
 export type WorldOptions = {
   sunDirection: THREE.Vector3;
@@ -44,10 +45,19 @@ export type World = {
   dispose: () => void;
 };
 
-/** Background work on the main thread (navigation tiles, shelf bakes) stays under this per frame. */
+/** All streaming work on the main thread (tiles, ships, navigation, shelf bakes) stays near this per frame. */
 const BUDGET_MS = 2.5;
 /** Navigation tiles are kept built this far around the whale (covers look-ahead and the next shelf bake). */
 const NAV_RADIUS = 2300;
+/** Navigation tiles and ship cells are centred this many seconds ahead along the whale's motion (capped in metres). */
+const LEAD = 20;
+const LEAD_MAX = 300;
+/** Faster than this between two frames is a jump (debug travel, reload), not swimming. */
+const JUMP_SPEED = 60;
+/** A camera further than this from the whale is not following it (e.g. during a fast-forward): stream around the whale. */
+const CAMERA_LEASH = 200;
+/** Worst-frame stats cover roughly this many seconds. */
+const WORST_WINDOW = 10;
 const FAR_SIZE = 384;
 const FAR_EXTENT = 6400;
 
@@ -139,6 +149,13 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
 
   const cameraWorld = new THREE.Vector3();
   let whale = [layout.whaleHome.x, layout.whaleHome.z];
+  // Whale velocity, smoothed from successive positions.
+  let vx = 0;
+  let vz = 0;
+  let windowAge = 0;
+  let worst = [0, 0];
+  let lastMs = 0;
+  let holeFrames = 0;
 
   return {
     root,
@@ -149,17 +166,32 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     landStream,
     ships: { active: ships.active, setVisible: ships.setVisible },
     update(wx, wz, camera, dt, time) {
+      const start = performance.now();
+      const left = () => BUDGET_MS - (performance.now() - start);
+      if (dt > 0) {
+        const rx = (wx - whale[0]!) / dt;
+        const rz = (wz - whale[1]!) / dt;
+        if (Math.hypot(rx, rz) > JUMP_SPEED) {
+          vx = 0;
+          vz = 0;
+        } else {
+          vx = damp(vx, rx, 1.5, dt);
+          vz = damp(vz, rz, 1.5, dt);
+        }
+      }
       whale = [wx, wz];
       // The camera is still in the old render space until the rig moves it: read it first.
       cameraWorld.copy(camera.position);
       cameraWorld.x += origin.x;
       cameraWorld.z += origin.z;
+      if (Math.hypot(cameraWorld.x - wx, cameraWorld.z - wz) > CAMERA_LEASH) cameraWorld.set(wx, 0, wz);
       origin.maybeRecenter(wx, wz);
-      landStream.update(cameraWorld.x, cameraWorld.z, dt);
-      ships.update(dt, time, wx, wz, land);
+      landStream.update(cameraWorld.x, cameraWorld.z, dt, vx, vz);
+      const k = Math.min(LEAD, LEAD_MAX / Math.max(1e-6, Math.hypot(vx, vz)));
+      const ax = wx + vx * k;
+      const az = wz + vz * k;
+      ships.update(dt, time, wx, wz, land, ax, az);
 
-      const start = performance.now();
-      const left = () => BUDGET_MS - (performance.now() - start);
       if (nearJob) {
         while (left() > 0) {
           const next = nearJob.next();
@@ -177,7 +209,16 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
           farJob = null;
         }
       }
-      if (left() > 0) land.nav.prefetch(wx, wz, NAV_RADIUS, left());
+      if (left() > 0) land.nav.prefetch(ax, az, NAV_RADIUS, left());
+
+      lastMs = performance.now() - start;
+      windowAge += dt;
+      if (windowAge > WORST_WINDOW) {
+        worst = [worst[1]!, 0];
+        windowAge = 0;
+      }
+      worst[1] = Math.max(worst[1]!, lastMs);
+      if (landStream.stats().holes > 0) holeFrames++;
     },
     stats() {
       const tiles = landStream.stats();
@@ -189,6 +230,12 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
         chunks: tiles.tiles,
         chunksPending: tiles.pending,
         chunksFading: tiles.fading,
+        chunksReady: tiles.ready,
+        /** Frames so far with a hole in the land inside the haze. */
+        coverageMisses: holeFrames,
+        streamMs: lastMs,
+        streamWorstMs: Math.max(worst[0]!, worst[1]!),
+        whaleSpeed: Math.hypot(vx, vz),
         landTriangles: tiles.triangles,
         navTiles: nav.tiles,
         shipCells: fleet.cells,
