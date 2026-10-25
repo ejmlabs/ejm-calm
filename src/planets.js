@@ -28,7 +28,7 @@ function surface(data, look, geometry, bakes, tier, moon = false, ringMap) {
   const name = recipeName(data.type), spec = look.realism.planets[name], atmosphere = look.realism.atmosphere;
   const bake = bakes.planet(data, { moon });
   const uniforms = { ...lights(), albedoMap: { value: bake.albedo }, surfaceMap: { value: bake.surface }, normalMap: { value: bake.normals }, ringMap: { value: ringMap ?? bake.surface },
-    ready: { value: 0 }, kind: { value: kinds.indexOf(data.type) }, normalTaps: { value: look.realism.planets.normals.tapsByTier[tier] }, texel: { value: new THREE.Vector2(1 / bake.width, 1 / bake.height) }, relief: { value: spec.reliefStrength },
+    ready: { value: 0 }, kind: { value: kinds.indexOf(data.type) }, normalTaps: { value: look.realism.planets.normals.tapsByTier[tier] }, texel: { value: new THREE.Vector2(1 / bake.width, 1 / bake.height) }, relief: { value: spec.reliefStrength * 1.55 },
     radius: { value: data.radius }, fallbackColor: { value: new THREE.Color(data.palette[0]) }, ambient: { value: new THREE.Color() }, atmosphere: { value: new THREE.Color(atmosphere.rayleigh[name]) }, atmosphereDensity: { value: moon ? 0 : atmosphere.density[name] },
     sunsetWidth: { value: look.realism.planets.terminator.sunsetBand.width }, sunsetColor: { value: new THREE.Color(look.realism.planets.terminator.sunsetBand.color) }, sunsetStrength: { value: look.realism.planets.terminator.sunsetBand.strength },
     softness: { value: look.realism.planets.terminator.softness }, limbDarkening: { value: spec.limbDarkening ?? 0 }, emissionStrength: { value: spec.seams?.hdrIntensity ?? 0 },
@@ -52,22 +52,23 @@ export function createPlanet(data, look, geometry, mobile, debugType, bakes, tie
   if (appearance.type === 'ocean') {
     cloud = new THREE.Mesh(geometry, new THREE.ShaderMaterial({ vertexShader: shaders.surfaceVertex, fragmentShader: shaders.cloudFragment, transparent: true, depthWrite: false,
       uniforms: { ...lights(), surfaceMap: { value: body.userData.bake.surface }, ready: { value: 0 }, time: { value: 0 } } }));
-    cloud.scale.setScalar(data.radius * 1.006); group.add(cloud);
-  }
-  let ring;
-  if (appearance.rings) {
-    const spec = appearance.ring, settings = look.realism.rings;
-    ring = new THREE.Mesh(new THREE.RingGeometry(data.radius * spec.inner, data.radius * spec.outer, mobile ? 128 : 192), new THREE.ShaderMaterial({
-      vertexShader: shaders.ringVertex, fragmentShader: shaders.ringFragment, side: THREE.DoubleSide, transparent: true, depthWrite: false,
-      uniforms: { ...lights(), densityMap: { value: texture }, colors: { value: settings.particleColor.map((c) => new THREE.Color(c)) }, bounds: { value: new THREE.Vector2(data.radius * spec.inner, data.radius * spec.outer) },
-        radius: { value: data.radius }, scatterG: { value: settings.forwardScatterG }, backlitBoost: { value: settings.backlitBoost }, localLights: { value: [new THREE.Vector3(), new THREE.Vector3()] } } }));
-    ring.rotation.set(-Math.PI / 2 + spec.tilt, data.tilt * 0.4, data.tilt + 0.15); group.add(ring);
-    body.material.uniforms.ringActive.value = 1; body.material.uniforms.ringBounds.value.set(spec.inner, spec.outer);
+    cloud.scale.setScalar(data.radius * 1.006); cloud.renderOrder = 1; group.add(cloud);
   }
   const moons = appearance.moons.map((moon) => {
     const moonData = { ...moon, radius: moon.radius * data.radius, type: 'rocky', palette: look.planets.moons.palette };
-    const mesh = surface(moonData, look, geometry, bakes, tier, true); group.add(mesh); return { data: moon, mesh };
+    const mesh = surface(moonData, look, geometry, bakes, tier, true); mesh.renderOrder = 0; group.add(mesh); return { data: moon, mesh };
   });
+  let ring;
+  if (appearance.rings) {
+    const spec = appearance.ring, settings = look.realism.rings;
+    ring = new THREE.Mesh(new THREE.RingGeometry(data.radius * spec.inner, data.radius * spec.outer, mobile ? 160 : 256, 1), new THREE.ShaderMaterial({
+      vertexShader: shaders.ringVertex, fragmentShader: shaders.ringFragment, side: THREE.DoubleSide, transparent: true, depthWrite: false, depthTest: true,
+      uniforms: { ...lights(), densityMap: { value: texture }, colors: { value: settings.particleColor.map((c) => new THREE.Color(c)) }, bounds: { value: new THREE.Vector2(data.radius * spec.inner, data.radius * spec.outer) },
+        radius: { value: data.radius }, scatterG: { value: settings.forwardScatterG }, backlitBoost: { value: settings.backlitBoost }, localLights: { value: [new THREE.Vector3(), new THREE.Vector3()] } } }));
+    ring.rotation.set(-Math.PI / 2 + spec.tilt, data.tilt * 0.4, data.tilt + 0.15); ring.renderOrder = 2; group.add(ring);
+    body.material.uniforms.ringActive.value = 1; body.material.uniforms.ringBounds.value.set(spec.inner, spec.outer);
+  }
+  atmosphere.renderOrder = 1;
   group.userData.planet = { data, appearance, surface: body, atmosphere, ring, moons, cloud, bakes, ringMap: texture,
     inverseRing: new THREE.Quaternion(), rotation: new THREE.Matrix4(), quaternion: new THREE.Quaternion(), parent: new THREE.Vector3() };
   return group;

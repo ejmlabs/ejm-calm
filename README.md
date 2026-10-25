@@ -5,9 +5,15 @@ procedurally generated space voyage from **ejmlabs, an open source lab**.
 Everything is generated locally. No accounts, tracking, analytics, or runtime
 network requests beyond this site's static files.
 
-Press **Begin** to fly. Autopilot chooses a gentle course past planets,
-nebulae, asteroid fields, and distant galaxies. Sound starts only when enabled.
-Reduced-motion preferences start the voyage paused; press Resume when ready.
+Press **Begin** to fly. Autopilot chooses a gentle course through seeded star
+systems: blackbody-lit planets with atmospheres and rings, volumetric nebulae,
+asteroid fields, distant galaxies, and the occasional comet. Sound starts only
+when enabled. Reduced-motion preferences start the voyage paused; press Resume
+when ready.
+
+Each `?seed=` value rebuilds the same infinite cell stream: spectral-class
+stars, near-coplanar orbits, worker-baked surfaces, and HDR lighting that
+adapts as you travel.
 
 ## Controls
 
@@ -44,11 +50,16 @@ There is no bundler or build step. The browser needs WebGL 2.
 browser automation dependency and the system browser executable; the browser may
 need permission to run outside a restricted environment.
 
-The full capture includes the about panel, a one-minute flight, both alternate
-regions, every planet surface, and the three rare events. `npm run shots -- --quick`
-captures only the short reference views. Local review URLs accept
-`?seed=42&debug=1&debugRegion=ember` (or `hollow`), `debugPlanet=ice`, and
-`debugEvent=comet` (or `binary` / `pulsar`). Review flags are ignored on public hosts.
+The full capture waits for surface bakes and exposure, then writes hero frames
+for seeds `42`, `7`, `1234`, and `98765` at desktop 1440×900 and mobile
+390×844 DPR 3 (`shots/desktop-seedN.png`, `shots/mobile-seedN.png`), plus
+`shots/desktop-ring.png` and `shots/desktop-nebula.png`. `shots/desktop.png`
+and `shots/mobile.png` remain the seed-42 heroes. It also covers the about
+panel, a one-minute flight, both alternate regions, every planet surface, and
+the three rare events. `npm run shots -- --quick` captures only the short
+reference views. Local review URLs accept `?seed=42&debug=1&debugRegion=ember`
+(or `hollow`), `debugPlanet=ice`, and `debugEvent=comet` (or `binary` /
+`pulsar`). Review flags are ignored on public hosts.
 
 ## Static deployment
 

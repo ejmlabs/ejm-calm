@@ -81,17 +81,25 @@ export function findSpawn(seed) {
       const system = generateSystem(seed, x, y, z); if (!system) continue;
       for (const planet of system.planets) {
         if (planet.orbit < system.stars[0].clearanceRadius * 1.1) continue;
-        candidates.push({ system, planet, score: distance(planet.position, [0, 0, 0]) / SYSTEM_CELL - Number(planet.rings) * 0.8 - Number(planet.type === 'ocean') * 0.4 });
+        const ringOpen = planet.rings ? Math.min(0.55, Math.abs(Math.sin(planet.ring.tilt + planet.tilt))) : 0;
+        candidates.push({ system, planet, score: distance(planet.position, [0, 0, 0]) / SYSTEM_CELL - Number(planet.rings) * 1.4 - ringOpen - Number(planet.type === 'ocean') * 0.35 });
       }
     }
   }
   if (!candidates.length) throw new Error('No nearby system found');
   const { system, planet } = candidates.sort((a, b) => a.score - b.score)[0];
   const light = normalize(system.stars[0].position.map((n, i) => n - planet.position[i]));
-  const tangent = normalize([-light[2], 0, light[0]]);
-  const observation = normalize(tangent.map((n, i) => n * 0.97 - light[i] * 0.25 + (i === 1 ? 0.08 : 0)));
-  const position = planet.position.map((n, i) => n + observation[i] * (planet.radius * 6.5 + 180));
-  const aim = planet.position.map((n, i) => n + tangent[i] * planet.radius * 0.55);
+  const tangent = normalize([-light[2], 0, light[0]].map((n, i) => n + (i === 1 ? 0 : 0)));
+  const binormal = normalize([
+    light[1] * tangent[2] - light[2] * tangent[1],
+    light[2] * tangent[0] - light[0] * tangent[2],
+    light[0] * tangent[1] - light[1] * tangent[0],
+  ]);
+  // Prefer a 60–120° lighting angle and open the rings ~15–40° from edge-on.
+  const ringLift = planet.rings ? 0.42 + Math.abs(planet.ring.tilt) * 0.35 : 0.18;
+  const observation = normalize(tangent.map((n, i) => n * 0.72 - light[i] * 0.38 + binormal[i] * ringLift));
+  const position = planet.position.map((n, i) => n + observation[i] * (planet.radius * (planet.rings ? 7.2 : 6.5) + 180));
+  const aim = planet.position.map((n, i) => n + tangent[i] * planet.radius * 0.4 + binormal[i] * planet.radius * 0.12);
   const direction = normalize(aim.map((n, i) => n - position[i]));
-  return { system, planet, position, yaw: Math.atan2(direction[0], -direction[2]), pitch: Math.asin(direction[1]) };
+  return { system, planet, position, yaw: Math.atan2(direction[0], -direction[2]), pitch: Math.asin(Math.max(-1, Math.min(1, direction[1]))) };
 }

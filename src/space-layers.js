@@ -31,12 +31,15 @@ export function densityTexture(seed, mobile, settings) {
 }
 
 export function starMaterial(look, ratio, shell = false) {
+  const psf = look.realism.starPsf;
   return new THREE.ShaderMaterial({ vertexShader: starShaders.vertex, fragmentShader: starShaders.fragment, transparent: true,
     depthWrite: false, depthTest: !shell, blending: THREE.AdditiveBlending,
     uniforms: { pixelRatio: { value: ratio }, shell: { value: Number(shell) }, palette: { value: look.REGIONS.tidepool.starTint.map((c) => new THREE.Color(c)) },
       fadeNear: { value: look.stars.field.fadeNear }, viewRadius: { value: look.stars.field.viewRadius },
       referenceDistance: { value: look.realism.lighting.illuminance.referenceDistance * 0.01 }, minFlux: { value: magnitudeFlux(look.realism.magnitudes.range[1]) },
-      peak: { value: look.realism.starPsf.hdrPeak }, regionTint: { value: new THREE.Color(1, 1, 1) } } });
+      peak: { value: psf.hdrPeak }, regionTint: { value: new THREE.Color(1, 1, 1) },
+      coreSigma: { value: psf.coreSigmaPx * 0.9 }, haloFrom: { value: psf.halo.fromMagnitude }, haloRadius: { value: new THREE.Vector2(psf.halo.radiusPx[0] * 0.45, psf.halo.radiusPx[1] * 0.5) },
+      haloPeak: { value: psf.halo.peak * 0.55 }, glareFrom: { value: psf.glare.fromMagnitude }, glareRadius: { value: psf.glare.radiusPx * 0.45 }, glarePeak: { value: psf.glare.peak * 0.5 } } });
 }
 
 export function starsGeometry(positions, sizes, tints, halos, physical = {}) {
@@ -57,7 +60,8 @@ export class Sky {
       uniforms: { inverseProjection: { value: new THREE.Matrix4() }, cameraRotation: { value: new THREE.Matrix3() },
         baseColor: { value: new THREE.Color() }, horizonColor: { value: new THREE.Color() }, mistColor: { value: new THREE.Color() },
         bandNormal: { value: this.bandNormal }, bandOpacity: { value: look.sky.bandOpacity }, seedPhase: { value: seed % 997 },
-        grain: { value: 0 }, vignette: { value: 0 }, softness: { value: look.grade.vignette.softness } } });
+        grain: { value: 0 }, vignette: { value: 0 }, softness: { value: look.grade.vignette.softness },
+        bandGlow: { value: new THREE.Color().setRGB(...blackbodyColor(4500)) } } });
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material); plane.frustumCulled = false; plane.renderOrder = -1000; this.scene.add(plane);
     const positions = [], sizes = [], tints = [], halos = [], colors = [], fluxes = [], direction = new THREE.Vector3();
     for (let i = 0; i < look.realism.magnitudes.countByTier.high; i++) {

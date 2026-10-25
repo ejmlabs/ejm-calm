@@ -19,8 +19,8 @@ function lightSprite(map, tint, size, opacity) {
 export function createShip(settings, glow, mobile, physical = art.realism, tier = mobile ? 'low' : 'high') {
   const ship = new THREE.Group();
   const materials = physical.shipMaterials;
-  const hull = panelMaterial(materials.hull, materials.panelLines);
-  const panels = panelMaterial({ color: materials.graphite.color, metalness: materials.graphite.metalness, roughness: materials.graphite.roughness, anisotropy: materials.graphite.anisotropy[tier] }, materials.panelLines);
+  const hull = panelMaterial({ ...materials.hull, color: materials.hull.color, roughness: Math.max(0.22, materials.hull.roughness - 0.06), clearcoat: Math.min(1, materials.hull.clearcoat + 0.15), clearcoatRoughness: Math.max(0.06, materials.hull.clearcoatRoughness - 0.03) }, materials.panelLines);
+  const panels = panelMaterial({ color: materials.graphite.color, metalness: materials.graphite.metalness, roughness: Math.max(0.32, materials.graphite.roughness - 0.08), anisotropy: materials.graphite.anisotropy[tier] }, materials.panelLines);
   const accent = new THREE.MeshPhysicalMaterial(materials.copper);
   const profile = [...settings.hull.profile].reverse().map(([z, radius]) => new THREE.Vector2(radius, z));
   const body = new THREE.Mesh(new THREE.LatheGeometry(profile, settings.hull.segments[mobile ? 'low' : 'high']), hull);

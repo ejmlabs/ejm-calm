@@ -14,10 +14,12 @@ export class StarLighting {
     }
     this.transition = Math.min(6, this.transition + dt); const weight = THREE.MathUtils.smoothstep(this.transition, 0, 6);
     const observer = new THREE.Vector3(...flight.position), distance = system ? observer.distanceTo(new THREE.Vector3(...system.position)) : Infinity;
-    const inRange = distance < this.settings.illuminance.referenceDistance * 3;
-    const stars = inRange ? system?.stars ?? [] : [];
-    const totalLuminosity = stars.reduce((sum, star) => sum + star.luminosity, 0);
-    const illuminance = stars.length ? THREE.MathUtils.clamp(totalLuminosity * (this.settings.illuminance.referenceDistance / Math.max(distance, 100)) ** 2, ...this.settings.illuminance.clamp) : this.settings.interstellarKey;
+    const reach = this.settings.illuminance.referenceDistance * 3;
+    const rangeFade = system ? THREE.MathUtils.smoothstep(reach, reach * 0.55, distance) : 1;
+    const stars = rangeFade < 0.999 ? system?.stars ?? [] : [];
+    const totalLuminosity = stars.reduce((sum, star) => sum + star.luminosity, 0) || 1;
+    const systemIlluminance = THREE.MathUtils.clamp(totalLuminosity * (this.settings.illuminance.referenceDistance / Math.max(distance, 100)) ** 2, ...this.settings.illuminance.clamp);
+    const illuminance = stars.length ? THREE.MathUtils.lerp(systemIlluminance, this.settings.interstellarKey, rangeFade) : this.settings.interstellarKey;
     for (let i = 0; i < 2; i++) {
       const light = this.lights[i], star = stars[i];
       const targetDirection = star ? new THREE.Vector3(...star.position).sub(observer).normalize() : this.previous[i].direction;

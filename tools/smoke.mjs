@@ -31,7 +31,7 @@ await withBrowser(async (browser, base) => {
       const picture = await pixels(page);
       assert.ok(picture.nonBlack > 500 && picture.max - picture.min > 25, `Canvas must contain a rendered scene: ${JSON.stringify(picture)}`);
       if (device.name === 'mobile') assert.ok(picture.width <= 390 * 1.25 + 1, 'Mobile DPR is capped');
-      assert.equal(await page.locator('#space').evaluate((canvas) => canvas.getContext('webgl2').getContextAttributes().antialias), true, 'All tiers keep silhouette antialiasing');
+      assert.equal(await page.locator('#space').evaluate((canvas) => canvas.getContext('webgl2').getContextAttributes().antialias), false, 'Canvas MSAA is off; HDR targets carry samples');
       const sound = page.getByRole('button', { name: 'Sound', exact: true });
       await sound.click(); assert.equal(await sound.getAttribute('aria-pressed'), 'false');
       await sound.click(); assert.equal(await sound.getAttribute('aria-pressed'), 'true');

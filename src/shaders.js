@@ -125,10 +125,16 @@ uniform mat4 inverseProjection;uniform mat3 cameraRotation;varying vec3 vDirecti
 void main(){vUv=uv;vec4 ray=inverseProjection*vec4(position.xy,1.0,1.0);vDirection=cameraRotation*ray.xyz;gl_Position=vec4(position.xy,0.99999,1.0);}`;
 export const skyFragment = `
 uniform vec3 baseColor;uniform vec3 horizonColor;uniform vec3 mistColor;uniform vec3 bandNormal;uniform float bandOpacity;
-uniform float seedPhase;uniform float grain;uniform float vignette;uniform float softness;varying vec3 vDirection;varying vec2 vUv;${noise}
+uniform float seedPhase;uniform float grain;uniform float vignette;uniform float softness;uniform vec3 bandGlow;varying vec3 vDirection;varying vec2 vUv;${noise}
 void main(){
- vec3 d=normalize(vDirection);float band=exp(-pow(dot(d,bandNormal)*3.7,2.0));float folds=fbm(d*3.0+seedPhase);float dust=smoothstep(0.28,0.62,noise3(d*14.0+seedPhase));
- vec3 result=mix(baseColor,horizonColor,pow(1.0-abs(d.y),3.0)*0.4)+mistColor*band*bandOpacity*(0.4+folds*1.7)*(0.5+dust*0.5);
+ vec3 d=normalize(vDirection);float latitude=dot(d,bandNormal);float band=exp(-pow(latitude*3.7,2.0));
+ float folds=fbm(d*3.0+seedPhase);float lanes=noise3(d*8.5+seedPhase*1.7);
+ float riftA=smoothstep(0.52,0.72,noise3(d*5.2+vec3(seedPhase,2.1,0.4)));
+ float riftB=smoothstep(0.58,0.78,noise3(d*7.1+vec3(0.7,seedPhase,-1.3)));
+ float rifts=max(riftA*0.85,riftB*0.55)*smoothstep(0.08,0.0,abs(latitude));
+ float dust=smoothstep(0.28,0.62,lanes)*(1.0-rifts);
+ vec3 glow=bandGlow*band*bandOpacity*(0.55+folds*1.1)*(0.45+dust*0.55);
+ vec3 result=mix(baseColor,horizonColor,pow(1.0-abs(d.y),3.0)*0.4)+glow*(1.0-rifts*0.92)+mistColor*band*bandOpacity*0.18*(1.0-rifts);
  float shade=1.0-vignette*smoothstep(softness,1.4,length(vUv*2.0-1.0));gl_FragColor=vec4(result*shade,1.0);${output}
  float dither=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)-0.5;gl_FragColor.rgb+=dither*grain;
 }`;

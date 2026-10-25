@@ -14,7 +14,7 @@ export class Nebulae {
       axes: { value: [new THREE.Vector3(1, 1, 1), new THREE.Vector3(1, 1, 1)] }, radii: { value: new THREE.Vector2(1, 1) }, count: { value: 0 }, cameraPosition: { value: new THREE.Vector3() },
       oxygen: { value: new THREE.Color() }, hydrogen: { value: new THREE.Color() }, sulphur: { value: new THREE.Color() }, reflection: { value: new THREE.Color() },
       extinction: { value: new THREE.Vector3(...look.realism.nebula.dust.reddening.map((n) => 1 / n)) }, extinctionScale: { value: look.realism.nebula.dust.extinction },
-      erosion: { value: look.realism.nebula.density.erosion }, dustCoverage: { value: look.realism.nebula.dust.coverage }, emissionScale: { value: look.realism.nebula.emissionScale },
+      erosion: { value: look.realism.nebula.density.erosion }, dustCoverage: { value: look.realism.nebula.dust.coverage }, emissionScale: { value: look.realism.nebula.emissionScale * 1.15 },
       steps: { value: 48 }, lowSlices: { value: 0 }, time: { value: 0 }, embedded: { value: Array.from({ length: 8 }, () => new THREE.Vector3()) }, embeddedCount: { value: 0 } };
     this.material = new THREE.RawShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: shaders.vertex, fragmentShader: shaders.fragment, uniforms: uniform, side: THREE.BackSide, depthTest: false, depthWrite: false });
     this.proxy = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), this.material); this.proxy.frustumCulled = false; this.scene.add(this.proxy);

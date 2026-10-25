@@ -27,9 +27,10 @@ void main(){
    float dust=smoothstep(1.0-dustCoverage-0.08,1.0-dustCoverage+0.12,field.g)*envelope;
    float localReflection=0.0;
    for(int star=0;star<8;star++){if(float(star)>=embeddedCount)break;float gap=length((embedded[star]-point)/radii[i]);localReflection+=exp(-gap*gap/0.1225)*0.7;}
-   float nearFade=mix(0.22,1.0,smoothstep(800.0,3000.0,length(cameraPosition-centers[i])));
+   float nearFade=mix(0.35,1.0,smoothstep(400.0,2400.0,length(cameraPosition-centers[i])));
+   float sliceBoost=lowSlices>0.5?2.4:1.0;
    vec3 gas=(oxygen*core+hydrogen*shell+sulphur*edge+reflection*(field.b*0.35+min(1.0,localReflection)))*density;
-   stepEmission+=gas*emissionScale*stride/radii[i]*nearFade;
+   stepEmission+=gas*emissionScale*stride/radii[i]*nearFade*sliceBoost;
    opticalDepth+=extinction*dust*extinctionScale*stride/radii[i]*nearFade;
   }
   emission+=transmittance*stepEmission;transmittance*=exp(-opticalDepth);

@@ -16,12 +16,12 @@ export class GalaxySky {
   }
   create(data) {
     const bake = this.bakes.galaxy(data.seed, data.kind);
-    const material = new THREE.ShaderMaterial({ depthTest: false, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending,
+    const material = new THREE.ShaderMaterial({ depthTest: false, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending, toneMapped: false,
       uniforms: { map: { value: bake.texture }, opacity: { value: 1 } },
       vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);gl_Position.z=gl_Position.w*0.99999;}',
-      fragmentShader: 'uniform sampler2D map;uniform float opacity;varying vec2 vUv;void main(){vec4 image=texture2D(map,vUv);gl_FragColor=vec4(image.rgb,image.a*opacity);}' });
+      fragmentShader: 'uniform sampler2D map;uniform float opacity;varying vec2 vUv;void main(){vec4 image=texture2D(map,vUv);gl_FragColor=vec4(image.rgb*1.35,image.a*opacity);}' });
     const mesh = new THREE.Mesh(this.geometry, material); mesh.frustumCulled = false; mesh.renderOrder = -800;
-    mesh.scale.setScalar(2 * Math.tan(data.angle / 2) * 30000); mesh.quaternion.copy(data.orientation); mesh.rotateZ(data.roll); this.scene.add(mesh);
+    mesh.scale.setScalar(2 * Math.tan(data.angle / 2) * 30000 * 1.15); mesh.quaternion.copy(data.orientation); mesh.rotateZ(data.roll); this.scene.add(mesh);
     const record = { data, bake, mesh }; this.cache.set(data.id, record); return record;
   }
   update(camera, hollow, dt) {

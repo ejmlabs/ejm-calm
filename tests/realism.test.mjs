@@ -77,3 +77,42 @@ test('quality selection and pass degradation preserve composition before reducin
   for (let i = 0; i < 200; i++) observePassQuality(state, 'nebula', 5, 17, 2.5);
   assert.equal(state.nebulaLevel, 1); assert.equal(state.ratio, before);
 });
+
+test('spawn vantages open rings and keep a terminator lighting angle', () => {
+  for (const seed of [42, 7, 1234, 98765]) {
+    const spawn = findSpawn(seed);
+    const toPlanet = spawn.planet.position.map((n, i) => n - spawn.position[i]);
+    const length = Math.hypot(...toPlanet);
+    const elev = Math.asin(toPlanet[1] / length) * 180 / Math.PI;
+    assert.ok(Math.abs(elev) >= 15 && Math.abs(elev) <= 45, `seed ${seed} elev ${elev}`);
+    const light = spawn.system.stars[0].position.map((n, i) => n - spawn.planet.position[i]);
+    const lightLen = Math.hypot(...light), view = toPlanet.map((n) => n / length);
+    const angle = Math.acos(Math.max(-1, Math.min(1, view.reduce((sum, n, i) => sum + n * light[i] / lightLen, 0)))) * 180 / Math.PI;
+    assert.ok(angle >= 55 && angle <= 125, `seed ${seed} lighting ${angle}`);
+  }
+});
+
+test('surface recipes expose relief height and ocean masks', async () => {
+  const { makeSurfaceRecipe, surfaceSample } = await import('../src/surface-recipe.js');
+  const rng = random(11);
+  for (const type of ['rocky', 'ocean', 'ice', 'ember', 'gas']) {
+    const recipe = makeSurfaceRecipe({ type, seed: 99, palette: ['#111', '#222', '#333', '#444'] }, rng);
+    const sample = surfaceSample(recipe, 0.2, 0.6, 0.3);
+    assert.ok(Number.isFinite(sample.height));
+    if (type === 'ocean') assert.ok(sample.ocean >= 0 && sample.ocean <= 1);
+    if (type === 'ice') assert.ok(sample.height !== 0.5);
+  }
+});
+
+test('autopilot prefers 60-120 degree lighting when a light direction is supplied', async () => {
+  const { stepFlight, createFlight } = await import('../src/flight.js');
+  const flight = createFlight();
+  flight.position = [0, 0, 0]; flight.yaw = 0; flight.pitch = 0; flight.targetTime = 0;
+  const interests = [
+    { position: [800, 0, -400], radius: 100, rings: false },
+    { position: [200, 120, -900], radius: 120, rings: true, ring: { outer: 2.2 } },
+  ];
+  stepFlight(flight, 0.05, interests, [], { speed: 8, lightDirection: [1, 0, 0], interest: { nebulaCore: { falloff: 16000 } }, retarget: { everySeconds: [28] } });
+  assert.ok(flight.target);
+  assert.ok(Math.abs(flight.target[1]) >= 80);
+});

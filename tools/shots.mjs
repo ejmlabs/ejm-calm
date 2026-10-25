@@ -4,18 +4,47 @@ import { withBrowser, openFlight, DESKTOP, MOBILE } from './browser.mjs';
 
 const directory = fileURLToPath(new URL('../shots/', import.meta.url));
 const quick = process.argv.includes('--quick');
+const seeds = [42, 7, 1234, 98765];
 await mkdir(directory, { recursive: true });
+
+async function settle(page, seconds = 6) {
+  await page.waitForFunction(() => window.__flightReview?.stats, null, { timeout: 20000 }).catch(() => {});
+  const started = Date.now();
+  while (Date.now() - started < seconds * 1000) {
+    const ready = await page.evaluate(() => {
+      const stats = window.__flightReview?.stats?.() ?? {};
+      return { bake: stats.bakeMs ?? 0, exposure: stats.exposure ?? 1, time: window.__flightReview?.time ?? 0 };
+    }).catch(() => ({ bake: 0 }));
+    if (ready.time > 2.5 && ready.bake < 0.05) break;
+    await page.waitForTimeout(400);
+  }
+  await page.waitForTimeout(900);
+}
+
+async function captureHero(browser, base, device, seed, path) {
+  const { page, context, errors } = await openFlight(browser, base, device, { seed, query: { debug: '1' } });
+  try {
+    await page.waitForFunction(() => !document.getElementById('beginBtn').disabled);
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: /^begin$/i }).click();
+    await settle(page, device.name === 'mobile' ? 7 : 8);
+    await page.screenshot({ path });
+    if (errors.length) throw new Error(errors.join('\n'));
+    console.log(`Saved ${path.split('/').pop()}`);
+  } finally { await context.close(); }
+}
+
 await withBrowser(async (browser, base) => {
   for (const device of [DESKTOP, MOBILE]) {
-    const { page, context, errors } = await openFlight(browser, base, device, { query: { debug: '1' } });
+    const { page, context, errors } = await openFlight(browser, base, device, { seed: 42, query: { debug: '1' } });
     try {
       await page.waitForFunction(() => !document.getElementById('beginBtn').disabled);
       await page.waitForTimeout(2600);
       await page.screenshot({ path: `${directory}${device.name}-begin.png` });
       await page.getByRole('button', { name: /^begin$/i }).click();
-      const began = Date.now();
-      await page.waitForTimeout(4500);
+      await settle(page, 8);
       await page.screenshot({ path: `${directory}${device.name}.png` });
+      await page.screenshot({ path: `${directory}${device.name}-seed42.png` });
       if (device.name === 'desktop') {
         await page.locator('#space').focus();
         await page.keyboard.press('ArrowRight', { delay: 600 });
@@ -27,26 +56,79 @@ await withBrowser(async (browser, base) => {
           await page.screenshot({ path: `${directory}desktop-about.png` });
           await page.keyboard.press('Escape');
           await page.evaluate(() => window.__flightReview.advance(Math.max(0, 60 - window.__flightReview.time)));
-          await page.waitForTimeout(600);
+          await page.waitForTimeout(800);
           await page.screenshot({ path: `${directory}desktop-midflight.png` });
         }
       }
       if (errors.length) throw new Error(errors.join('\n'));
-      console.log(`Saved ${device.name} views`);
+      console.log(`Saved ${device.name} hero views`);
     } finally { await context.close(); }
   }
-  if (!quick) for (const [name, query] of [
-    ['region-ember', { debugRegion: 'ember' }], ['region-hollow', { debugRegion: 'hollow' }],
-    ...['comet', 'binary', 'pulsar'].map((kind) => [`event-${kind}`, { debugEvent: kind }]),
-    ...['rocky', 'ocean', 'ice', 'ember'].map((type) => [`planet-${type}`, { debugPlanet: type }]),
-  ]) {
-    const { page, context, errors } = await openFlight(browser, base, DESKTOP, { query: { debug: '1', ...query } });
-    try {
-      await page.getByRole('button', { name: /^begin$/i }).click();
-      await page.waitForTimeout(3000);
-      await page.screenshot({ path: `${directory}${name}.png` });
-      if (errors.length) throw new Error(errors.join('\n'));
-      console.log(`Saved ${name}`);
-    } finally { await context.close(); }
+
+  if (!quick) {
+    for (const seed of seeds.slice(1)) {
+      for (const device of [DESKTOP, MOBILE]) {
+        await captureHero(browser, base, device, seed, `${directory}${device.name}-seed${seed}.png`);
+      }
+    }
+
+    {
+      const { page, context, errors } = await openFlight(browser, base, DESKTOP, { seed: 42, query: { debug: '1' } });
+      try {
+        await page.getByRole('button', { name: /^begin$/i }).click();
+        await settle(page, 8);
+        await page.locator('#space').focus();
+        for (let i = 0; i < 18; i++) { await page.mouse.wheel(0, -90); await page.waitForTimeout(40); }
+        await page.waitForTimeout(600);
+        await page.screenshot({ path: `${directory}desktop-ring.png` });
+        if (errors.length) throw new Error(errors.join('\n'));
+        console.log('Saved desktop-ring');
+      } finally { await context.close(); }
+    }
+
+    {
+      const { page, context, errors } = await openFlight(browser, base, DESKTOP, { seed: 42, query: { debug: '1', debugRegion: 'ember' } });
+      try {
+        await page.getByRole('button', { name: /^begin$/i }).click();
+        await settle(page, 5);
+        await page.evaluate(() => {
+          const list = window.__flightReview.nebulae();
+          const nebula = list.sort((a, b) => a.radius - b.radius).at(-1) ?? list[0];
+          if (!nebula) return;
+          const position = [
+            nebula.position[0] - nebula.radius * 0.05,
+            nebula.position[1] + nebula.radius * 0.12,
+            nebula.position[2] + nebula.radius * 0.05,
+          ];
+          window.__flightReview.place(position, Math.PI * 0.5, 0.12);
+        });
+        await page.waitForTimeout(5500);
+        await page.locator('#space').focus();
+        for (let i = 0; i < 10; i++) {
+          await page.mouse.move(720, 450); await page.mouse.down();
+          await page.mouse.move(720, 420); await page.mouse.up(); await page.waitForTimeout(40);
+        }
+        await settle(page, 6);
+        await page.screenshot({ path: `${directory}desktop-nebula.png` });
+        if (errors.length) throw new Error(errors.join('\n'));
+        console.log('Saved desktop-nebula');
+      } finally { await context.close(); }
+    }
+
+    for (const [name, query, seed] of [
+      ['region-ember', { debug: '1', debugRegion: 'ember' }, 42],
+      ['region-hollow', { debug: '1', debugRegion: 'hollow' }, 42],
+      ...['comet', 'binary', 'pulsar'].map((kind) => [`event-${kind}`, { debug: '1', debugEvent: kind }, 42]),
+      ...['rocky', 'ocean', 'ice', 'ember'].map((type) => [`planet-${type}`, { debug: '1', debugPlanet: type }, 42]),
+    ]) {
+      const { page, context, errors } = await openFlight(browser, base, DESKTOP, { seed, query });
+      try {
+        await page.getByRole('button', { name: /^begin$/i }).click();
+        await settle(page, 7);
+        await page.screenshot({ path: `${directory}${name}.png` });
+        if (errors.length) throw new Error(errors.join('\n'));
+        console.log(`Saved ${name}`);
+      } finally { await context.close(); }
+    }
   }
 });

@@ -21,15 +21,24 @@ export function stepFlight(state, elapsed, interests = [], obstacles = [], setti
   const facing = forward(state.yaw, state.pitch);
   if (state.targetTime <= 0 || !state.target || distance(state.position, state.target) < 280) {
     let best = null, score = -Infinity;
+    const light = settings.lightDirection;
     for (const interest of interests) {
       const gap = distance(state.position, interest.position);
       if (gap < (interest.radius ?? 0) + 280 || gap > interestRange) continue;
       const direction = normalize(interest.position.map((n, i) => n - state.position[i]));
       const alignment = direction.reduce((sum, n, i) => sum + n * facing[i], 0);
-      const value = alignment * 3 - gap / interestRange;
+      let lighting = 0;
+      if (light && interest.radius) {
+        const approach = normalize(interest.position.map((n, i) => n - state.position[i]));
+        const angle = Math.acos(clamp(approach.reduce((sum, n, i) => sum + n * light[i], 0), -1, 1)) * 180 / Math.PI;
+        lighting = angle >= 60 && angle <= 120 ? 1.2 : angle >= 45 && angle <= 135 ? 0.4 : -0.35;
+      }
+      const ringBonus = interest.rings ? 0.35 : 0;
+      const value = alignment * 3 - gap / interestRange + lighting + ringBonus;
       if (alignment > 0.15 && value > score) { score = value; best = interest; }
     }
-    state.target = best ? best.position.map((n, i) => n + (i === 0 ? (best.rings ? best.radius * best.ring.outer : best.radius ?? 100) * 2.4 + 180 : i === 1 ? 80 : 0)) :
+    const lift = best?.rings ? Math.max(110, (best.radius ?? 100) * 0.22) : 80;
+    state.target = best ? best.position.map((n, i) => n + (i === 0 ? (best.rings ? best.radius * best.ring.outer : best.radius ?? 100) * 2.4 + 180 : i === 1 ? lift : 0)) :
       state.position.map((n, i) => n + facing[i] * 2200 + (i === 1 ? Math.sin(state.time * 0.017) * 150 : 0));
     state.targetTime = settings.retarget?.everySeconds?.[0] ?? 28;
   }

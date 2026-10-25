@@ -79,7 +79,7 @@ function tick(now) {
   const flying = started && !paused;
   if (flying) {
     input.update(dt);
-    stepFlight(flight, dt, universe.pointsOfInterest(), universe.obstacles(flight.position), look.pacing ?? {});
+    stepFlight(flight, dt, universe.pointsOfInterest(), universe.obstacles(flight.position), { ...(look.pacing ?? {}), lightDirection: renderer.lightWorld.toArray() });
     if (renderer.observeQuality(elapsed) || updateQuality(quality, elapsed)) renderer.applyQuality(quality);
   }
   stream();
@@ -112,10 +112,17 @@ try {
       const target = flight.time + Math.max(0, Math.min(3600, seconds));
       while (flight.time < target - 1e-6) {
         stream();
-        stepFlight(flight, Math.min(1 / 30, target - flight.time), universe.pointsOfInterest(), universe.obstacles(flight.position), look.pacing);
+        stepFlight(flight, Math.min(1 / 30, target - flight.time), universe.pointsOfInterest(), universe.obstacles(flight.position), { ...(look.pacing ?? {}), lightDirection: renderer.lightWorld.toArray() });
       }
       renderer.updateStars(universe, flight.position); camera.update(flight, 1); persist(); last = 0; schedule();
     },
+    place(position, yaw = flight.yaw, pitch = flight.pitch) {
+      flight.position = position.map(Number); flight.yaw = yaw; flight.pitch = pitch; flight.target = null; flight.targetTime = 0;
+      for (let i = 0; i < 24; i++) stream();
+      renderer.nearestSystem = universe.nearestSystem(flight.position);
+      renderer.updateStars(universe, flight.position); camera.update(flight, 1); last = 0; schedule();
+    },
+    nebulae() { return [...universe.nebulae.values()].map((nebula) => ({ key: nebula.key, position: [...nebula.position], radius: nebula.radius })); },
   };
   input = bindInput(ui.elements.canvas, {
     orbit: (x, y) => camera.orbit(x, y), steer: (yaw, pitch) => { camera.noteInput(); steerFlight(flight, yaw, pitch); }, zoom: (amount) => camera.zoom(amount),

@@ -41,7 +41,7 @@ export class ShipEnvironment {
     this.face++;
     if (this.face === 6) {
       this.target.texture.needsPMREMUpdate = true; const filtered = this.prefilter.fromCubemap(this.target.texture);
-      this.filtered?.dispose(); this.filtered = filtered; scene.environment = filtered.texture; scene.environmentIntensity = this.settings.intensity; this.face = -1;
+      this.filtered?.dispose(); this.filtered = filtered; scene.environment = filtered.texture; scene.environmentIntensity = this.settings.intensity * 1.85; this.face = -1;
     }
     this.renderer.setRenderTarget(previous);
   }
