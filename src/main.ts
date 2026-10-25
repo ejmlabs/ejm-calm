@@ -351,6 +351,7 @@ if (debug) {
         dpr: quality.ratio,
         phase: whale.state.phase,
         whale: [whale.state.x, whale.state.y, whale.state.z],
+        whaleHeading: whale.state.heading,
         whaleSize: [size.x, size.y, size.z],
         cam: [camera.position.x, camera.position.y, camera.position.z],
         focus: [rig.lookAt.x, rig.lookAt.y, rig.lookAt.z],

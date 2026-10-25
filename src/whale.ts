@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { fork, hash } from './rng.js';
 import { clamp, damp, lerp, smoothstep } from './math.js';
 import type { IslandSpec } from './terrain.js';
-import { clampShipClearOfIslands } from './terrain.js';
+import { createWhalePilot, type WhaleCourse } from './whale-course.js';
 
 export type WhalePhase = 'swim' | 'surface' | 'spout' | 'dive' | 'breach' | 'splash';
 
@@ -329,10 +329,8 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
   const bindY = new Float32Array(bodyGeo.attributes.position!.count);
   for (let i = 0; i < bindY.length; i++) bindY[i] = bodyGeo.attributes.position!.getY(i);
 
-  const pathRadius = 18 + rng() * 12;
-  const pathSpeed = 0.07 + rng() * 0.03;
-  const pathCenterX = home.x * 0.35;
-  const pathCenterZ = home.z * 0.35;
+  const course: WhaleCourse = { x: state.x, z: state.z, heading: state.heading, leg: state.heading };
+  const pilot = createWhalePilot(seed, home, state.heading);
   let forced: WhalePhase | null = null;
   let forcedT = 0;
 
@@ -383,21 +381,12 @@ export function createWhale(seed: number, home: { x: number; z: number }): Whale
       state.phaseT = schedule.phaseT;
       state.cycle = schedule.cycle;
 
-      // Freeze path while a review phase is forced so event framing stays locked.
+      // Freeze the cruise while a review phase is forced so event framing stays locked.
       if (!forced) {
-        const angle = time * pathSpeed + state.heading;
-        let tx = pathCenterX + Math.cos(angle) * pathRadius;
-        let tz = pathCenterZ + Math.sin(angle) * pathRadius;
-        const cleared = clampShipClearOfIslands(tx, tz, islands, 20);
-        tx = cleared.x;
-        tz = cleared.z;
-        state.x = damp(state.x, tx, 0.6, dt);
-        state.z = damp(state.z, tz, 0.6, dt);
-        const dx = tx - state.x;
-        const dz = tz - state.z;
-        if (Math.hypot(dx, dz) > 0.05) {
-          state.heading = Math.atan2(dx, dz);
-        }
+        pilot.step(course, dt, time, islands);
+        state.x = course.x;
+        state.z = course.z;
+        state.heading = course.heading;
       }
 
       let targetY = restY;
