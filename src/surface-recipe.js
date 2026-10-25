@@ -38,11 +38,13 @@ export function surfaceSample(recipe, x, y, z) {
   if (type === 'gas') {
     const latitude = Math.asin(y) / Math.PI + 0.5, longitude = Math.atan2(z, x);
     const turbulence = surfaceFbm(x * 1.5, y * 8, z * 1.5, seed, spec.turbulence.octaves);
-    const phase = latitude * recipe.bands + (turbulence - 0.5) * spec.bandWarp * 2;
+    const widthJitter = 0.4 + fieldNoise(Math.floor(latitude * recipe.bands), 3, seed % 97, seed) * 1.4;
+    const phase = latitude * recipe.bands * widthJitter + (turbulence - 0.5) * spec.bandWarp * 3.2;
     const wave = Math.sin(phase * Math.PI * 2) * 0.5 + 0.5;
-    albedo = mix(palette[0], palette[1], smooth(0.1, 0.9, wave));
-    albedo = mix(albedo, palette[2], smooth(0.75, 0.98, wave) * 0.8);
-    albedo = mix(albedo, palette[3], smooth(0.0, 0.35, fieldNoise(Math.floor(phase), 1, 0, seed)) * 0.25);
+    // Lower stripe contrast so bands read as soft belts, not cartoon stripes.
+    albedo = mix(palette[0], palette[1], smooth(0.18, 0.82, wave) * 0.7 + 0.15);
+    albedo = mix(albedo, palette[2], smooth(0.78, 0.98, wave) * 0.45);
+    albedo = mix(albedo, palette[3], smooth(0.0, 0.35, fieldNoise(Math.floor(phase), 1, 0, seed)) * 0.18);
     for (const storm of recipe.storms) {
       const lon = Math.atan2(Math.sin(longitude - storm.longitude), Math.cos(longitude - storm.longitude));
       const u = lon / (storm.size * 2.7), v = (y - Math.sin(storm.latitude)) / storm.size;

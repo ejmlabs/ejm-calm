@@ -32,13 +32,17 @@ void main(){vec3 color=texture2D(source,vUv).rgb*tent(transmission,vUv,stepSize)
       source: { value: null }, emission: { value: null }, transmission: { value: null }, stepSize: { value: new THREE.Vector2() },
     });
     this.composite = material(`uniform sampler2D source;uniform sampler2D bloom;uniform float exposure;uniform float bloomStrength;uniform float aberration;uniform float vignette;uniform float softness;uniform float grain;uniform float time;varying vec2 vUv;
-float hash(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233))+time*13.37)*43758.5453);}
+float hash(vec2 p){return fract(sin(dot(p+time,vec2(12.9898,78.233)))*43758.5453);}
+// Triangular-PDF dither: sum of two uniform [0,1) hashes, remapped to ±1 LSB.
+float tpdf(vec2 p){return hash(p)+hash(p+vec2(19.1,7.3))-1.0;}
 void main(){vec2 radial=vUv-0.5;vec2 offset=radial*dot(radial,radial)*aberration;vec3 c=texture2D(source,vUv).rgb;
 if(aberration>0.0){c.r=texture2D(source,vUv+offset).r;c.b=texture2D(source,vUv-offset).b;}
 c+=texture2D(bloom,vUv).rgb*bloomStrength;float shade=1.0-vignette*smoothstep(softness,1.4,length(radial*2.0));gl_FragColor=vec4(c*exposure*shade,1.0);
 #include <tonemapping_fragment>
 #include <colorspace_fragment>
-float luminance=dot(gl_FragColor.rgb,vec3(0.2126,0.7152,0.0722));float noise=(hash(gl_FragCoord.xy)-0.5)*grain*(0.55+0.45*sqrt(max(0.0,luminance)));gl_FragColor.rgb=max(gl_FragColor.rgb+vec3(noise),vec3(4.0,5.0,10.0)/255.0);
+float luminance=dot(gl_FragColor.rgb,vec3(0.2126,0.7152,0.0722));
+float noise=tpdf(gl_FragCoord.xy)*grain*(0.7+0.3*sqrt(max(0.0,luminance)));
+gl_FragColor.rgb=max(gl_FragColor.rgb+vec3(noise),vec3(4.0,5.0,10.0)/255.0);
 }`, { source: { value: this.hdr.texture }, bloom: { value: null }, exposure: { value: 1 }, bloomStrength: { value: this.look.bloom.intensity },
       aberration: { value: 0 }, vignette: { value: this.look.lens.vignette.amount }, softness: { value: this.look.lens.vignette.softness }, grain: { value: this.look.lens.grain.amount }, time: { value: 0 } });
     this.composite.toneMapped = true; this.levels = []; this.resize();

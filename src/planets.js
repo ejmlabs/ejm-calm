@@ -21,15 +21,19 @@ function ringTexture(seed, look) {
     data[i * 4] = Math.round(tau / 1.4 * 255); data[i * 4 + 1] = Math.round(noise * 255);
     data[i * 4 + 2] = Math.round(surfaceFbm(t * 7, 2, 0, seed + 3, 2) * 255); data[i * 4 + 3] = 255;
   }
-  const texture = new THREE.DataTexture(data, width, 1); texture.magFilter = THREE.LinearFilter; texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.generateMipmaps = true; texture.needsUpdate = true; return texture;
+  const texture = new THREE.DataTexture(data, width, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
+  texture.magFilter = THREE.LinearFilter;
+  // Height-1 data textures break under mipmapping on SwiftShader; keep a single level.
+  texture.minFilter = THREE.LinearFilter; texture.generateMipmaps = false; texture.needsUpdate = true; texture.flipY = false;
+  texture.colorSpace = THREE.NoColorSpace; texture.unpackAlignment = 1;
+  return texture;
 }
 function surface(data, look, geometry, bakes, tier, moon = false, ringMap) {
   const name = recipeName(data.type), spec = look.realism.planets[name], atmosphere = look.realism.atmosphere;
   const bake = bakes.planet(data, { moon });
   const uniforms = { ...lights(), albedoMap: { value: bake.albedo }, surfaceMap: { value: bake.surface }, normalMap: { value: bake.normals }, ringMap: { value: ringMap ?? bake.surface },
     ready: { value: 0 }, kind: { value: kinds.indexOf(data.type) }, normalTaps: { value: look.realism.planets.normals.tapsByTier[tier] }, texel: { value: new THREE.Vector2(1 / bake.width, 1 / bake.height) }, relief: { value: spec.reliefStrength * 1.55 },
-    radius: { value: data.radius }, fallbackColor: { value: new THREE.Color(data.palette[0]) }, ambient: { value: new THREE.Color() }, atmosphere: { value: new THREE.Color(atmosphere.rayleigh[name]) }, atmosphereDensity: { value: moon ? 0 : atmosphere.density[name] },
+    radius: { value: data.radius }, fallbackColor: { value: new THREE.Color(data.palette[0]) }, ambient: { value: new THREE.Color().setScalar(look.realism.planets.nightSide.ambient) }, atmosphere: { value: new THREE.Color(atmosphere.rayleigh[name]) }, atmosphereDensity: { value: moon ? 0 : atmosphere.density[name] },
     sunsetWidth: { value: look.realism.planets.terminator.sunsetBand.width }, sunsetColor: { value: new THREE.Color(look.realism.planets.terminator.sunsetBand.color) }, sunsetStrength: { value: look.realism.planets.terminator.sunsetBand.strength },
     softness: { value: look.realism.planets.terminator.softness }, limbDarkening: { value: spec.limbDarkening ?? 0 }, emissionStrength: { value: spec.seams?.hdrIntensity ?? 0 },
     glintRoughness: { value: spec.glint?.roughness ?? 0.3 }, glintStrength: { value: spec.glint?.strength ?? 0.4 }, time: { value: 0 }, ringActive: { value: 0 }, ringBounds: { value: new THREE.Vector2() },
@@ -65,7 +69,7 @@ export function createPlanet(data, look, geometry, mobile, debugType, bakes, tie
       vertexShader: shaders.ringVertex, fragmentShader: shaders.ringFragment, side: THREE.DoubleSide, transparent: true, depthWrite: false, depthTest: true,
       uniforms: { ...lights(), densityMap: { value: texture }, colors: { value: settings.particleColor.map((c) => new THREE.Color(c)) }, bounds: { value: new THREE.Vector2(data.radius * spec.inner, data.radius * spec.outer) },
         radius: { value: data.radius }, scatterG: { value: settings.forwardScatterG }, backlitBoost: { value: settings.backlitBoost }, localLights: { value: [new THREE.Vector3(), new THREE.Vector3()] } } }));
-    ring.rotation.set(-Math.PI / 2 + spec.tilt, data.tilt * 0.4, data.tilt + 0.15); ring.renderOrder = 2; group.add(ring);
+    ring.rotation.set(-Math.PI / 2 + spec.tilt, data.tilt * 0.4, data.tilt + 0.15); ring.renderOrder = 2; ring.frustumCulled = false; group.add(ring);
     body.material.uniforms.ringActive.value = 1; body.material.uniforms.ringBounds.value.set(spec.inner, spec.outer);
   }
   atmosphere.renderOrder = 1;
@@ -82,7 +86,15 @@ function setLights(material, lightView, palette, starLights) {
   } else {
     uniforms.lightPositions.value[0].copy(lightView).multiplyScalar(1e6); uniforms.lightColors.value[0].copy(palette.key); uniforms.lightIntensity.value.set(1, 0);
   }
-  if (uniforms.ambient) uniforms.ambient.value.copy(palette.fill);
+  if (uniforms.ambient) {
+    const floor = lookNightAmbient(palette);
+    uniforms.ambient.value.copy(palette.fill).multiplyScalar(floor);
+  }
+}
+
+function lookNightAmbient(palette) {
+  // palette.camera is the THREE camera; night floor rides on the fill color from the caller.
+  return palette.nightAmbient ?? 0.03;
 }
 
 export function updatePlanet(group, time, lightWorld, lightView, palette, starLights) {

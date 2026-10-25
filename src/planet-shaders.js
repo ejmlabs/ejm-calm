@@ -39,7 +39,7 @@ void main(){
    float phi=vUv.x*6.2831853,lat=(vUv.y-0.5)*3.14159265;vec3 tangent=vec3(-sin(phi),0.0,-cos(phi)),bitangent=vec3(-cos(phi)*sin(lat),cos(lat),sin(phi)*sin(lat));
    objectNormal=normalize(objectNormal-tangent*(right-left)*relief*4.2-bitangent*(up-down)*relief*4.2);
  }
- vec3 n=normalize(normalMatrix*objectNormal),result=albedo*ambient*0.015;float daylight=0.0;
+ vec3 n=normalize(normalMatrix*objectNormal),result=albedo*ambient;float daylight=0.0;
  for(int i=0;i<2;i++){
    vec3 l=normalize(lightPositions[i]-vViewPoint);float strength=lightIntensity[i];float ndl=dot(n,l),day=smoothstep(-softness,softness,ndl);daylight=max(daylight,day*step(0.01,strength));
    float visibility=ringShadow(p,ringLights[i])*sphereShadow(vViewPoint,l);
@@ -63,10 +63,14 @@ uniform vec3 tint;uniform float thickness;uniform float density;uniform float ex
 uniform vec3 lightPositions[2];uniform vec3 lightColors[2];uniform vec2 lightIntensity;varying vec3 vNormal;varying vec3 vViewPoint;
 float hg(float c,float g){return (1.0-g*g)/(12.56637*pow(max(0.015,1.0+g*g-2.0*g*c),1.5));}
 void main(){
- vec3 n=normalize(vNormal),v=normalize(-vViewPoint);float cosine=max(0.0,dot(n,v));float limb=sqrt(max(0.001,1.0-1.0/pow(1.0+thickness,2.0)));
- float path=exp(-pow((cosine-limb)/(limb*0.65),2.0))*smoothstep(0.0,limb*0.22,cosine);vec3 emission=vec3(0);
- for(int i=0;i<2;i++){vec3 l=normalize(lightPositions[i]-vViewPoint);float day=smoothstep(-0.18,0.3,dot(n,l));float scatter=hg(dot(-l,v),scatterG);
- emission+=tint*lightColors[i]*lightIntensity[i]*path*density*(day*0.45+scatter*backlitBoost*0.18);}
+ // Purely additive limb: color × (1 − μ)^exponent, no darkening, soft fade at the shell rim.
+ vec3 n=normalize(vNormal),v=normalize(-vViewPoint);float mu=max(0.0,dot(n,v));
+ float rim=pow(1.0-mu,exponent);float shell=smoothstep(0.0,0.08,mu);vec3 emission=vec3(0);
+ for(int i=0;i<2;i++){
+  vec3 l=normalize(lightPositions[i]-vViewPoint);float day=smoothstep(-0.2,0.35,dot(n,l));
+  float scatter=hg(dot(-l,v),scatterG);float crescent=pow(max(0.0,-dot(l,v)),1.6)*backlitBoost;
+  emission+=tint*lightColors[i]*lightIntensity[i]*density*rim*shell*(day*0.55+scatter*0.25+crescent*0.55);
+ }
  gl_FragColor=vec4(emission,1.0);
 }`;
 
@@ -84,16 +88,20 @@ uniform vec3 localLights[2];uniform vec3 lightPositions[2];uniform vec3 lightCol
 varying vec3 vPoint;varying vec3 vViewPoint;varying vec3 vNormal;
 float hg(float c,float g){return (1.0-g*g)/(12.56637*pow(max(0.01,1.0+g*g-2.0*g*c),1.5));}
 void main(){
- float r=length(vPoint.xy),u=(r-bounds.x)/(bounds.y-bounds.x),width=fwidth(u);vec4 data=texture2D(densityMap,vec2(u,0.5));
- float edge=smoothstep(0.0,max(0.03,width*2.0),u)*(1.0-smoothstep(0.92,1.0,u));vec3 view=normalize(-vViewPoint),normal=normalize(vNormal);
- float mu=max(0.04,abs(dot(normal,view))),tau=data.r*1.4;float alpha=(1.0-exp(-tau/mu))*edge;
- vec3 particle=mix(colors[0],colors[1],data.g);particle=mix(particle,colors[2],data.b*0.4);particle=mix(particle,colors[3],(1.0-data.g)*0.18);vec3 light=vec3(0.02);
+ float r=length(vPoint.xy),u=(r-bounds.x)/(bounds.y-bounds.x),width=max(fwidth(u),1e-4);vec4 data=texture2D(densityMap,vec2(clamp(u,0.0,1.0),0.5));
+ float edge=smoothstep(0.0,max(0.03,width*2.0),u)*(1.0-smoothstep(0.92,1.0,u));
+ // Floor density so rings never go fully transparent if the bake/texture fails on a software GL.
+ float tau=max(0.35,data.r*1.4);vec3 view=normalize(-vViewPoint),normal=normalize(vNormal);
+ float mu=max(0.04,abs(dot(normal,view)));float alpha=(1.0-exp(-tau/mu))*max(edge,0.35);
+ vec3 particle=mix(colors[0],colors[1],data.g);particle=mix(particle,colors[2],data.b*0.4);particle=mix(particle,colors[3],(1.0-data.g)*0.18);
+ if(data.r<0.001)particle=mix(colors[0],colors[1],0.5);
+ vec3 light=vec3(0.12);
  for(int i=0;i<2;i++){
-   vec3 local=normalize(localLights[i]);float t=max(0.0,-dot(vPoint,local));float closest=length(vPoint+local*t);
+   vec3 local=normalize(localLights[i]+vec3(1e-5,0.0,0.0));float t=max(0.0,-dot(vPoint,local));float closest=length(vPoint+local*t);
    float edgeOn=1.0-smoothstep(0.08,0.45,abs(dot(normal,local)));
    float soft=max(radius*(0.14+edgeOn*0.22),fwidth(closest)*6.0);float shadow=1.0-(1.0-smoothstep(radius-soft,radius+soft*(1.6+edgeOn),closest))*step(0.001,t);
    vec3 l=normalize(lightPositions[i]-vViewPoint);float scatter=hg(dot(-l,view),scatterG)*backlitBoost;
-   light+=lightColors[i]*lightIntensity[i]*(abs(dot(normal,l))*0.75+scatter)*shadow;
+   light+=lightColors[i]*max(0.45,lightIntensity[i])*(abs(dot(normal,l))*0.85+scatter*0.6)*shadow;
  }
- gl_FragColor=vec4(particle*light,alpha);
+ gl_FragColor=vec4(particle*light,min(1.0,alpha*1.5));
 }`;

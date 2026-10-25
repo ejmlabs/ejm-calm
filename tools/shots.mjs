@@ -73,13 +73,13 @@ await withBrowser(async (browser, base) => {
     }
 
     {
-      const { page, context, errors } = await openFlight(browser, base, DESKTOP, { seed: 42, query: { debug: '1' } });
+      // Seed 98765 opens rings ~25° with preferRings; 42 sits nearly edge-on.
+      const { page, context, errors } = await openFlight(browser, base, DESKTOP, { seed: 98765, query: { debug: '1', debugRing: '1' } });
       try {
         await page.getByRole('button', { name: /^begin$/i }).click();
         await settle(page, 8);
-        await page.locator('#space').focus();
-        for (let i = 0; i < 18; i++) { await page.mouse.wheel(0, -90); await page.waitForTimeout(40); }
-        await page.waitForTimeout(600);
+        await page.evaluate(() => window.__flightReview?.frameRing?.(22));
+        await settle(page, 5);
         await page.screenshot({ path: `${directory}desktop-ring.png` });
         if (errors.length) throw new Error(errors.join('\n'));
         console.log('Saved desktop-ring');

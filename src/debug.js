@@ -5,5 +5,6 @@ export function reviewSettings(search, hostname) {
   return { region: ['tidepool', 'ember', 'hollow'].includes(region) ? region : undefined,
     event: ['comet', 'binary', 'pulsar'].includes(event) ? event : undefined,
     planet: ['rocky', 'ocean', 'gas', 'ice', 'ember'].includes(planet) ? planet : undefined,
+    ring: params.get('debugRing') === '1',
     hideNebula: params.get('debugHide') === 'nebula', hideSky: params.get('debugHide') === 'sky' };
 }

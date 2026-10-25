@@ -118,7 +118,9 @@ void main(){
 export const dustFragment = `
 uniform vec3 tint;uniform float opacity;varying vec2 vUv;varying float vFade;
 void main(){vec2 p=vUv*2.0-1.0;float alpha=exp(-p.x*p.x*4.0)*pow(max(0.0,1.0-p.y*p.y),1.5);
- gl_FragColor=vec4(tint,alpha*vFade*opacity);${output}}
+ // Lift dark dust so motes read as faint grey under key light, never pure black.
+ vec3 lit=max(tint,vec3(0.22,0.24,0.28));
+ gl_FragColor=vec4(lit,alpha*vFade*opacity);${output}}
 `;
 export const skyVertex = `
 uniform mat4 inverseProjection;uniform mat3 cameraRotation;varying vec3 vDirection;varying vec2 vUv;

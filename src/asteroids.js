@@ -6,7 +6,11 @@ export class AsteroidKit {
     this.seed = seed; this.look = look; this.tier = tier; this.names = ['C', 'S', 'M']; this.geometries = []; this.materials = []; this.fields = new Set(); this.dummy = new THREE.Object3D();
     for (const [index, name] of this.names.entries()) {
       this.geometries.push(this.geometry(index, tier)); const spec = look.realism.asteroids.classes[name];
-      const material = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: spec.roughness, metalness: spec.metalness });
+      // Floor emissive so lit albedo reads ≥ #1a1a1a even under dim interstellar key.
+      const material = new THREE.MeshStandardMaterial({
+        color: '#ffffff', roughness: spec.roughness, metalness: spec.metalness,
+        emissive: '#1a1a1a', emissiveIntensity: 0.35,
+      });
       this.detailMaterial(material, tier); this.materials.push(material);
     }
   }

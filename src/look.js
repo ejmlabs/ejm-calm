@@ -80,7 +80,7 @@ export const stars = {
     box: 90,
     count: { high: 700, medium: 450, low: 260 },
     sizePx: [0.8, 1.8],
-    alpha: 0.28,
+    alpha: 0.38,
     streak: 0.6, // stretch along velocity, in units at cruise speed; 0 disables
     fadeEdge: 0.25, // fraction of box over which motes fade at the wrap edges
   },
@@ -466,8 +466,8 @@ export const realism = {
   starPsf: {
     coreSigmaPx: 0.55, // at DPR 1; scale with DPR
     minFootprintPx: 1.0, // faint stars never shrink below one pixel; dim by intensity instead
-    halo: { fromMagnitude: 1.5, radiusPx: [6, 14], peak: 0.03 }, // only m < 1.5 get a halo
-    glare: { fromMagnitude: 0.0, radiusPx: 22, peak: 0.012 }, // brightest few only; circular, soft
+    halo: { fromMagnitude: 1.5, radiusPx: [4, 8], peak: 0.025 }, // only m < 1.5; capped ≤3.5 core radii in shader
+    glare: { fromMagnitude: 0.0, radiusPx: 10, peak: 0.01 }, // brightest few only; circular, soft
     hdrPeak: 6.0, // linear intensity cap for the brightest core, so bloom catches it
   },
   // Depth layers that give parallax and scale.
@@ -490,9 +490,9 @@ export const realism = {
     },
     // Emission lines in display sRGB (artistic, readable versions of the real lines).
     emission: {
-      hAlpha: '#e8466a', // 656 nm, rendered rose rather than deep red so it reads on screens
-      oIII: '#4fd8d0', // 501 nm teal
-      sII: '#b3222f', // 672 nm deep red, sits at the outskirts
+      hAlpha: '#d0506a', // 656 nm rose shell
+      oIII: '#3fb8b0', // 501 nm teal core
+      sII: '#a01828', // 672 nm deep red outskirts
       hBeta: '#5a7dff',
       reflection: '#6c8cff', // blue scattered starlight near embedded stars
     },
@@ -512,11 +512,11 @@ export const realism = {
       coverage: 0.35,
     },
     embeddedStars: { count: [1, 4], tempK: [12000, 30000], lightRadius: 0.35, intensity: 1.4 },
-    emissionScale: 0.9, // linear HDR emission at density 1; nebulae stay below the bloom threshold
+    emissionScale: 1.05, // linear HDR emission at density 1; peak ~0.35–0.6 after layering
     steps: { high: 48, medium: 32, low: 16 },
     resolution: { high: 0.5, medium: 0.5, low: 0.35 }, // of the drawing buffer
     jitter: 'blueNoise', // per-pixel ray offset, rotated per frame
-    history: { high: 0.85, medium: 0.8, low: 0 }, // temporal blend; 0 = off
+    history: { high: 0.85, medium: 0.8, low: 0 }, // temporal blend; 0 = off on low tier
     lowTierFallback: { slices: 6 }, // if raymarching misses budget: 6 camera-facing slices sampling the same 3D density
   },
 
@@ -544,7 +544,7 @@ export const realism = {
     },
     gas: {
       bands: [8, 16],
-      bandWarp: 0.18, // fraction of one band width
+      bandWarp: 0.42, // fraction of one band width; higher = less cartoon stripes
       turbulence: { octaves: 5, alongLongitude: 3.0 }, // stretch noise east–west
       storms: { count: [1, 3], size: [0.04, 0.12], color: '#c9653a' },
       palettes: [
@@ -568,7 +568,7 @@ export const realism = {
     },
     normals: { tapsByTier: { high: 4, medium: 3, low: 0 }, strength: 1.0 }, // 0 taps = baked normal only
     terminator: { softness: 0.08, sunsetBand: { color: '#ff9a5a', width: 0.06, strength: 0.5 } },
-    nightSide: { ambient: 0.015, earthshine: 0.0 }, // no city lights, ever
+    nightSide: { ambient: 0.03, earthshine: 0.0 }, // low-tier floor so discs never read as #000
   },
 
   // Atmosphere: analytic single-scattering approximation on a shell 1 + thickness.
@@ -619,9 +619,9 @@ export const realism = {
 
   asteroids: {
     classes: {
-      C: { weight: 0.75, albedo: ['#3b3733', '#47423c'], roughness: 0.92, metalness: 0.0 },
-      S: { weight: 0.17, albedo: ['#7a6a58', '#8d7b66'], roughness: 0.85, metalness: 0.0 },
-      M: { weight: 0.08, albedo: ['#8a8580', '#9a948c'], roughness: 0.55, metalness: 0.6 },
+      C: { weight: 0.75, albedo: ['#5a5550', '#6a645c'], roughness: 0.92, metalness: 0.0 },
+      S: { weight: 0.17, albedo: ['#8a7a66', '#9d8b74'], roughness: 0.85, metalness: 0.0 },
+      M: { weight: 0.08, albedo: ['#9a9590', '#aaa49c'], roughness: 0.55, metalness: 0.6 },
     },
     sizePowerLaw: 2.5, // N(>D) ∝ D^−2.5
     detailByTier: { high: 2, medium: 1, low: 1 }, // icosahedron subdivisions
@@ -659,7 +659,7 @@ export const realism = {
     lens: {
       chromaticAberration: { high: 0.0015, medium: 0, low: 0 }, // at the corners, radial, as UV offset
       vignette: { amount: 0.18, softness: 0.55 },
-      grain: { amount: 0.012, fps: 24, luminanceOnly: true },
+      grain: { amount: 0.018, fps: 24, luminanceOnly: true }, // TPDF ±1 LSB after tonemap
     },
   },
 

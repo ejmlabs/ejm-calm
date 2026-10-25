@@ -4,3 +4,9 @@ shots/*.webm
 shots/*.mp4
 *.log
 .DS_Store
+dist/
+.wrangler/
+CLAUDE.md
+AGENTS.md
+.orch/
+.claude/

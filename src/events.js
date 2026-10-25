@@ -32,20 +32,31 @@ export class RareEvents {
     this.origin = new THREE.Vector3(); this.starAway = new THREE.Vector3();
   }
   interval(spec) { return (spec.everyMin[0] + this.rng() * (spec.everyMin[1] - spec.everyMin[0])) * 60; }
-  start(kind, flight, system) {
+  start(kind, flight, system, camera = null) {
     this.clear();
     const legacy = this.look.rare.events[kind], realism = this.look.realism.comets, group = new THREE.Group();
-    const distance = kind === 'comet' ? legacy.passDistance[1] : legacy.distance[0];
-    const bearing = new THREE.Vector3(-0.27, 0.17, -1).normalize();
+    // Debug events sit in the view frustum; normal events skim past on a fixed bearing.
+    const distance = kind === 'comet'
+      ? (this.debugKind ? 280 : legacy.passDistance[0] + this.rng() * (legacy.passDistance[1] - legacy.passDistance[0]))
+      : (this.debugKind ? 1800 : legacy.distance[0]);
+    const bearing = new THREE.Vector3();
+    if (this.debugKind) {
+      // Place along the ship's forward so the chase-cam always sees it.
+      bearing.set(Math.sin(flight.yaw) * Math.cos(flight.pitch), Math.sin(flight.pitch), -Math.cos(flight.yaw) * Math.cos(flight.pitch));
+      bearing.x += 0.08; bearing.y += 0.05; bearing.normalize();
+    } else {
+      bearing.set(-0.27, 0.17, -1).normalize();
+    }
     this.origin.copy(bearing).multiplyScalar(distance).add(new THREE.Vector3(...flight.position));
     group.userData.origin = this.origin.clone(); this.group.add(group);
     if (kind === 'comet') {
-      const ionLength = realism.ionTail.length[0] + this.rng() * (realism.ionTail.length[1] - realism.ionTail.length[0]);
-      const dustLength = realism.dustTail.length[0] + this.rng() * (realism.dustTail.length[1] - realism.dustTail.length[0]);
-      const comaRadius = realism.coma.radius[0] + this.rng() * (realism.coma.radius[1] - realism.coma.radius[0]);
-      group.add(glow(this.map, realism.coma.color, comaRadius * 0.55, realism.coma.hdrIntensity));
-      const ion = ribbon(ionLength * 0.012, realism.ionTail.width[0] * 0.004, realism.ionTail.color, 0, realism.ionTail.striations);
-      const dust = ribbon(dustLength * 0.012, realism.dustTail.width[0] * 0.004, realism.dustTail.color, dustLength * realism.dustTail.curvature * 0.00005, 0);
+      const scale = this.debugKind ? 2.4 : 1;
+      const ionLength = (realism.ionTail.length[0] + this.rng() * (realism.ionTail.length[1] - realism.ionTail.length[0])) * scale;
+      const dustLength = (realism.dustTail.length[0] + this.rng() * (realism.dustTail.length[1] - realism.dustTail.length[0])) * scale;
+      const comaRadius = (realism.coma.radius[0] + this.rng() * (realism.coma.radius[1] - realism.coma.radius[0])) * scale;
+      group.add(glow(this.map, realism.coma.color, comaRadius * 0.7, realism.coma.hdrIntensity * (this.debugKind ? 1.6 : 1)));
+      const ion = ribbon(ionLength * 0.018, realism.ionTail.width[0] * 0.006, realism.ionTail.color, 0, realism.ionTail.striations);
+      const dust = ribbon(dustLength * 0.018, realism.dustTail.width[0] * 0.006, realism.dustTail.color, dustLength * realism.dustTail.curvature * 0.00005, 0);
       group.add(ion, dust); group.userData.tails = [ion, dust];
       group.userData.systemKey = system?.key ?? null;
       if (system?.stars?.[0]) this.starAway.fromArray(system.stars[0].position).sub(new THREE.Vector3(...flight.position)).normalize();
@@ -69,13 +80,14 @@ export class RareEvents {
     if (!this.active) {
       let kind = this.debugKind || Object.keys(this.next).find((name) => flight.time >= this.next[name] && flight.time - this.lastTime >= this.look.rare.minGapMin * 60);
       if (kind === 'comet' && this.look.realism.comets.onlyInSystems && !inSystem && !this.debugKind) kind = null;
-      if (kind) this.start(kind, flight, system);
+      if (kind) this.start(kind, flight, system, camera);
     }
     if (!this.active) return;
     const { kind, group, start } = this.active, t = flight.time - start, spec = this.look.rare.events[kind];
     group.position.copy(group.userData.origin).sub(new THREE.Vector3(...flight.position));
     if (kind === 'comet') {
-      group.position.x -= t * 12;
+      // Keep a debug comet parked in frame; live comets drift across.
+      if (!this.debugKind) group.position.x -= t * 12;
       if (system?.stars?.[0]) this.starAway.fromArray(system.stars[0].position).sub(new THREE.Vector3(...flight.position)).add(group.position).normalize().negate();
       else this.starAway.copy(key).negate().normalize();
       this.away.copy(this.starAway); this.normal.copy(camera.position).sub(group.position).normalize();

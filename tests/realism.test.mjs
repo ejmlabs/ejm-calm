@@ -78,15 +78,19 @@ test('quality selection and pass degradation preserve composition before reducin
   assert.equal(state.nebulaLevel, 1); assert.equal(state.ratio, before);
 });
 
-test('spawn vantages open rings and keep a terminator lighting angle', () => {
+test('spawn vantages open rings and keep a terminator lighting angle', async () => {
+  const { ringMeshNormal } = await import('../src/systems.js');
   for (const seed of [42, 7, 1234, 98765]) {
-    const spawn = findSpawn(seed);
+    const spawn = findSpawn(seed, { preferRings: true, ringOpenDeg: 20, fill: 0.17 });
     const toPlanet = spawn.planet.position.map((n, i) => n - spawn.position[i]);
     const length = Math.hypot(...toPlanet);
-    const elev = Math.asin(toPlanet[1] / length) * 180 / Math.PI;
-    assert.ok(Math.abs(elev) >= 15 && Math.abs(elev) <= 45, `seed ${seed} elev ${elev}`);
+    const view = toPlanet.map((n) => n / length);
+    assert.ok(spawn.planet.rings, `seed ${seed} should prefer a ringed body`);
+    const normal = ringMeshNormal(spawn.planet.ring.tilt, spawn.planet.tilt);
+    const open = Math.asin(Math.min(1, Math.abs(view.reduce((sum, n, i) => sum + n * normal[i], 0)))) * 180 / Math.PI;
+    assert.ok(open >= 15 && open <= 25, `seed ${seed} ring open ${open}`);
     const light = spawn.system.stars[0].position.map((n, i) => n - spawn.planet.position[i]);
-    const lightLen = Math.hypot(...light), view = toPlanet.map((n) => n / length);
+    const lightLen = Math.hypot(...light);
     const angle = Math.acos(Math.max(-1, Math.min(1, view.reduce((sum, n, i) => sum + n * light[i] / lightLen, 0)))) * 180 / Math.PI;
     assert.ok(angle >= 55 && angle <= 125, `seed ${seed} lighting ${angle}`);
   }

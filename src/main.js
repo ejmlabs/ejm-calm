@@ -24,8 +24,19 @@ const resolved = resolveSeed(location.search, memory?.seed, () => {
 const seed = resolved.seed;
 history.replaceState(null, '', seedURL(location.href, seed));
 const flight = createFlight(!resolved.explicit && memory?.seed === seed ? memory.flight : null);
-const spawn = findSpawn(seed); look.focusPlanetId = spawn.planet.id;
-if (resolved.explicit || !memory) { flight.speed = look.pacing.speed; flight.position = [...spawn.position]; flight.yaw = spawn.yaw; flight.pitch = spawn.pitch; }
+const spawn = findSpawn(seed, {
+  preferType: look.debug?.planet,
+  preferRings: Boolean(look.debug?.planet) || Boolean(look.debug?.ring),
+  fill: look.debug?.ring ? 0.17 : look.debug?.planet ? 0.3 : 0.26,
+  ringOpenDeg: look.debug?.ring ? 22 : 18,
+});
+if (look.debug?.planet) {
+  spawn.planet.type = look.debug.planet;
+  look.focusPlanetId = spawn.planet.id;
+} else look.focusPlanetId = spawn.planet.id;
+if (resolved.explicit || !memory || look.debug?.planet || look.debug?.event || look.debug?.region || look.debug?.ring) {
+  flight.speed = look.pacing.speed; flight.position = [...spawn.position]; flight.yaw = spawn.yaw; flight.pitch = spawn.pitch;
+}
 const audio = new AmbientAudio(memory?.sound ?? { enabled: true, volume: look.ui?.defaultVolume ?? 0.5 });
 const mobile = matchMedia('(pointer: coarse)').matches || window.innerWidth < 700;
 const quality = createQuality({ mobile, dpr: window.devicePixelRatio || 1,
@@ -123,6 +134,84 @@ try {
       renderer.updateStars(universe, flight.position); camera.update(flight, 1); last = 0; schedule();
     },
     nebulae() { return [...universe.nebulae.values()].map((nebula) => ({ key: nebula.key, position: [...nebula.position], radius: nebula.radius })); },
+    rings() {
+      const out = [];
+      for (const group of renderer.planetGroups) {
+        const record = group.userData.planet;
+        if (!record?.ring) continue;
+        const ring = record.ring;
+        out.push({
+          id: record.data.id,
+          visible: ring.visible,
+          radius: record.data.radius,
+          inner: record.appearance.ring?.inner,
+          outer: record.appearance.ring?.outer,
+          pos: group.position.toArray(),
+          scale: ring.scale.toArray(),
+          geom: ring.geometry?.parameters,
+          children: group.children.length,
+        });
+      }
+      return out;
+    },
+
+    systems() {
+      return [...universe.systems.values()].map((system) => ({
+        key: system.key,
+        position: [...system.position],
+        planets: system.planets.map((planet) => ({
+          id: planet.id, type: planet.type, rings: Boolean(planet.rings),
+          position: [...planet.position], radius: planet.radius,
+          tilt: planet.tilt, ringTilt: planet.ring?.tilt ?? 0,
+        })),
+        stars: system.stars.map((star) => ({ position: [...star.position], radius: star.radius })),
+      }));
+    },
+    frameRing(openDeg = 20) {
+      const systems = this.systems();
+      let best = null, bestScore = Infinity;
+      for (const system of systems) for (const planet of system.planets) {
+        if (!planet.rings) continue;
+        const dist = Math.hypot(...planet.position.map((n, i) => n - flight.position[i]));
+        if (dist < bestScore) { bestScore = dist; best = { system, planet }; }
+      }
+      if (!best) return false;
+      const light = best.system.stars[0].position.map((n, i) => n - best.planet.position[i]);
+      // Match createPlanet Euler → local +Z (same as systems.ringMeshNormal).
+      const rx = -Math.PI / 2 + best.planet.ringTilt, ry = best.planet.tilt * 0.4, rz = best.planet.tilt + 0.15;
+      const cx = Math.cos(rx), sx = Math.sin(rx), cy = Math.cos(ry), sy = Math.sin(ry), cz = Math.cos(rz), sz = Math.sin(rz);
+      const ringNormal = [cx * sy * cz + sx * sz, cx * sy * sz - sx * cz, cx * cy];
+      // Inline frameBody so the review harness does not import modules.
+      const len = (v) => Math.hypot(...v) || 1;
+      const norm = (v) => v.map((n) => n / len(v));
+      const lightN = norm(light);
+      const up = Math.abs(lightN[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+      let tangent = norm([
+        lightN[1] * up[2] - lightN[2] * up[1],
+        lightN[2] * up[0] - lightN[0] * up[2],
+        lightN[0] * up[1] - lightN[1] * up[0],
+      ]);
+      let binormal = norm([
+        lightN[1] * tangent[2] - lightN[2] * tangent[1],
+        lightN[2] * tangent[0] - lightN[0] * tangent[2],
+        lightN[0] * tangent[1] - lightN[1] * tangent[0],
+      ]);
+      const rn = norm(ringNormal);
+      const lighting = 85 * Math.PI / 180, open = Math.max(0.12, openDeg) * Math.PI / 180;
+      let observation = norm(tangent.map((n, i) => n * Math.sin(lighting) - lightN[i] * Math.cos(lighting) + binormal[i] * 0.08));
+      const along = observation.reduce((sum, n, i) => sum + n * rn[i], 0);
+      const planar = norm(observation.map((n, i) => n - rn[i] * along));
+      const sign = along >= 0 ? 1 : -1;
+      observation = norm(planar.map((n, i) => n * Math.cos(open) + rn[i] * Math.sin(open) * sign));
+      const fill = 0.17, fovDeg = 52;
+      const angular = Math.max(0.05, fill * fovDeg * Math.PI / 180);
+      const range = best.planet.radius / Math.tan(angular / 2);
+      const position = best.planet.position.map((n, i) => n + observation[i] * range);
+      const aim = best.planet.position.map((n, i) => n + tangent[i] * best.planet.radius * 0.08);
+      const direction = norm(aim.map((n, i) => n - position[i]));
+      this.place(position, Math.atan2(direction[0], -direction[2]), Math.asin(Math.max(-1, Math.min(1, direction[1]))));
+      return true;
+    },
   };
   input = bindInput(ui.elements.canvas, {
     orbit: (x, y) => camera.orbit(x, y), steer: (yaw, pitch) => { camera.noteInput(); steerFlight(flight, yaw, pitch); }, zoom: (amount) => camera.zoom(amount),

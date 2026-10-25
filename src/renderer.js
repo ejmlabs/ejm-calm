@@ -152,21 +152,7 @@ export class SpaceRenderer {
     if (cell.asteroids.length) {
       group.add(this.rocks.create(cell.asteroids, origin));
     }
-    for (const data of cell.nebulae) {
-      const rng = random(data.seed), count = this.look.nebula.puffs[this.mobile ? 'low' : 'high'];
-      const cloud = { group, center: new THREE.Vector3(...local(data.position)), puffs: [] };
-      for (let i = 0; i < count; i++) {
-        const material = new THREE.ShaderMaterial({ vertexShader: shaders.nebulaVertex, fragmentShader: shaders.nebulaFragment,
-          transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-          uniforms: { densityMap: { value: this.cloudTextures[i % 2] }, core: { value: new THREE.Color() }, mid: { value: new THREE.Color() }, edge: { value: new THREE.Color() },
-            opacity: { value: 0 }, nearFade: { value: 0 }, softness: { value: this.look.nebula.softness } } });
-        const puff = new THREE.Mesh(this.quad, material); puff.position.copy(cloud.center);
-        const offset = new THREE.Vector3((rng() - 0.5) * data.radius, (rng() - 0.5) * data.radius * 0.6, (rng() - 0.5) * data.radius * 0.5);
-        if (i > 0) puff.position.add(offset);
-        puff.scale.set(data.radius * (0.45 + rng() * 0.4), data.radius * (0.35 + rng() * 0.4), 1); puff.userData.roll = rng() * Math.PI * 2; puff.frustumCulled = false;
-        group.add(puff); cloud.puffs.push(puff);
-      } this.cloudGroups.add(cloud);
-    }
+    // Cell nebulae stream through the volumetric path (Nebulae + bake-worker); legacy 2D puffs stay off.
     this.groups.set(cell.key, group); this.scene.add(group);
   }
 
@@ -202,6 +188,8 @@ export class SpaceRenderer {
     this.renderer.setSize(width, height, false); this.camera.aspect = width / Math.max(1, height); this.camera.updateProjectionMatrix();
     this.renderer.getDrawingBufferSize(this.size);
     this.starMaterial.uniforms.pixelRatio.value = this.sky.stars.material.uniforms.pixelRatio.value = this.renderer.getPixelRatio();
+    this.starMaterial.uniforms.resolution.value.copy(this.size);
+    this.sky.stars.material.uniforms.resolution.value.copy(this.size);
     this.dust.material.uniforms.resolution.value.copy(this.size);
     this.dust.material.uniforms.pixelRatio.value = this.renderer.getPixelRatio();
     this.pipeline?.resize();
@@ -237,8 +225,8 @@ export class SpaceRenderer {
     this.sun.color.copy(this.palette.key);
     this.fill.color.copy(this.palette.fill); this.fill.intensity = 0;
     this.rim.color.copy(this.palette.rim); this.rim.intensity = 0;
-    this.hemisphere.color.copy(this.palette.band); this.hemisphere.intensity = 0.55 + this.weights[0] * 0.35;
-    this.fill.intensity = 0.28; this.rim.intensity = 0.45;
+    this.hemisphere.color.copy(this.palette.band); this.hemisphere.intensity = 0.85 + this.weights[0] * 0.35;
+    this.fill.intensity = 0.42; this.rim.intensity = 0.55;
     this.planetFill.copy(this.palette.fill).multiplyScalar(1 / Math.max(this.palette.fill.r, this.palette.fill.g, this.palette.fill.b, 0.01));
   }
 
@@ -256,7 +244,8 @@ export class SpaceRenderer {
     this.lightWorld.copy(starLights[0].direction); this.viewLight.copy(this.lightWorld).transformDirection(this.camera.matrixWorldInverse);
     for (const [i, light] of [this.sun, this.companion].entries()) { light.position.copy(starLights[i].direction).multiplyScalar(8); light.color.copy(starLights[i].color); light.intensity = starLights[i].intensity * (i === 0 ? 1.45 : 1); }
     this.scene.updateMatrixWorld(); this.farScene.updateMatrixWorld();
-    for (const planet of this.planetGroups) updatePlanet(planet, flight.time, this.lightWorld, this.viewLight, { key: this.palette.key, fill: this.planetFill, camera: this.camera }, starLights);
+    const nightAmbient = this.look.realism.planets.nightSide.ambient;
+    for (const planet of this.planetGroups) updatePlanet(planet, flight.time, this.lightWorld, this.viewLight, { key: this.palette.key, fill: this.planetFill, camera: this.camera, nightAmbient }, starLights);
     const box = this.look.stars.dust.box, uniforms = this.dust.material.uniforms;
     uniforms.travel.value.fromArray(flight.position.map((n) => ((n % box) + box) % box));
     const travel = forward(flight.yaw, flight.pitch), cap = this.look.realism.depthLayers.near.dustApparentSpeedCap;
@@ -266,20 +255,6 @@ export class SpaceRenderer {
     this.dust.geometry.instanceCount = this.dust.userData.baseCount * (insideField ? 3 : 1);
     animateShip(this.ship, flight, dt, this.camera, window.innerHeight);
     this.camera.getWorldDirection(this.cameraForward);
-    const score = (cloud) => {
-      this.vector.copy(cloud.center).add(cloud.group.position).sub(this.camera.position);
-      return this.vector.lengthSq() + (this.vector.dot(this.cameraForward) < 0 ? 1e12 : 0);
-    };
-    const clouds = [...this.cloudGroups].sort((a, b) => score(a) - score(b));
-    const opacity = this.weights.reduce((sum, weight, i) => sum + weight * this.look.REGIONS[regionNames[i]].nebula.opacity, 0);
-    clouds.forEach((cloud, index) => cloud.puffs.forEach((puff) => {
-      const distance = this.vector.copy(puff.position).add(cloud.group.position).distanceTo(this.camera.position);
-      const [near, far] = this.look.nebula.nearFade; const fade = THREE.MathUtils.smoothstep(distance, near, far);
-      puff.visible = !this.debug.hideNebula && index < (this.mobile ? 1 : 2) && fade > 0.001;
-      puff.quaternion.copy(this.camera.quaternion); puff.rotateZ(puff.userData.roll);
-      const u = puff.material.uniforms; u.core.value.copy(this.palette.nebula[0]); u.mid.value.copy(this.palette.nebula[1]); u.edge.value.copy(this.palette.nebula[2]);
-      u.nearFade.value = fade; u.opacity.value = opacity / Math.sqrt(cloud.puffs.length) * 0.8;
-    }));
     this.events.update(flight, this.camera, this.lightWorld, this.nearestSystem);
     this.camera.near = 50; this.camera.far = 5e6; this.camera.updateProjectionMatrix();
     this.sky.update(this.camera, this.palette, this.weights[2], dt); this.sky.scene.visible = !this.debug.hideSky;

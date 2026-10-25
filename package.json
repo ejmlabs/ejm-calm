@@ -9,7 +9,8 @@
     "serve": "node tools/serve.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:browser": "node tools/smoke.mjs",
-    "shots": "node tools/shots.mjs"
+    "shots": "node tools/shots.mjs",
+    "build": "node tools/build.mjs"
   },
   "devDependencies": {
     "playwright-core": "^1.64.1"

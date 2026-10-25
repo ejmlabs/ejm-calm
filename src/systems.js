@@ -3,6 +3,7 @@ import { cellRandom, hash } from './rng.js';
 import { sampleStar } from './astrophysics.js';
 import { weightedChoice, planetAppearance } from './planet-data.js';
 import { normalize, distance } from './math.js';
+import { frameBody } from './vantage.js';
 
 export const SYSTEM_CELL = art.realism.starSystems.cellSize;
 export const systemCellOf = (position) => position.map((n) => Math.floor((n + SYSTEM_CELL / 2) / SYSTEM_CELL));
@@ -73,33 +74,50 @@ export function generateNebula(seed, x, y, z) {
     axes: [1, between(rng, [0.5, 0.9]), between(rng, [0.3, 0.7])], embedded, seed: hash(seed, x, y, z, 744) };
 }
 
-export function findSpawn(seed) {
+export function findSpawn(seed, { preferType, preferRings = false, fill = 0.32, ringOpenDeg = 20 } = {}) {
   const candidates = [];
-  for (let radius = 0; radius <= 3 && !candidates.length; radius++) {
+  for (let radius = 0; radius <= 4; radius++) {
     for (let x = -radius; x <= radius; x++) for (let y = -radius; y <= radius; y++) for (let z = -radius; z <= radius; z++) {
       if (Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) !== radius) continue;
       const system = generateSystem(seed, x, y, z); if (!system) continue;
       for (const planet of system.planets) {
         if (planet.orbit < system.stars[0].clearanceRadius * 1.1) continue;
+        if (preferType && planet.type !== preferType) continue;
         const ringOpen = planet.rings ? Math.min(0.55, Math.abs(Math.sin(planet.ring.tilt + planet.tilt))) : 0;
-        candidates.push({ system, planet, score: distance(planet.position, [0, 0, 0]) / SYSTEM_CELL - Number(planet.rings) * 1.4 - ringOpen - Number(planet.type === 'ocean') * 0.35 });
+        candidates.push({
+          system, planet,
+          score: distance(planet.position, [0, 0, 0]) / SYSTEM_CELL
+            - Number(planet.rings) * (preferRings ? 2.2 : 1.4) - ringOpen
+            - Number(planet.type === preferType) * 3
+            - Number(planet.type === 'ocean') * 0.35,
+        });
       }
     }
+    if (candidates.length && (preferType || preferRings || radius >= 1)) break;
   }
+  if (!candidates.length && preferType) return findSpawn(seed, { preferRings, fill, ringOpenDeg });
   if (!candidates.length) throw new Error('No nearby system found');
   const { system, planet } = candidates.sort((a, b) => a.score - b.score)[0];
-  const light = normalize(system.stars[0].position.map((n, i) => n - planet.position[i]));
-  const tangent = normalize([-light[2], 0, light[0]].map((n, i) => n + (i === 1 ? 0 : 0)));
-  const binormal = normalize([
-    light[1] * tangent[2] - light[2] * tangent[1],
-    light[2] * tangent[0] - light[0] * tangent[2],
-    light[0] * tangent[1] - light[1] * tangent[0],
+  const light = system.stars[0].position.map((n, i) => n - planet.position[i]);
+  // Match createPlanet ring.rotation.set(-π/2 + ring.tilt, planet.tilt*0.4, planet.tilt + 0.15).
+  const ringNormal = planet.rings ? ringMeshNormal(planet.ring.tilt, planet.tilt) : [0, 1, 0];
+  const framed = frameBody({
+    subject: planet.position, radius: planet.radius, lightFromSubject: light,
+    // Keep the full ring ellipse in frame: outer ~2.5× radius → lower fill.
+    fill: planet.rings ? Math.min(fill, 0.18) : fill, lightingDeg: 85,
+    ringOpenDeg: planet.rings ? ringOpenDeg : 8, ringNormal,
+  });
+  return { system, planet, position: framed.position, yaw: framed.yaw, pitch: framed.pitch, range: framed.range, lightingDeg: framed.angle };
+}
+
+/** Ring plane normal matching createPlanet's Euler (X, Y, Z) on local +Z. */
+export function ringMeshNormal(ringTilt, planetTilt) {
+  const x = -Math.PI / 2 + ringTilt, y = planetTilt * 0.4, z = planetTilt + 0.15;
+  const cx = Math.cos(x), sx = Math.sin(x), cy = Math.cos(y), sy = Math.sin(y), cz = Math.cos(z), sz = Math.sin(z);
+  // Third column of R = Rz*Ry*Rx applied to (0,0,1).
+  return normalize([
+    cx * sy * cz + sx * sz,
+    cx * sy * sz - sx * cz,
+    cx * cy,
   ]);
-  // Prefer a 60–120° lighting angle and open the rings ~15–40° from edge-on.
-  const ringLift = planet.rings ? 0.42 + Math.abs(planet.ring.tilt) * 0.35 : 0.18;
-  const observation = normalize(tangent.map((n, i) => n * 0.72 - light[i] * 0.38 + binormal[i] * ringLift));
-  const position = planet.position.map((n, i) => n + observation[i] * (planet.radius * (planet.rings ? 7.2 : 6.5) + 180));
-  const aim = planet.position.map((n, i) => n + tangent[i] * planet.radius * 0.4 + binormal[i] * planet.radius * 0.12);
-  const direction = normalize(aim.map((n, i) => n - position[i]));
-  return { system, planet, position, yaw: Math.atan2(direction[0], -direction[2]), pitch: Math.asin(Math.max(-1, Math.min(1, direction[1]))) };
 }

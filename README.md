@@ -63,6 +63,10 @@ reference views. Local review URLs accept `?seed=42&debug=1&debugRegion=ember`
 
 ## Static deployment
 
+`npm run build` copies the public tree into `dist/` and writes `dist/_headers`
+with the content security policy, framing, sniffing and referrer headers.
+`wrangler.jsonc` serves `dist/` as static assets at fly.ejmlabs.com.
+
 Serve `index.html`, `styles.css`, `src/`, and `vendor/three/` together, preserving
 relative paths. Include `LICENSE` and `THIRD_PARTY_NOTICES`. No server functions,
 external assets, import maps, or runtime package resolution are required. The

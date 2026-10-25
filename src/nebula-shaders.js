@@ -15,28 +15,33 @@ void main(){
  float samples=lowSlices>0.5?6.0:steps;float stride=(last-first)/samples;
  float jitter=texture(jitterMap,fract(gl_FragCoord.xy/32.0+vec2(fract(time*0.75487766),fract(time*0.56984029)))).r;
  vec3 transmittance=vec3(1),emission=vec3(0);
+ // Camera-facing slice fade: slice normal ≈ ray toward the proxy center; fade when grazing.
+ vec3 sliceNormal=normalize(cameraPosition-centers[0]);
+ float sliceFade=lowSlices>0.5?mix(0.2,1.0,pow(abs(dot(ray,sliceNormal)),1.4)):1.0;
  for(int sampleIndex=0;sampleIndex<48;sampleIndex++){
   if(float(sampleIndex)>=samples)break;
   float distance=first+(float(sampleIndex)+jitter)*stride;vec3 point=cameraPosition+ray*distance,stepEmission=vec3(0),opticalDepth=vec3(0);
   for(int i=0;i<2;i++){
    if(float(i)>=count)break;vec3 p=(point-centers[i])/radii[i];float ellipsoid=dot(p/axes[i],p/axes[i]);if(ellipsoid>=1.0)continue;
-   vec4 field=i==0?texture(densityA,p*0.5+0.5):texture(densityB,p*0.5+0.5);
-   float envelope=pow(max(0.0,1.0-ellipsoid),2.0);float density=field.r*envelope;float radius=length(p);
-   float core=1.0-smoothstep(0.15,0.45,radius),shell=smoothstep(0.12,0.35,radius)*(1.0-smoothstep(0.65,0.85,radius));
-   float edge=smoothstep(0.5,0.7,radius)*(1.0-smoothstep(0.85,1.0,radius));
-   float dust=smoothstep(1.0-dustCoverage-0.08,1.0-dustCoverage+0.12,field.g)*envelope;
+   // Soft envelope: no hard sphere rim.
+   float envelope=pow(max(0.0,1.0-ellipsoid),2.8);vec4 field=i==0?texture(densityA,p*0.5+0.5):texture(densityB,p*0.5+0.5);
+   float density=field.r*envelope;float radius=length(p);
+   float core=smoothstep(0.0,0.12,radius)*(1.0-smoothstep(0.28,0.48,radius));
+   float shell=smoothstep(0.2,0.38,radius)*(1.0-smoothstep(0.7,0.9,radius));
+   float edge=smoothstep(0.55,0.72,radius)*(1.0-smoothstep(0.88,1.0,radius));
+   float dust=smoothstep(1.0-dustCoverage-0.05,1.0-dustCoverage+0.1,field.g)*envelope;
    float localReflection=0.0;
-   for(int star=0;star<8;star++){if(float(star)>=embeddedCount)break;float gap=length((embedded[star]-point)/radii[i]);localReflection+=exp(-gap*gap/0.1225)*0.7;}
-   float nearFade=mix(0.35,1.0,smoothstep(400.0,2400.0,length(cameraPosition-centers[i])));
-   float sliceBoost=lowSlices>0.5?2.4:1.0;
-   vec3 gas=(oxygen*core+hydrogen*shell+sulphur*edge+reflection*(field.b*0.35+min(1.0,localReflection)))*density;
-   stepEmission+=gas*emissionScale*stride/radii[i]*nearFade*sliceBoost;
+   for(int star=0;star<8;star++){if(float(star)>=embeddedCount)break;float gap=length((embedded[star]-point)/radii[i]);localReflection+=exp(-gap*gap/0.1225)*0.55;}
+   float nearFade=mix(0.4,1.0,smoothstep(500.0,2800.0,length(cameraPosition-centers[i])));
+   vec3 gas=(oxygen*core*1.15+hydrogen*shell+sulphur*edge*0.95+reflection*(field.b*0.2+min(1.0,localReflection)*0.45))*density;
+   stepEmission+=gas*emissionScale*stride/radii[i]*nearFade*sliceFade;
+   // Dust only darkens/reddens (Beer–Lambert); never adds tan emission.
    opticalDepth+=extinction*dust*extinctionScale*stride/radii[i]*nearFade;
   }
   emission+=transmittance*stepEmission;transmittance*=exp(-opticalDepth);
-  if(max(max(transmittance.r,transmittance.g),transmittance.b)<0.015)break;
+  if(max(max(transmittance.r,transmittance.g),transmittance.b)<0.02)break;
  }
- outEmission=vec4(min(emission,vec3(0.98)),1);outTransmission=vec4(transmittance,1);
+ outEmission=vec4(min(emission,vec3(0.62)),1);outTransmission=vec4(transmittance,1);
 }`;
 export const historyVertex = `precision highp float;in vec3 position;in vec2 uv;out vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0,1);}`;
 export const historyFragment = `precision highp float;uniform sampler2D emission;uniform sampler2D transmission;uniform sampler2D oldEmission;uniform sampler2D oldTransmission;uniform float weight;in vec2 vUv;

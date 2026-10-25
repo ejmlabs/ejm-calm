@@ -63,12 +63,16 @@ function bakeVolume({ seed, size }) {
     px = px * spec.baseFrequency + warp; py = py * spec.baseFrequency - warp * 0.7; pz = pz * spec.baseFrequency + warp * 0.4;
     let density = 0, amplitude = 0.5, weight = 0;
     for (let i = 0; i < spec.ridgedOctaves; i++) {
+      // Ridged multifractal: 1 − |noise|, sharpened, so filaments stay thin.
       const value = surfaceFbm(px, py, pz, seed + i * 31, 1) * 2 - 1;
-      density += (1 - Math.abs(value)) ** spec.ridgeSharpness * amplitude; weight += amplitude;
-      px *= 2.03; py *= 2.03; pz *= 2.03; amplitude *= 0.5;
+      const ridge = Math.pow(1 - Math.abs(value), spec.ridgeSharpness);
+      density += ridge * ridge * amplitude; weight += amplitude;
+      px *= 2.07; py *= 2.07; pz *= 2.07; amplitude *= 0.5;
     }
+    const filament = Math.max(0, density / weight - spec.erosion);
     const index = ((z * size + y) * size + x) * 4;
-    data[index] = Math.round(Math.max(0, Math.min(1, (density / weight - spec.erosion) * 2.1)) * 255);
+    // Keep peak coverage low so large regions stay under ~15% opacity.
+    data[index] = Math.round(Math.max(0, Math.min(1, filament * filament * 3.4)) * 255);
     data[index + 1] = Math.round(surfaceFbm(x / size * art.realism.nebula.dust.laneFrequency, y / size * art.realism.nebula.dust.laneFrequency, z / size * art.realism.nebula.dust.laneFrequency, seed + 811, 3) * 255);
     data[index + 2] = Math.round(surfaceFbm(x / size * 3, y / size * 3, z / size * 3, seed + 29, 2) * 255); data[index + 3] = 255;
   }

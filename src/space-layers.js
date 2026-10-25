@@ -39,7 +39,8 @@ export function starMaterial(look, ratio, shell = false) {
       referenceDistance: { value: look.realism.lighting.illuminance.referenceDistance * 0.01 }, minFlux: { value: magnitudeFlux(look.realism.magnitudes.range[1]) },
       peak: { value: psf.hdrPeak }, regionTint: { value: new THREE.Color(1, 1, 1) },
       coreSigma: { value: psf.coreSigmaPx * 0.9 }, haloFrom: { value: psf.halo.fromMagnitude }, haloRadius: { value: new THREE.Vector2(psf.halo.radiusPx[0] * 0.45, psf.halo.radiusPx[1] * 0.5) },
-      haloPeak: { value: psf.halo.peak * 0.55 }, glareFrom: { value: psf.glare.fromMagnitude }, glareRadius: { value: psf.glare.radiusPx * 0.45 }, glarePeak: { value: psf.glare.peak * 0.5 } } });
+      haloPeak: { value: psf.halo.peak * 0.55 }, glareFrom: { value: psf.glare.fromMagnitude }, glareRadius: { value: psf.glare.radiusPx * 0.45 }, glarePeak: { value: psf.glare.peak * 0.5 },
+      resolution: { value: new THREE.Vector2(1280, 720) } } });
 }
 
 export function starsGeometry(positions, sizes, tints, halos, physical = {}) {
