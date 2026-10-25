@@ -87,7 +87,7 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
       const fine = n0(x * 9 + z * 3, y * 9 - z * 2);
 
       // Countershading: white throat and belly, dark tail stock underneath.
-      const boundary = lerp(-0.02, -0.38, smoothstep(0.3, 0.55, u)) - 1.1 * smoothstep(0.62, 0.82, u);
+      const boundary = lerp(-0.12, -0.48, smoothstep(0.3, 0.55, u)) - 1.1 * smoothstep(0.62, 0.82, u);
       const belly = 1 - smoothstep(boundary - 0.24, boundary + 0.2, c + low * 0.28 + mid * 0.14);
       const sideTone = 1 - smoothstep(0.1, 0.9, c);
       let r = lerp(BACK[0]!, FLANK[0]!, sideTone * 0.6);

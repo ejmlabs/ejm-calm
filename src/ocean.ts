@@ -234,10 +234,11 @@ function shelfPatches(): ShaderPatch[] {
       replace: `// Light coming up through clear shallows, blended under the reflection (Fresnel):
       // strong where the view is steep, gone at grazing angles and with distance.
       // The camera sits a few metres up, so everything past ~100 m crowds into a thin band
-      // above the horizon: fade with the view angle so that band never reads as a stripe.
-      float facing = smoothstep( 0.003, 0.06, eyeDirection.y );
+      // above the horizon: keep a soft, capped grazing wash there so it never reads as a stripe.
+      float facing = mix( 0.15, 1.0, smoothstep( 0.002, 0.04, eyeDirection.y ) );
       float nearby = 1.0 - smoothstep( 300.0, 1400.0, distance );
-      float shelfMix = ( shallow * 0.9 + slope * 0.35 ) * facing * nearby * ( 1.0 - reflectance * 0.7 );
+      float shelfMix = ( shallow * 0.9 + slope * 0.35 ) * facing * nearby * ( 1.0 - reflectance * 0.6 );
+      shelfMix = min( shelfMix, mix( 0.25, 0.8, smoothstep( 0.002, 0.04, eyeDirection.y ) ) );
       // HDR so the turquoise survives the scene's low exposure.
       vec3 under = mix( shelfColor, shallowColor, shallow ) * shallowLight * 2.1;
       albedo = mix( albedo, under, clamp( shelfMix, 0.0, 0.8 ) );
