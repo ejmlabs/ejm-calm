@@ -12,6 +12,7 @@ type CalmReview = {
   advance?: (seconds: number) => void;
   forceBreach?: () => void;
   forceSpout?: () => void;
+  forceDeepDive?: (at?: number) => void;
   frameWhale?: (kind?: 'breach' | 'spout') => void;
   frame?: (yaw: number, pitch: number, distance: number) => void;
   stats?: () => Record<string, unknown>;
@@ -111,6 +112,16 @@ await withBrowser(async (browser, base) => {
       await page.waitForTimeout(300);
     },
   );
+
+  // Chase camera under water: start a deep dive and let the camera follow it down.
+  for (const device of [MOBILE, DESKTOP]) {
+    await capture(browser, base, device, 42, `${directory}${device.name}-dive.png`, { debug: '1' }, async (page) => {
+      await page.evaluate(() => {
+        (window as unknown as { __calmReview?: CalmReview }).__calmReview?.forceDeepDive?.(0.35);
+      });
+      await page.waitForTimeout(5000);
+    });
+  }
 
   // Convenience aliases for the seed-42 heroes.
   await capture(browser, base, MOBILE, 42, `${directory}mobile.png`);
