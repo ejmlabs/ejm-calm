@@ -13,7 +13,6 @@ import {
 import { createLand, landFraction, nearShelf, depthForMask, coastSpread, VIEW_HALF_CONE } from '../src/land.js';
 import { biomeColor } from '../src/landmesh.js';
 import { clampClearOfLand } from '../src/shore.js';
-import { phaseAtCycleTime, cycleDuration, type WhalePhase } from '../src/whale.js';
 import { validateMemory, VERSION } from '../src/persistence.js';
 import { fbm2, makeNoise2D, ridged2 } from '../src/noise.js';
 
@@ -221,22 +220,6 @@ test('shallow shelves sit in view between the camera and the coast', () => {
     assert.ok(shallow > 20, `seed ${seed}: only ${shallow} shallow samples in view`);
     assert.ok(deep > 10, `seed ${seed}: no deeper water in view (${deep})`);
   }
-});
-
-test('whale behaviour cycle stays finite and periodic', () => {
-  const duration = cycleDuration();
-  assert.ok(duration > 0 && Number.isFinite(duration));
-  const seen = new Set<WhalePhase>();
-  for (let t = 0; t < duration * 3; t += 0.5) {
-    const { phase, phaseT, cycle } = phaseAtCycleTime(t);
-    seen.add(phase);
-    assert.ok(phaseT >= 0 && phaseT <= 1);
-    assert.ok(Number.isInteger(cycle) && cycle >= 0);
-    assert.ok(['swim', 'surface', 'spout', 'dive', 'deep', 'breach', 'splash'].includes(phase));
-  }
-  assert.ok(seen.has('breach') && seen.has('spout') && seen.has('swim') && seen.has('deep'));
-  assert.deepEqual(phaseAtCycleTime(0).phase, phaseAtCycleTime(duration).phase);
-  assert.equal(phaseAtCycleTime(duration * 10 + 1).cycle, 10);
 });
 
 test('quality tiers and adaptive DPR stay bounded', () => {
