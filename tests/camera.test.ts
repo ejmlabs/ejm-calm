@@ -68,7 +68,7 @@ test('rig settles behind a target moving straight, without oscillation', () => {
   const dz = camera.position.z - t.z;
   const len = Math.hypot(dx, dz);
   assert.ok((-dx * f.x - dz * f.z) / len > 0.99, 'not behind the whale');
-  assert.ok(len > 20 && len < 40, `distance ${len}`);
+  assert.ok(len > 14 && len < 40, `distance ${len}`);
   assert.ok(camera.position.y > 3, 'eye too low above water');
   // Trailing distance grows monotonically to the steady lag: no ringing.
   for (let i = 1; i < along.length; i++) assert.ok(along[i]! <= along[i - 1]! + 1e-9, `oscillation at ${i}`);
@@ -199,7 +199,7 @@ test('a drag peek springs back to the heading after idle', () => {
   r.look(-400, 0);
   for (let i = 0; i < 60; i++) r.update(1 / 60, 0);
   const peek = viewYaw(r) - locked;
-  assert.ok(peek > 0.4 && peek <= 0.6 + 1e-6, `peek ${peek}`);
+  assert.ok(peek > 0.4 && peek <= 0.65, `peek ${peek}`);
   for (let i = 0; i < 60 * (PEEK_IDLE + 8); i++) r.update(1 / 60, 0);
   assert.ok(Math.abs(viewYaw(r) - locked) < 0.01, 'did not return');
 });

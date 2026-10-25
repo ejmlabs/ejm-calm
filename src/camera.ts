@@ -21,7 +21,7 @@ export type FollowCameraOptions = {
   groundAt?: (x: number, z: number) => number;
 };
 
-export const DEFAULT_FRAMING: CameraFraming = { yaw: 0, pitch: 0.17, distance: 22 };
+export const DEFAULT_FRAMING: CameraFraming = { yaw: 0, pitch: 0.3, distance: 16 };
 export const FRAMING_DISTANCE: readonly [number, number] = [14, 40];
 const FRAMING_PITCH: readonly [number, number] = [0.1, 0.4];
 
@@ -38,7 +38,7 @@ const UNDER_DISTANCE = 0.7;
 const UNDER_MAX_DISTANCE = 18;
 /** Distance and look-ahead grow with speed up to this many m/s. */
 const SPEED_CAP = 14;
-const SPEED_DISTANCE = 0.03;
+const SPEED_DISTANCE = 0.015;
 const SPEED_LOOK_AHEAD = 0.6;
 /** Below about this speed the camera holds its bearing instead of following the heading. */
 const COUPLING_SPEED: readonly [number, number] = [0.6, 3];

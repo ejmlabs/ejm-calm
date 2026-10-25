@@ -289,7 +289,7 @@ const whalePatches: ShaderPatch[] = [
         float halfWidth = 1.75 * sqrt( max( 0.0, sin( 3.14159 * ( 0.12 + 0.8 * s ) ) ) );
         float ends = smoothstep( -5.2, -4.2, along ) * ( 1.0 - smoothstep( 5.4, 6.2, along ) );
         float body = ( 1.0 - smoothstep( halfWidth * 0.55, halfWidth * 1.05, across ) ) * ends;
-        float fluke = ( 1.0 - smoothstep( 1.4, 2.1, across ) ) * smoothstep( -6.4, -5.6, along ) * ( 1.0 - smoothstep( -5.0, -4.6, along ) );
+        float fluke = ( 1.0 - smoothstep( 0.8, 2.2, across ) ) * smoothstep( -6.6, -5.6, along ) * ( 1.0 - smoothstep( -5.2, -4.4, along ) );
         // Clearer near the surface, gone when deep or airborne; weaker at grazing angles where the mirror wins.
         float clear = exp( -max( 0.0, -whaleBody.w - 1.2 ) / 3.5 ) * ( 1.0 - smoothstep( -0.6, 0.4, whaleBody.w ) );
         float view = mix( 0.65, 1.0, smoothstep( 0.03, 0.3, eyeDirection.y ) );

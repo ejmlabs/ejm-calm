@@ -17,16 +17,16 @@ export const PHASE_ORDER: WhalePhase[] = ['swim', 'surface', 'spout', 'dive', 'd
 
 /**
  * Body-origin heights and resting trim. Near the surface the whale rides
- * slightly nose-up with its tail stock sagging: only the head crown, blowholes,
- * a low back line and the fin break the water (about 0.2–0.3 m); the tail stays under.
+ * slightly nose-up with its tail stock sagging: the head crown, blowholes,
+ * back line and fin break the water; the tail stays under.
  */
 export const DEEP_Y = -4.5;
-export const SWIM_Y = -1.4;
+export const SWIM_Y = -0.4;
 /** Cruising depth of the long dive between surfacings. */
 export const DEEP_DIVE_Y = -14;
 /** Smallest gap kept between the body origin and the seafloor. */
 export const FLOOR_CLEARANCE = 3;
-export const SURFACE_Y = -1.3;
+export const SURFACE_Y = -0.7;
 export const SWIM_PITCH = 0.04;
 export const SURFACE_PITCH = 0.085;
 export const REST_ARCH = -0.4;

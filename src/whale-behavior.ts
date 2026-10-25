@@ -38,6 +38,8 @@ const FEED_RANGE = 600;
 const APPROACH_SECONDS = 100;
 /** Seconds between decisions; fixed in sim time so 30 and 60 fps decide alike. */
 const DECIDE_EVERY = 0.5;
+/** Travel dives fade in over a seafloor deeper than this, so the clamp never holds one above the camera's dive threshold. */
+const DIVE_FLOOR = -11;
 
 /** A posed stretch (surface, spout, dive, breach, splash) played from whalePose. */
 type Segment = { phase: WhalePhase; len: number; t: number };
@@ -86,12 +88,10 @@ export function createWhaleMover(
   /** Travel speed: two octaves of slow noise, so surges and lulls never repeat. */
   const travelSpeed = (t: number) =>
     lerp(TRAVEL_MIN, TRAVEL_MAX, smoothstep(-0.65, 0.45, 0.7 * noise(t / 34, 0.5) + 0.3 * noise(t / 11, 3.7)));
-  /**
-   * Travel depth: back and dorsal fin breaking the surface (so the chase camera above
-   * the mirror-like water always sees the whale), now and then a shallow dive it follows under.
-   */
-  const travelDepth = (t: number) =>
-    -1.35 - 0.4 * smoothstep(-0.6, 0.6, noise(t / 47, 8.1)) - 7.5 * smoothstep(0.3, 0.75, noise(t / 130, 12.9));
+  /** Travel depth: the back and dorsal fin break the surface, so the chase camera always sees the whale. */
+  const cruiseDepth = (t: number) => SWIM_Y - 0.25 * smoothstep(-0.6, 0.6, noise(t / 47, 8.1));
+  /** Now and then a shallow dive the camera follows under; only over water deep enough for it to show. */
+  const diveDepth = (t: number) => -7.5 * smoothstep(0.3, 0.75, noise(t / 130, 12.9));
   const jitter = (a: number, b: number) => a + (b - a) * rng();
 
   // The opening is a breath already under way: mid-surface, so the first blow comes within seconds.
@@ -243,7 +243,7 @@ export function createWhaleMover(
 
     // Goals for speed and depth from the behaviour.
     let goalSpeed = travelSpeed(time);
-    let goalDepth = travelDepth(time);
+    let goalDepth = cruiseDepth(time);
     course.aim = null;
     if (behavior === 'breathe') {
       goalSpeed = seg ? (seg.phase === 'dive' ? 1.8 : 1.1) : 1.8;
@@ -272,13 +272,15 @@ export function createWhaleMover(
       }
     }
     motion.floor = floorAt?.(course.x, course.z);
+    let floor = -Infinity;
     if (floorAt) {
       // Read the floor a few seconds ahead too, so a fast whale rises over a slope in time.
       const fwd = whaleForward(course.heading);
-      let floor = motion.floor ?? -Infinity;
+      floor = motion.floor ?? -Infinity;
       for (const ahead of [2, 4, 8]) floor = Math.max(floor, floorAt(course.x + fwd.x * speed * ahead, course.z + fwd.z * speed * ahead));
-      if (Number.isFinite(floor)) goalDepth = Math.max(goalDepth, floor + FLOOR_CLEARANCE + 1);
     }
+    if (behavior === 'travel') goalDepth += diveDepth(time) * (1 - smoothstep(DIVE_FLOOR - 6, DIVE_FLOOR, floor));
+    if (Number.isFinite(floor)) goalDepth = Math.max(goalDepth, floor + FLOOR_CLEARANCE + 1);
     goalDepth = Math.min(goalDepth, SWIM_Y);
 
     // Speed eases toward a smoothed goal with bounded acceleration.
