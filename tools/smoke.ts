@@ -6,28 +6,37 @@ type DrawWindow = Window & { __draws: number; __frameDraws: number[] };
 
 async function pixels(page: Page) {
   const snapshot = (await page.locator('#space').screenshot()).toString('base64');
-  return page.locator('#space').evaluate(async (canvas, encoded) => {
-    const image = new Image();
-    image.src = `data:image/png;base64,${encoded}`;
-    await image.decode();
-    const copy = document.createElement('canvas');
-    copy.width = 96;
-    copy.height = 64;
-    const context = copy.getContext('2d');
-    if (!context) throw new Error('2d context unavailable');
-    context.drawImage(image, 0, 0, copy.width, copy.height);
-    const data = context.getImageData(0, 0, copy.width, copy.height).data;
-    let min = 765;
-    let max = 0;
-    let nonBlack = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      const value = data[i]! + data[i + 1]! + data[i + 2]!;
-      min = Math.min(min, value);
-      max = Math.max(max, value);
-      if (value > 9) nonBlack++;
-    }
-    return { min, max, nonBlack, width: (canvas as HTMLCanvasElement).width, height: (canvas as HTMLCanvasElement).height };
-  }, snapshot);
+  const size = await page.locator('#space').evaluate((canvas) => ({ width: (canvas as HTMLCanvasElement).width, height: (canvas as HTMLCanvasElement).height }));
+  // Decode on a blank page: the app's CSP does not allow data: images.
+  const scratch = await page.context().newPage();
+  try {
+    return { ...await scratch.evaluate(decode, snapshot), ...size };
+  } finally {
+    await scratch.close();
+  }
+}
+
+async function decode(encoded: string) {
+  const image = new Image();
+  image.src = `data:image/png;base64,${encoded}`;
+  await image.decode();
+  const copy = document.createElement('canvas');
+  copy.width = 96;
+  copy.height = 64;
+  const context = copy.getContext('2d');
+  if (!context) throw new Error('2d context unavailable');
+  context.drawImage(image, 0, 0, copy.width, copy.height);
+  const data = context.getImageData(0, 0, copy.width, copy.height).data;
+  let min = 765;
+  let max = 0;
+  let nonBlack = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const value = data[i]! + data[i + 1]! + data[i + 2]!;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+    if (value > 9) nonBlack++;
+  }
+  return { min, max, nonBlack };
 }
 
 await withBrowser(async (browser, base) => {

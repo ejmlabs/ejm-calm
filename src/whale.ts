@@ -691,7 +691,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     washPivot.position.set(tmpV.x, 0.05, tmpV.z);
     washPivot.rotation.y = state.heading;
     wash.scale.set(4.7, 1.05, 1);
-    washMat.opacity = 0.4 * w;
+    washMat.opacity = 0.28 * w;
   }
 
   syncNow(0);

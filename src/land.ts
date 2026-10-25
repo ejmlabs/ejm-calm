@@ -293,8 +293,9 @@ export function createLand(seed: number, options: LandOptions): Land {
   function shoalAt(x: number, z: number): number {
     const r = Math.hypot(x, z);
     // Sand banks dot the bay out to the coast, leaving the water right under the camera deep.
-    const reach = smoothstep(25, 70, r) * (1 - smoothstep(900, 1300, r));
-    const patches = smoothstep(0.08, 0.26, fbm2(n.shoal, x / 160, z / 160, 3)) * reach;
+    // Long, soft ramps so the banks shoal gradually instead of stepping up at one range.
+    const reach = smoothstep(20, 170, r) * (1 - smoothstep(900, 1300, r));
+    const patches = smoothstep(0.0, 0.4, fbm2(n.shoal, x / 160, z / 160, 3)) * reach;
     // One sand bank always lies in the opening view, close enough to see from steeply above.
     const bx = x - bank.x;
     const bz = z - bank.z;
@@ -412,7 +413,7 @@ export function nearShelf(land: Land): ShelfMap {
   return shelf;
 }
 
-export function farShelf(land: Pick<Land, 'maskAt'>, size = 192, extent = 6400, cx = 0, cz = 0): ShelfMap {
+export function farShelf(land: Pick<Land, 'maskAt'>, size = 384, extent = 6400, cx = 0, cz = 0): ShelfMap {
   const steps = farShelfSteps(land, size, extent, cx, cz);
   for (;;) {
     const next = steps.next();
@@ -421,7 +422,7 @@ export function farShelf(land: Pick<Land, 'maskAt'>, size = 192, extent = 6400, 
 }
 
 /** farShelf in slices of a few rows. */
-export function* farShelfSteps(land: Pick<Land, 'maskAt'>, size = 192, extent = 6400, cx = 0, cz = 0): Generator<void, ShelfMap> {
+export function* farShelfSteps(land: Pick<Land, 'maskAt'>, size = 384, extent = 6400, cx = 0, cz = 0): Generator<void, ShelfMap> {
   // Too coarse for an exact distance field: estimate it from the coast mask slope.
   const distance = new Float32Array(size * size);
   const cell = (extent * 2) / (size - 1);

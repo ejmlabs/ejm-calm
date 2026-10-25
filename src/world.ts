@@ -48,7 +48,7 @@ export type World = {
 const BUDGET_MS = 2.5;
 /** Navigation tiles are kept built this far around the whale (covers look-ahead and the next shelf bake). */
 const NAV_RADIUS = 2300;
-const FAR_SIZE = 192;
+const FAR_SIZE = 384;
 const FAR_EXTENT = 6400;
 
 export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scene, options: WorldOptions): World {

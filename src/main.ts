@@ -315,7 +315,7 @@ if (debug) {
       return time;
     },
     advance(seconds: number) {
-      if (Number.isFinite(seconds)) time += Math.max(0, seconds);
+      if (Number.isFinite(seconds)) time += Math.min(3600, Math.max(0, seconds));
     },
     travel(seconds: number) {
       for (let t = 0; t < Math.min(3600, Math.max(0, seconds || 0)); t += 1 / 30) {

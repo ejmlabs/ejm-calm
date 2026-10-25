@@ -22,7 +22,7 @@ const MIME: Record<string, string> = {
 };
 
 // Shared with index.html meta CSP. Header adds frame-ancestors (meta cannot set it).
-export const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+export const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 export const CSP_HEADER = `${CSP}; frame-ancestors 'none'`;
 
 const HEADERS: Record<string, string> = {
@@ -34,11 +34,12 @@ const HEADERS: Record<string, string> = {
   'Content-Security-Policy': CSP_HEADER,
 };
 
-const ALLOWED = new Set(['index.html', 'LICENSE', 'THIRD_PARTY_NOTICES', 'favicon.ico', 'favicon.svg', 'favicon.png']);
+export const ICON_FILES = ['favicon.svg', 'favicon-16.png', 'favicon-32.png', 'favicon-48.png', 'apple-touch-icon.png'] as const;
+
+const ALLOWED = new Set(['index.html', 'LICENSE', 'THIRD_PARTY_NOTICES', ...ICON_FILES]);
 
 function allowed(relative: string): boolean {
   if (ALLOWED.has(relative)) return true;
-  if (relative.startsWith('favicon')) return true;
   if (relative === 'assets' || relative.startsWith('assets/')) return true;
   return false;
 }

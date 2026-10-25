@@ -4,7 +4,7 @@ import { readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { request } from 'node:http';
-import { startServer } from '../tools/serve.js';
+import { startServer, ICON_FILES } from '../tools/serve.js';
 
 type FetchResult = { status: number | undefined; headers: import('node:http').IncomingHttpHeaders; body: string };
 
@@ -52,4 +52,23 @@ test('static server provides module MIME types and rejects traversal and unsuppo
     assert.equal((await fetchRaw(app.url, '/%not-valid')).status, 400);
     assert.equal((await fetchRaw(app.url, scriptPath, 'POST')).status, 405);
   } finally { await app.close(); }
+});
+
+test('static server serves exactly the shipped icons with image types', async () => {
+  const root = resolve(import.meta.dirname, '..');
+  const dist = resolve(root, 'dist');
+  execFileSync('npx', ['vite', 'build'], { cwd: root, stdio: 'ignore' });
+  const app = await startServer({ port: 0, root: dist });
+  try {
+    for (const name of ICON_FILES) {
+      const icon = await fetchRaw(app.url, `/${name}`, 'HEAD');
+      assert.equal(icon.status, 200, name);
+      assert.equal(icon.headers['content-type'], name.endsWith('.svg') ? 'image/svg+xml' : 'image/png', name);
+    }
+    for (const name of ['favicon-x.png', 'favicon.ico', 'favicon.png']) {
+      assert.equal((await fetchRaw(app.url, `/${name}`)).status, 404, name);
+    }
+  } finally {
+    await app.close();
+  }
 });

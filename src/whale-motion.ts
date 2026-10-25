@@ -21,12 +21,12 @@ export const PHASE_ORDER: WhalePhase[] = ['swim', 'surface', 'spout', 'dive', 'd
  * a low back line and the fin break the water (about 0.2–0.3 m); the tail stays under.
  */
 export const DEEP_Y = -4.5;
-export const SWIM_Y = -1.2;
+export const SWIM_Y = -1.4;
 /** Cruising depth of the long dive between surfacings. */
 export const DEEP_DIVE_Y = -14;
 /** Smallest gap kept between the body origin and the seafloor. */
 export const FLOOR_CLEARANCE = 3;
-export const SURFACE_Y = -1.02;
+export const SURFACE_Y = -1.3;
 export const SWIM_PITCH = 0.04;
 export const SURFACE_PITCH = 0.085;
 export const REST_ARCH = -0.4;
@@ -228,7 +228,8 @@ export function floorLimit(y: number, floorY: number | undefined): number {
   if (floorY === undefined || !Number.isFinite(floorY)) return y;
   const limit = Math.min(floorY + FLOOR_CLEARANCE, SURFACE_Y - FLOOR_SOFT);
   const u = y - limit;
-  if (u >= FLOOR_SOFT) return y;
+  // Tolerance: surface riding sits exactly on the blend edge and must pass through untouched.
+  if (u >= FLOOR_SOFT - 1e-9) return y;
   if (u <= -FLOOR_SOFT) return limit;
   return limit + ((u + FLOOR_SOFT) * (u + FLOOR_SOFT)) / (4 * FLOOR_SOFT);
 }
