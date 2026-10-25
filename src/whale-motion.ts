@@ -20,8 +20,8 @@ export const PHASE_ORDER: WhalePhase[] = ['swim', 'surface', 'spout', 'dive', 's
  * a low back line and the fin break the water (about 0.2–0.3 m); the tail stays under.
  */
 export const DEEP_Y = -4.5;
-export const SWIM_Y = -1.2;
-export const SURFACE_Y = -1.02;
+export const SWIM_Y = -1.4;
+export const SURFACE_Y = -1.3;
 export const SWIM_PITCH = 0.04;
 export const SURFACE_PITCH = 0.085;
 export const REST_ARCH = -0.4;

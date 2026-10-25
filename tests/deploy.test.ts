@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { CSP, CSP_HEADER } from '../tools/serve.js';
+import { CSP, CSP_HEADER, ICON_FILES } from '../tools/serve.js';
 
 const root = resolve(import.meta.dirname, '..');
-const ALLOWED_TOP = new Set(['LICENSE', 'THIRD_PARTY_NOTICES', '_headers', 'index.html', 'assets']);
+const ALLOWED_TOP = new Set([
+  'LICENSE', 'THIRD_PARTY_NOTICES', '_headers', 'index.html', 'assets',
+  ...ICON_FILES,
+]);
 
 async function walk(directory: string): Promise<string[]> {
   const result: string[] = [];
@@ -37,9 +40,9 @@ test('build output holds only the Vite public tree and host headers', async () =
 
   const entries = await readdir(resolve(root, 'dist'));
   for (const name of entries) {
-    assert.ok(ALLOWED_TOP.has(name) || name.startsWith('favicon'), `unexpected dist entry: ${name}`);
+    assert.ok(ALLOWED_TOP.has(name), `unexpected dist entry: ${name}`);
   }
-  for (const required of ['LICENSE', 'THIRD_PARTY_NOTICES', '_headers', 'index.html', 'assets']) {
+  for (const required of ALLOWED_TOP) {
     assert.ok(entries.includes(required), `missing dist entry: ${required}`);
   }
 

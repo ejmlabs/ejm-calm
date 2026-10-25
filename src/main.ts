@@ -332,7 +332,7 @@ if (debug) {
       return time;
     },
     advance(seconds: number) {
-      if (Number.isFinite(seconds)) time += Math.max(0, seconds);
+      if (Number.isFinite(seconds)) time += Math.min(3600, Math.max(0, seconds));
     },
     forceBreach(at?: number) {
       whale.forcePhase('breach', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
