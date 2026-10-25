@@ -5,7 +5,11 @@ import { clamp, lerp } from './math.js';
 import { hash } from './rng.js';
 import { WATER_LEVEL, underwaterUniforms, waterSignal, type FloatingOrigin, type WaterSignal } from './seams.js';
 import { WATER_IOR, blendFog, radianceFor, surfaceLight, waterTint, type FogState } from './underwater-optics.js';
-import { createSeafloor } from './underwater-floor.js';
+import { createFloorPatch } from './underwater-floor.js';
+import { createSeafloor, type Seafloor } from './seafloor.js';
+import { createUnderwaterLife } from './underwater-life.js';
+import { createSwarms } from './underwater-swarm.js';
+import type { FeedSite } from './feed-sites.js';
 import { GLSL_WATER_COMMON } from './underwater-glsl.js';
 
 /**
@@ -34,8 +38,14 @@ export type UnderwaterOptions = {
 };
 
 export type UnderwaterHandle = {
-  update: (dt: number, time: number, camera: THREE.PerspectiveCamera) => WaterSignal;
+  /** `whale` (world metres) keeps scenery out of the camera's line to it and makes swarms part around it. */
+  update: (dt: number, time: number, camera: THREE.PerspectiveCamera, whale?: { x: number; y: number; z: number }) => WaterSignal;
   readonly signal: WaterSignal;
+  /** Seafloor relief (world coords) that the floor, life and feed sites all stand on. */
+  seafloor: Seafloor;
+  /** Feed sites currently drawn as swarms, nearest first. */
+  readonly sites: readonly FeedSite[];
+  stats: () => { lifeCells: number; lifeInstances: number; schools: number; swarms: number };
   dispose: () => void;
 };
 
@@ -64,10 +74,13 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   const lights = [sky.sun, sky.hemi, sky.ambient].map((light) => ({ light, intensity: light.intensity, color: light.color.clone() }));
   const lightTint = new THREE.Color().setHex(0x7fd0dc, THREE.SRGBColorSpace);
 
-  // Underwater state, in display colour (for the clear) and scene radiance (for fog and shaders).
+  // three applies scene fog after tone mapping, so `scene.fog.color` is a display colour (as the
+  // sky sets it); these shaders fog before tone mapping and take the matching radiance instead.
   const tint: FogState = { color: new THREE.Color(), density: 0 };
   const below: FogState = { color: new THREE.Color(), density: 0 };
   const blended: FogState = { color: new THREE.Color(), density: 0 };
+  const fogRadiance = new THREE.Color();
+  const lastBlend = new THREE.Color(-1, -1, -1);
   const clearColor = new THREE.Color();
   let tintDepth = NaN;
 
@@ -309,8 +322,9 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
 
   /* -------------------------------------------------------------- seafloor */
 
-  const floor = createSeafloor({
-    heightAt: options.heightAt,
+  const seafloor = createSeafloor(seed, { heightAt: options.heightAt });
+  const floor = createFloorPatch({
+    heightAt: seafloor.heightAt,
     cells: tier.floorCells,
     step: tier.floorStep,
     budget: tier.budget,
@@ -322,6 +336,15 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     caustic: radianceFor(display(0xfff6e2), exposure(), renderer.toneMapping),
   });
   layered(floor.mesh);
+
+  /* -------------------------------------------------------------- life and feed sites */
+
+  const life = createUnderwaterLife(seed, seafloor.heightAt, options.tier, UNDERWATER_LAYER);
+  group.add(life.group);
+  const swarms = createSwarms(seed, seafloor.heightAt, options.tier, UNDERWATER_LAYER, shared, (hex) => radianceFor(display(hex), exposure(), renderer.toneMapping));
+  group.add(swarms.group);
+  const whaleRender = new THREE.Vector3();
+  let pointScale = 400;
 
   /* -------------------------------------------------------------- waterline overlay */
 
@@ -404,7 +427,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   };
   let resting = false;
 
-  function update(dt: number, time: number, camera: THREE.PerspectiveCamera): WaterSignal {
+  function update(dt: number, time: number, camera: THREE.PerspectiveCamera, whale?: { x: number; y: number; z: number }): WaterSignal {
     camera.layers.enable(UNDERWATER_LAYER);
     waterSignal(camera.position.y, signal);
     // sky.update rewrites the density each frame; anything else is our own write from last frame.
@@ -416,7 +439,17 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     const camWorldZ = camera.position.z + origin.z;
 
     // Warm the seafloor cache whenever the camera is near the water, so the first dive has a floor.
-    if (camera.position.y < 4) floor.prepare(camWorldX, camWorldZ, origin);
+    // Without a whale the corridor collapses onto the camera, which the near fade already covers.
+    if (whale) whaleRender.set(whale.x - origin.x, whale.y, whale.z - origin.z);
+    else whaleRender.copy(camera.position);
+    const near = camera.position.y < 4;
+    if (near) floor.prepare(camWorldX, camWorldZ, origin);
+    // Life and swarms stream (and draw) only near or under the water; above that nothing runs.
+    const drawLife = depth > 0;
+    if (near || drawLife) {
+      life.update(time, camWorldX, camWorldZ, whaleRender, origin, drawLife);
+      swarms.update(time, camWorldX, camWorldZ, whaleRender, origin, pointScale, drawLife);
+    }
 
     if (s <= 0 && depth < -0.6) {
       if (!resting) restoreState();
@@ -435,7 +468,11 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     // Whatever the camera sees through the lens is on its own side of the surface: hold the
     // murk back while above and go fully under soon after crossing; the waterline overlay
     // carries the visual transition across the split itself.
-    blendFog(above, below, fogMix(depth, s), blended);
+    blendFog(above, tint, fogMix(depth, s), blended);
+    if (!blended.color.equals(lastBlend)) {
+      lastBlend.copy(blended.color);
+      radianceFor(blended.color, exposure(), renderer.toneMapping, fogRadiance);
+    }
     if (fog) {
       fog.color.copy(blended.color);
       fog.density = blended.density;
@@ -461,7 +498,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
 
     shared.uTime.value = time;
     shared.uPattern.value.set(mod(origin.x, PATTERN_PERIOD), mod(origin.z, PATTERN_PERIOD));
-    shared.uFogColor.value.copy(blended.color);
+    shared.uFogColor.value.copy(fogRadiance);
     shared.uFogDensity.value = blended.density;
     shared.uLight.value = surfaceLight(Math.max(0, depth)) * daylight;
     refractSun();
@@ -474,7 +511,8 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       const reflect = surfaceMaterial.uniforms['uReflect']!.value as THREE.Color;
       reflect.copy(below.color).multiplyScalar(0.8);
       rayMaterial.uniforms['uIntensity']!.value = 0.22 * smoothstep01(depth / 0.8) * daylight * (0.35 + 0.65 * clamp(sky.sunDirection.y * 2.5, 0, 1));
-      snowMaterial.uniforms['uScale']!.value = (renderer.getDrawingBufferSize(tmpSize).y * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5);
+      pointScale = (renderer.getDrawingBufferSize(tmpSize).y * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5);
+      snowMaterial.uniforms['uScale']!.value = pointScale;
     }
     floor.update(camWorldX, camWorldZ, origin, below0);
 
@@ -500,6 +538,14 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   return {
     update,
     signal,
+    seafloor,
+    get sites() {
+      return swarms.sites;
+    },
+    stats() {
+      const l = life.stats();
+      return { lifeCells: l.cells, lifeInstances: l.instances, schools: l.schools, swarms: swarms.sites.length };
+    },
     dispose() {
       restoreState();
       scene.remove(group);
@@ -511,6 +557,8 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       snowGeometry.dispose();
       snowMaterial.dispose();
       floor.dispose();
+      life.dispose();
+      swarms.dispose();
       overlay.geometry.dispose();
       overlayMaterial.dispose();
     },

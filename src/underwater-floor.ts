@@ -8,15 +8,14 @@ import { GLSL_WATER_COMMON } from './underwater-glsl.js';
  * only samples the new rows; a per-frame budget spreads the first fill out.
  */
 
-/** Deeper ground is drawn at this depth: still faintly visible through the murk, and never above the real floor. */
-export const VISUAL_FLOOR = 34;
 /** The patch recentres in steps of this many cells. */
 const SNAP = 4;
 /** Sunk a little so it never fights the land mesh along the shallows. */
 const SINK = 0.15;
 
-export type SeafloorOptions = {
-  heightAt: (x: number, z: number, lod?: number) => number;
+export type FloorPatchOptions = {
+  /** Seafloor height at world X/Z (seafloor.ts keeps it within sight of a diving whale). */
+  heightAt: (x: number, z: number) => number;
   cells: number;
   step: number;
   budget: number;
@@ -28,7 +27,7 @@ export type SeafloorOptions = {
   caustic: THREE.Color;
 };
 
-export type Seafloor = {
+export type FloorPatch = {
   mesh: THREE.Mesh;
   /** Fill the height cache around a world position without drawing. */
   prepare: (worldX: number, worldZ: number, origin: FloatingOrigin) => void;
@@ -36,9 +35,9 @@ export type Seafloor = {
   dispose: () => void;
 };
 
-/** Height drawn for the seafloor at a sampled ground height. */
+/** Height drawn for the seafloor at a sampled ground height (land is flattened; the land mesh covers it). */
 export function visualFloor(height: number): number {
-  return Math.min(2, Math.max(height, -VISUAL_FLOOR)) - SINK;
+  return Math.min(2, height) - SINK;
 }
 
 /** Grid cell the patch centres on for a world position. */
@@ -46,7 +45,7 @@ export function floorCentre(world: number, step: number): number {
   return Math.round(world / step / SNAP) * SNAP;
 }
 
-export function createSeafloor(options: SeafloorOptions): Seafloor {
+export function createFloorPatch(options: FloorPatchOptions): FloorPatch {
   const { cells: N, step } = options;
   const M = N + 1;
   const half = N / 2;
@@ -103,6 +102,8 @@ export function createSeafloor(options: SeafloorOptions): Seafloor {
         float grain = tiledNoise( p / 8.0, 32.0 ) * 0.6 + tiledNoise( p / 2.0, 128.0 ) * 0.4;
         vec3 albedo = mix( uSandDark, uSand, grain );
         albedo = mix( albedo, uRock, smoothstep( 0.93, 0.72, n.y ) );
+        // Deep basins silt over: duller and greyer than the sunny shelf.
+        albedo = mix( albedo, uRock * 0.9, smoothstep( 22.0, 40.0, -vWorld.y ) * 0.45 );
         float depth = max( 0.0, -vWorld.y );
         // Light reaching the floor: weaker and bluer the deeper it is.
         float sunLit = max( dot( n, -uSunWater ), 0.0 );
@@ -154,7 +155,7 @@ export function createSeafloor(options: SeafloorOptions): Seafloor {
         scan = k;
         return false;
       }
-      heights[s] = visualFloor(options.heightAt(gx * step, gz * step, 1));
+      heights[s] = visualFloor(options.heightAt(gx * step, gz * step));
       tagX[s] = gx;
       tagZ[s] = gz;
       spent++;

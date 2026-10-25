@@ -13,6 +13,7 @@ import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
 import { cycleDuration } from './whale.js';
 import { createUnderwater } from './underwater.js';
+import { feedSitesNear } from './feed-sites.js';
 
 type CalmReview = {
   time: number;
@@ -34,7 +35,7 @@ type CalmReview = {
   /** Start the long deep dive now (whale holds position while forced). */
   forceDeepDive: (at?: number) => void;
   /** Debug camera `depth` metres under the surface (negative is above), looking at the whale; null releases it. */
-  peekUnderwater: (depth: number | null) => void;
+  peekUnderwater: (depth: number | null, site?: boolean) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
 };
 
@@ -246,14 +247,16 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
 
 /** Debug-only camera override for reviewing the underwater view without the follow camera. */
 let peekDepth: number | null = null;
+let peekSite: { x: number; y: number; z: number; radius: number } | null = null;
 
 function peekCamera(depth: number): void {
-  const w = whale.state;
+  const w = peekSite ? { ...peekSite, heading: 0.6 } : whale.state;
   const x = w.x - world.origin.x;
   const z = w.z - world.origin.z;
   const side = w.heading + Math.PI / 2;
   const y = -depth;
-  camera.position.set(x + Math.cos(side) * 16, y, z - Math.sin(side) * 16);
+  const back = peekSite ? 12 + peekSite.radius * 2 : 16;
+  camera.position.set(x + Math.cos(side) * back, y, z - Math.sin(side) * back);
   // From below the whale, look straight at it so the surface and Snell's window fill the top of the frame.
   camera.lookAt(x, y + (w.y - y) * (y < w.y ? 1 : 0.45), z);
 }
@@ -286,7 +289,7 @@ function tick(now: number): void {
   rig.update(dt, time, motion.matches);
   if (peekDepth !== null) peekCamera(peekDepth);
 
-  const signal = underwater.update(dt, time, camera);
+  const signal = underwater.update(dt, time, camera, whale.state);
   audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin });
   renderer.render(scene, camera);
 
@@ -352,8 +355,10 @@ if (debug) {
     forceDeepDive(at?: number) {
       whale.forcePhase('deep', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
     },
-    peekUnderwater(depth: number | null) {
+    peekUnderwater(depth: number | null, site?: boolean) {
       peekDepth = typeof depth === 'number' && Number.isFinite(depth) ? clamp(depth, -20, 40) : null;
+      // Review a swarm: the nearest feed site, viewed from its side at the given depth.
+      peekSite = site ? (feedSitesNear(seed, whale.state.x, whale.state.z, 2400, underwater.seafloor.heightAt)[0] ?? null) : null;
     },
     frame(yaw: number, pitch: number, distance: number) {
       if (![yaw, pitch, distance].every(Number.isFinite)) return;
@@ -390,6 +395,8 @@ if (debug) {
         exposure: renderer.toneMappingExposure,
         submersion: underwater.signal.submersion,
         depth: underwater.signal.depth,
+        underwaterLife: Object.values(underwater.stats()),
+        feedSites: underwater.sites.map((site) => site.id),
         audio: audio.stats(),
       };
     },
