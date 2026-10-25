@@ -13,6 +13,8 @@ export type OceanHandle = {
   setOrigin: (x: number, z: number) => void;
   /** Swaps in shelf maps baked elsewhere in the world (maps are in world coordinates). */
   setShelves: (shelves: { near?: ShelfMap; far?: ShelfMap }) => void;
+  /** The whale's body origin in render coordinates, drawn as a soft silhouette under the surface. */
+  setWhale: (x: number, y: number, z: number, heading: number) => void;
   setSize: (textureSize: number) => void;
   dispose: () => void;
 };
@@ -155,6 +157,9 @@ export function createOcean(
         water.position.z = camera.position.z;
       }
     },
+    setWhale(x: number, y: number, z: number, heading: number) {
+      material.uniforms.whaleBody?.value.set(x, z, heading, y);
+    },
     setOrigin(x: number, z: number) {
       origin.x = x;
       origin.z = z;
@@ -261,6 +266,40 @@ const reflectionPatches: ShaderPatch[] = [
 ];
 
 /**
+ * The mirror-like surface hides anything below y = 0, so a whale cruising just
+ * under it would vanish from the chase camera. Draw it through the water as a
+ * soft, rippled, depth-faded silhouette, as a whale reads from a boat. Shape:
+ * body origin with the head 6 m ahead and the tail stock 4.6 m behind
+ * (whale-model), forward = whaleForward(heading).
+ */
+const whalePatches: ShaderPatch[] = [
+  {
+    find: 'uniform vec3 waterColor;',
+    replace: `uniform vec3 waterColor;
+      uniform vec4 whaleBody;`,
+  },
+  {
+    find: 'vec3 outgoingLight = albedo;',
+    replace: `{
+        vec2 fwd = vec2( -cos( whaleBody.z ), sin( whaleBody.z ) );
+        vec2 rel = worldPosition.xz - whaleBody.xy + surfaceNormal.xz * 0.6;
+        float along = dot( rel, fwd );
+        float across = abs( dot( rel, vec2( -fwd.y, fwd.x ) ) );
+        float s = clamp( ( along + 4.6 ) / 10.6, 0.0, 1.0 );
+        float halfWidth = 1.75 * sqrt( max( 0.0, sin( 3.14159 * ( 0.12 + 0.8 * s ) ) ) );
+        float ends = smoothstep( -5.2, -4.2, along ) * ( 1.0 - smoothstep( 5.4, 6.2, along ) );
+        float body = ( 1.0 - smoothstep( halfWidth * 0.55, halfWidth * 1.05, across ) ) * ends;
+        float fluke = ( 1.0 - smoothstep( 1.4, 2.1, across ) ) * smoothstep( -6.4, -5.6, along ) * ( 1.0 - smoothstep( -5.0, -4.6, along ) );
+        // Clearer near the surface, gone when deep or airborne; weaker at grazing angles where the mirror wins.
+        float clear = exp( -max( 0.0, -whaleBody.w - 1.2 ) / 3.5 ) * ( 1.0 - smoothstep( -0.6, 0.4, whaleBody.w ) );
+        float view = mix( 0.65, 1.0, smoothstep( 0.03, 0.3, eyeDirection.y ) );
+        albedo = mix( albedo, albedo * 0.3 + waterColor * 0.15, max( body, fluke * 0.8 ) * clear * view * 0.85 );
+      }
+      vec3 outgoingLight = albedo;`,
+  },
+];
+
+/**
  * Depth-based colour: turquoise over sandy shelves, teal over the slope,
  * open-ocean blue beyond. Texel centres map to world via min + uv * extent.
  */
@@ -319,7 +358,7 @@ function applyWaterLook(
   haze: THREE.Color | undefined,
   gain: number,
 ): THREE.DataTexture[] {
-  const patched = patchShader(material.fragmentShader, [...reflectionPatches, ...(shelves ? shelfPatches() : [])]);
+  const patched = patchShader(material.fragmentShader, [...reflectionPatches, ...(shelves ? shelfPatches() : []), ...whalePatches]);
   if (patched === null) {
     const message = 'calm: Water shader did not match the expected source; using the stock water.';
     if (import.meta.env.DEV) throw new Error(message);
@@ -329,6 +368,8 @@ function applyWaterLook(
   material.fragmentShader = patched;
   material.uniforms.rippleShiftA = { value: new THREE.Vector4() };
   material.uniforms.rippleShiftB = { value: new THREE.Vector4() };
+  // Far below the floor until the first setWhale, so nothing shows.
+  material.uniforms.whaleBody = { value: new THREE.Vector4(0, 0, 0, -1e4) };
   material.uniforms.reflectionHaze = { value: (haze ?? new THREE.Color(0x8a9aa4)).clone() };
   material.uniforms.reflectionLift = { value: 0.25 };
   material.uniforms.reflectionGain = { value: Number.isFinite(gain) ? Math.min(3, Math.max(1, gain)) : 1 };

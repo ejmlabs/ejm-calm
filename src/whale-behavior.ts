@@ -86,9 +86,12 @@ export function createWhaleMover(
   /** Travel speed: two octaves of slow noise, so surges and lulls never repeat. */
   const travelSpeed = (t: number) =>
     lerp(TRAVEL_MIN, TRAVEL_MAX, smoothstep(-0.65, 0.45, 0.7 * noise(t / 34, 0.5) + 0.3 * noise(t / 11, 3.7)));
-  /** Travel depth: just under the surface, now and then a shallow dive. */
+  /**
+   * Travel depth: back and dorsal fin breaking the surface (so the chase camera above
+   * the mirror-like water always sees the whale), now and then a shallow dive it follows under.
+   */
   const travelDepth = (t: number) =>
-    -1.9 - 1.5 * smoothstep(-0.6, 0.6, noise(t / 47, 8.1)) - 7 * smoothstep(0.3, 0.75, noise(t / 130, 12.9));
+    -1.35 - 0.4 * smoothstep(-0.6, 0.6, noise(t / 47, 8.1)) - 7.5 * smoothstep(0.3, 0.75, noise(t / 130, 12.9));
   const jitter = (a: number, b: number) => a + (b - a) * rng();
 
   // The opening is a breath already under way: mid-surface, so the first blow comes within seconds.

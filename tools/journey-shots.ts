@@ -11,6 +11,8 @@ import { withBrowser, openCalm, DESKTOP, MOBILE } from './browser.js';
  */
 
 type Stats = Record<string, unknown> & {
+  speed?: number;
+  behavior?: string;
   whale: number[];
   whaleHeading: number;
   cam: number[];
@@ -25,7 +27,8 @@ type Stats = Record<string, unknown> & {
 type CalmReview = {
   travel: (seconds: number) => void;
   forceDeepDive: (at?: number) => void;
-  peekUnderwater: (depth: number | null) => void;
+  /** `site` views the nearest feed site instead of the whale. */
+  peekUnderwater: (depth: number | null, site?: boolean) => void;
   stats: () => Stats;
 };
 
@@ -99,7 +102,7 @@ await withBrowser(async (browser, base) => {
         const entry = {
           shot: `${name}-${label}`, ...m, draws: s.draws, triangles: s.triangles,
           landTriangles: s.landTriangles, chunks: s.chunks, ships: s.ships,
-          camMode: s.camMode, submersion: round(s.submersion), phase: s.phase,
+          camMode: s.camMode, submersion: round(s.submersion), phase: s.phase, behavior: s.behavior, speed: round(s.speed ?? 0),
           heading: round(s.whaleHeading), camToWhale: camToWhale(s),
         };
         perf.push(entry);
@@ -125,6 +128,22 @@ await withBrowser(async (browser, base) => {
         const swum = Math.hypot(far.whale[0]!, far.whale[2]!);
         console.log(`${name}: origin ${far.origin.map(round).join(', ')}, whale ${round(swum)} m from the start`);
         perf[perf.length - 1]!.distanceFromStart = round(swum);
+
+        // Swim on (fast-forward) until the stop condition holds, then let the chase settle in real frames.
+        const swimUntil = async (done: (s: Stats) => boolean, limit: number) => {
+          for (let t = 0; t < limit && !done(await stats(page)); t += 5) await review(page, 'travel', 5);
+          // Fast-forward jumps far: give streaming time to refine and fade in.
+          await page.waitForTimeout(6000);
+        };
+        await swimUntil((s) => s.behavior === 'travel' && (s.speed ?? 0) > 7 && s.whale[1]! > -2, 600);
+        await shot('fast');
+        // At the swarm: slow (circling or lunging) and down at its depth.
+        await swimUntil((s) => s.behavior === 'feed' && s.whale[1]! < -4 && (s.speed ?? 9) < 3.6, 1800);
+        await shot('feed');
+        await review(page, 'peekUnderwater', 8, true);
+        await page.waitForTimeout(2500);
+        await shot('feed-swarm');
+        await review(page, 'peekUnderwater', null);
 
         // The chase camera follows the deep dive under.
         await review(page, 'forceDeepDive', 0.3);

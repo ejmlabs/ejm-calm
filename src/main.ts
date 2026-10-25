@@ -290,6 +290,7 @@ function tick(now: number): void {
   world.update(whale.state.x, whale.state.z, camera, dt, time);
   world.ocean.update(dt, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
+  world.ocean.setWhale(whale.state.x - world.origin.x, whale.state.y, whale.state.z - world.origin.z, whale.state.heading);
   birds.update(time, whale.state.x, whale.state.z, dt);
 
   followWhale();

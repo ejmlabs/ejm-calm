@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-COLUMNS = ["follow-1", "follow-2", "follow-3", "follow-4", "travel", "underwater", "surface"]
+COLUMNS = ["follow-1", "follow-2", "follow-3", "follow-4", "fast", "travel", "feed", "feed-swarm", "underwater", "surface"]
 DEVICES = ["desktop", "mobile"]
 SEEDS = [42, 7, 1234]
 CELL_HEIGHT = 240
@@ -19,6 +19,7 @@ GAP = 6
 def main() -> None:
     directory = Path(sys.argv[1])
     rows = [(device, seed) for device in DEVICES for seed in SEEDS]
+    columns = [c for c in COLUMNS if any(directory.glob(f"*-{c}.png"))]
     widths = {device: 0 for device in DEVICES}
     for device in DEVICES:
         sample = next(directory.glob(f"{device}-seed*-follow-1.png"), None)
@@ -26,11 +27,11 @@ def main() -> None:
             with Image.open(sample) as image:
                 widths[device] = round(image.width * CELL_HEIGHT / image.height)
     cell_width = max(widths.values()) or CELL_HEIGHT
-    sheet = Image.new("RGB", (GAP + len(COLUMNS) * (cell_width + GAP), GAP + len(rows) * (CELL_HEIGHT + LABEL + GAP)), (18, 22, 28))
+    sheet = Image.new("RGB", (GAP + len(columns) * (cell_width + GAP), GAP + len(rows) * (CELL_HEIGHT + LABEL + GAP)), (18, 22, 28))
     draw = ImageDraw.Draw(sheet)
     font = ImageFont.load_default()
     for r, (device, seed) in enumerate(rows):
-        for c, column in enumerate(COLUMNS):
+        for c, column in enumerate(columns):
             x = GAP + c * (cell_width + GAP)
             y = GAP + r * (CELL_HEIGHT + LABEL + GAP)
             draw.text((x + 2, y + 4), f"{device} seed {seed} {column}", fill=(220, 226, 232), font=font)
