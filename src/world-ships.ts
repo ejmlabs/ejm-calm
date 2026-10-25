@@ -68,7 +68,8 @@ export type ShipStream = {
   active: () => readonly ShipHandle[];
   /** Every loaded ship, visible or not. */
   all: () => readonly ShipHandle[];
-  update: (dt: number, time: number, whaleX: number, whaleZ: number, shore: Shore) => void;
+  /** Cells stream around (aheadX, aheadZ), a point the whale is heading for; ships show by distance from the whale. */
+  update: (dt: number, time: number, whaleX: number, whaleZ: number, shore: Shore, aheadX?: number, aheadZ?: number) => void;
   setVisible: (visible: boolean) => void;
   stats: () => { cells: number; ships: number; visible: number };
   dispose: () => void;
@@ -137,14 +138,14 @@ export function createShipStream(options: {
   return {
     active: () => active,
     all: () => handles,
-    update(dt, time, wx, wz, shore) {
+    update(dt, time, wx, wz, shore, ax = wx, az = wz) {
       // Cells only change every few hundred metres: look again after 50, or while still filling in.
-      if (filling || Math.hypot(wx - streamedAt.x, wz - streamedAt.z) > 50) {
+      if (filling || Math.hypot(ax - streamedAt.x, az - streamedAt.z) > 50) {
         const before = streamer.loaded.size;
-        streamer.update(wx, wz);
+        streamer.update(ax, az);
         filling = streamer.loaded.size > before;
-        streamedAt.x = wx;
-        streamedAt.z = wz;
+        streamedAt.x = ax;
+        streamedAt.z = az;
       }
       order.length = 0;
       for (const ship of ships) {

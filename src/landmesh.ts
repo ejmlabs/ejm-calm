@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Land } from './land.js';
 import { makeNoise2D } from './noise.js';
 import { chunkKey, parseChunkKey, cellDistance } from './chunks.js';
+import { hash } from './rng.js';
 import { buildTile, tileSize, TOP_LEVEL, SINK, type TileData } from './world-tiles.js';
 import type { WorkerRequest } from './world-worker.js';
 import { underwaterUniforms, UNDERWATER_GLSL_PARS } from './seams.js';
@@ -27,9 +28,25 @@ export type LandStream = {
   group: THREE.Group;
   /** Builds every tile needed around world (x, z) right now, fully faded in (first frame). */
   prime: (x: number, z: number) => void;
-  /** Streams around the camera's world position and advances fades. */
-  update: (x: number, z: number, dt: number) => void;
-  stats: () => { tiles: number; triangles: number; pending: number; fading: number };
+  /**
+   * Streams around world (x, z) moving at (vx, vz) m/s and advances fades: finer
+   * tiles lead along the motion, and tiles further ahead are built early and held.
+   */
+  update: (x: number, z: number, dt: number, vx?: number, vz?: number) => void;
+  /** A tile's dissolve state, or undefined when it is not placed. */
+  tileState: (key: string) => 'in' | 'on' | 'out' | undefined;
+  stats: () => {
+    tiles: number;
+    triangles: number;
+    pending: number;
+    fading: number;
+    /** Built ahead, not yet wanted. */
+    ready: number;
+    /** Wanted tiles inside the haze with nothing solid over them right now. */
+    holes: number;
+    /** Tiles that have finished dissolving in, ever. */
+    completed: number;
+  };
   dispose: () => void;
 };
 
@@ -43,10 +60,28 @@ const HAZE_END = 7800;
 const STREAM_RADIUS = 8600;
 /** A tile splits into four when the camera is closer than SPLIT × its size. */
 const SPLIT = 0.8;
-/** Seconds a tile takes to dissolve in or out. */
+/** Seconds a tile takes to dissolve in or out (±20% per tile, so neighbours never finish in step). */
 const FADE = 1.5;
-/** Re-select tiles once the camera has moved this far. */
+/** Re-select tiles once the selection centre has moved this far. */
 const RESELECT = 12;
+/** Tiles are refined this many seconds of motion before the camera reaches them (capped in metres). */
+const LEAD = 6;
+const LEAD_MAX = 80;
+/** Tiles this far ahead are built early and held ready (not drawn) until wanted. */
+const PREFETCH = 12;
+const PREFETCH_MAX = 240;
+const READY_CAP = 96;
+/** Built tiles start dissolving in at most this many per frame, so a burst of arrivals trickles in. */
+const PLACE_PER_FRAME = 2;
+
+/** Seeded per-tile value in [0, 1): order jitter and fade length. */
+const tileUnit = (seed: number, level: number, ix: number, iz: number) => hash(seed, 0x544c, level, ix, iz) / 0x100000000;
+
+/** (vx, vz)·seconds, capped at `max` metres. */
+function ahead(vx: number, vz: number, seconds: number, max: number): [number, number] {
+  const k = Math.min(seconds, max / Math.max(1e-6, Math.hypot(vx, vz)));
+  return [vx * k, vz * k];
+}
 
 const vertexShader = /* glsl */ `
 varying vec3 vColor;
@@ -135,6 +170,8 @@ type Tile = {
   triangles: number;
   /** 0 → 1 while dissolving in; back to 0 while dissolving out. */
   fade: number;
+  /** Seconds this tile's dissolve takes. */
+  fadeTime: number;
   state: 'in' | 'on' | 'out';
 };
 
@@ -142,13 +179,31 @@ type Tile = {
  * Picks the tiles to draw around (x, z): a quadtree from TOP_LEVEL down, where a
  * node splits when the camera is within SPLIT × its size. Nodes that were split
  * stay split a little longer, so a camera hovering at a boundary never flickers.
+ * With a lead (ax, az), distance is measured to the segment from the camera to
+ * the camera + lead, so the tiles it is heading into are refined early.
  */
-export function selectTiles(x: number, z: number, wasSplit: ReadonlySet<string>, split: Set<string>, radius = STREAM_RADIUS, factor = SPLIT): string[] {
+export function selectTiles(
+  x: number,
+  z: number,
+  wasSplit: ReadonlySet<string>,
+  split: Set<string>,
+  radius = STREAM_RADIUS,
+  factor = SPLIT,
+  ax = 0,
+  az = 0,
+): string[] {
   const out: Array<{ key: string; d: number; level: number }> = [];
   const top = tileSize(TOP_LEVEL);
+  // Samples along the segment, at most 16 m apart (a cell's distance is convex along it).
+  const samples = Math.ceil(Math.hypot(ax, az) / 16);
+  const distance = (ix: number, iz: number, size: number) => {
+    let d = cellDistance(x, z, ix, iz, size);
+    for (let k = 1; k <= samples; k++) d = Math.min(d, cellDistance(x + (ax * k) / samples, z + (az * k) / samples, ix, iz, size));
+    return d;
+  };
   const visit = (level: number, ix: number, iz: number) => {
     const size = tileSize(level);
-    const d = cellDistance(x, z, ix, iz, size);
+    const d = distance(ix, iz, size);
     const key = chunkKey(level, ix, iz);
     const reach = factor * size * (wasSplit.has(key) ? 1.2 : 1);
     if (level > 0 && d < reach) {
@@ -218,7 +273,14 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
   let split = new Set<string>();
   let lastX = Infinity;
   let lastZ = Infinity;
+  let lastAX = 0;
+  let lastAZ = 0;
   let queue: string[] = [];
+  /** Built tiles waiting to be placed (paced), and tiles built ahead of need. */
+  const arrived: Array<{ key: string; data: TileData | null }> = [];
+  const ready = new Map<string, TileData | null>();
+  let completed = 0;
+  let holes = 0;
 
   let worker: Worker | null = null;
   let inFlight = 0;
@@ -232,7 +294,7 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
         if (event.data.type !== 'tile') return;
         inFlight = Math.max(0, inFlight - 1);
         requested.delete(event.data.key);
-        if (wanted.has(event.data.key)) place(event.data.key, event.data.data, false);
+        received(event.data.key, event.data.data);
       };
       worker.onerror = () => {
         // Build on the main thread from here on; re-queue whatever was in flight.
@@ -247,10 +309,24 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
     }
   }
 
+  /** A built tile: queued for placement while wanted, otherwise held ready. */
+  function received(key: string, data: TileData | null): void {
+    if (wanted.has(key)) {
+      arrived.push({ key, data });
+      return;
+    }
+    ready.delete(key);
+    ready.set(key, data);
+    while (ready.size > READY_CAP) ready.delete(ready.keys().next().value!);
+  }
+
   function place(key: string, data: TileData | null, solidNow: boolean): void {
     if (tiles.has(key)) return;
     const { lod, cx, cz } = parseChunkKey(key);
-    const tile: Tile = { key, level: lod, ix: cx, iz: cz, mesh: null, triangles: 0, fade: solidNow ? 1 : 0, state: solidNow ? 'on' : 'in' };
+    // Open sea has nothing to dissolve: it counts as solid at once.
+    const on = solidNow || !data;
+    const fadeTime = FADE * (0.8 + 0.4 * tileUnit(land.seed, lod, cx, cz));
+    const tile: Tile = { key, level: lod, ix: cx, iz: cz, mesh: null, triangles: 0, fade: on ? 1 : 0, fadeTime, state: on ? 'on' : 'in' };
     if (data) {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
@@ -288,18 +364,50 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
     }
   }
 
-  function reselect(x: number, z: number): void {
+  /** Whether a cell is drawn solid: by itself, an ancestor, or (two levels down at most) its children. */
+  function solidAt(level: number, ix: number, iz: number): boolean {
+    for (let l = level, x = ix, z = iz; l <= TOP_LEVEL; l++, x = Math.floor(x / 2), z = Math.floor(z / 2)) {
+      if (tiles.get(chunkKey(l, x, z))?.state === 'on') return true;
+    }
+    const below = (l: number, x: number, z: number, depth: number): boolean => {
+      if (tiles.get(chunkKey(l, x, z))?.state === 'on') return true;
+      if (l === 0 || depth === 0) return false;
+      for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) if (!below(l - 1, x * 2 + i, z * 2 + j, depth - 1)) return false;
+      return true;
+    };
+    return level > 0 && below(level, ix, iz, 2);
+  }
+
+  /**
+   * Wanted tiles along the lead (ax, az); then tiles around the prefetch point.
+   * Missing ones queue by need (uncovered first), then distance with seeded
+   * jitter so a ring of equal tiles never arrives together.
+   */
+  function reselect(x: number, z: number, ax: number, az: number, px: number, pz: number): void {
     const next = new Set<string>();
-    wantedList = selectTiles(x, z, split, next);
+    wantedList = selectTiles(x, z, split, next, STREAM_RADIUS, SPLIT, ax, az);
     split = next;
     wanted = new Set(wantedList);
     wantedCells = wantedList.map((key) => {
       const { lod, cx, cz } = parseChunkKey(key);
       return { key, level: lod, ix: cx, iz: cz };
     });
-    queue = wantedList.filter((key) => !tiles.has(key));
+    const order = (keys: string[], bias: number) =>
+      keys
+        .filter((key) => !tiles.has(key) && !(bias && ready.has(key)))
+        .map((key) => {
+          const { lod, cx, cz } = parseChunkKey(key);
+          const d = cellDistance(x, z, cx, cz, tileSize(lod)) * (0.8 + 0.4 * tileUnit(land.seed, lod, cx, cz));
+          return { key, rank: bias + (solidAt(lod, cx, cz) ? d : -1) };
+        })
+        .sort((a, b) => a.rank - b.rank || (a.key < b.key ? -1 : 1))
+        .map((t) => t.key);
+    const later = px === x && pz === z ? [] : selectTiles(px, pz, split, new Set()).filter((key) => !wanted.has(key));
+    queue = [...order(wantedList, 0), ...order(later, 1e9)];
     lastX = x;
     lastZ = z;
+    lastAX = ax;
+    lastAZ = az;
   }
 
   /** True when every wanted tile overlapping `tile` is solid (or empty sea). */
@@ -315,37 +423,51 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
   return {
     group,
     prime(x, z) {
-      reselect(x, z);
+      reselect(x, z, 0, 0, x, z);
       for (const key of wantedList) place(key, buildHere(key), true);
       queue = [];
     },
-    update(x, z, dt) {
-      if (Math.hypot(x - lastX, z - lastZ) > RESELECT) reselect(x, z);
-      // Requests, nearest first.
-      if (queue.length) {
+    update(x, z, dt, vx = 0, vz = 0) {
+      const [ax, az] = ahead(vx, vz, LEAD, LEAD_MAX);
+      if (Math.max(Math.hypot(x - lastX, z - lastZ), Math.hypot(x + ax - lastX - lastAX, z + az - lastZ - lastAZ)) > RESELECT) {
+        const [px, pz] = ahead(vx, vz, PREFETCH, PREFETCH_MAX);
+        reselect(x, z, ax, az, x + px, z + pz);
+      }
+      // Requests in queue order; one tile per frame when building on the main thread.
+      while (queue.length && (worker ? inFlight < MAX_IN_FLIGHT : true)) {
+        const key = queue.shift()!;
+        if (tiles.has(key) || requested.has(key)) continue;
+        if (ready.has(key)) {
+          if (wanted.has(key)) {
+            arrived.push({ key, data: ready.get(key)! });
+            ready.delete(key);
+          }
+          continue;
+        }
         if (worker) {
-          while (queue.length && inFlight < MAX_IN_FLIGHT) {
-            const key = queue.shift()!;
-            if (tiles.has(key) || requested.has(key) || !wanted.has(key)) continue;
-            const { lod, cx, cz } = parseChunkKey(key);
-            const request: WorkerRequest = { type: 'tile', key, level: lod, ix: cx, iz: cz, cells };
-            worker.postMessage(request);
-            requested.add(key);
-            inFlight++;
-          }
+          const { lod, cx, cz } = parseChunkKey(key);
+          const request: WorkerRequest = { type: 'tile', key, level: lod, ix: cx, iz: cz, cells };
+          worker.postMessage(request);
+          requested.add(key);
+          inFlight++;
         } else {
-          // One tile per frame on the main thread.
-          while (queue.length) {
-            const key = queue.shift()!;
-            if (tiles.has(key) || !wanted.has(key)) continue;
-            place(key, buildHere(key), false);
-            break;
-          }
+          received(key, buildHere(key));
+          break;
         }
       }
+      for (let placed = 0; arrived.length && placed < PLACE_PER_FRAME; ) {
+        const { key, data } = arrived.shift()!;
+        if (tiles.has(key)) continue;
+        if (!wanted.has(key)) {
+          received(key, data);
+          continue;
+        }
+        place(key, data, false);
+        placed++;
+      }
       // Without motion (reduced-motion preference) tiles swap at once.
-      const step = dt > 0 ? dt / FADE : 1;
       for (const tile of [...tiles.values()]) {
+        const step = dt > 0 ? dt / tile.fadeTime : 1;
         const want = wanted.has(tile.key);
         if (want && tile.state === 'out') tile.state = 'in';
         if (!want && tile.state !== 'out' && covered(tile)) tile.state = 'out';
@@ -353,6 +475,7 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
           tile.fade = Math.min(1, tile.fade + step);
           if (tile.fade >= 1) {
             tile.state = 'on';
+            completed++;
             if (tile.mesh) tile.mesh.material = solid;
           }
         } else if (tile.state === 'out') {
@@ -361,7 +484,13 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
           if (tile.fade <= 0 || !tile.mesh) remove(tile);
         }
       }
+      holes = 0;
+      for (const cell of wantedCells) {
+        if (tiles.get(cell.key)?.state === 'on') continue;
+        if (cellDistance(x, z, cell.ix, cell.iz, tileSize(cell.level)) < HAZE_END && !solidAt(cell.level, cell.ix, cell.iz)) holes++;
+      }
     },
+    tileState: (key) => tiles.get(key)?.state,
     stats() {
       let triangles = 0;
       let fading = 0;
@@ -369,7 +498,7 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
         triangles += tile.triangles;
         if (tile.state !== 'on') fading++;
       }
-      return { tiles: tiles.size, triangles, pending: queue.length + requested.size, fading };
+      return { tiles: tiles.size, triangles, pending: queue.length + requested.size + arrived.length, fading, ready: ready.size, holes, completed };
     },
     dispose() {
       worker?.terminate();
