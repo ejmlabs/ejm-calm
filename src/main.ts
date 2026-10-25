@@ -12,6 +12,7 @@ import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
 import { cycleDuration } from './whale.js';
+import { createUnderwater } from './underwater.js';
 
 type CalmReview = {
   time: number;
@@ -30,6 +31,10 @@ type CalmReview = {
   setWhaleVisible: (visible: boolean) => void;
   setLandVisible: (visible: boolean) => void;
   setShipsVisible: (visible: boolean) => void;
+  /** Start the long deep dive now (whale holds position while forced). */
+  forceDeepDive: (at?: number) => void;
+  /** Debug camera `depth` metres under the surface (negative is above), looking at the whale; null releases it. */
+  peekUnderwater: (depth: number | null) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
 };
 
@@ -107,6 +112,7 @@ let buildMs = 0;
 let birds: ReturnType<typeof createBirds>;
 let layout: ReturnType<typeof layoutWorld>;
 let rig: FollowCamera;
+let underwater: ReturnType<typeof createUnderwater>;
 
 try {
   const buildStart = performance.now();
@@ -140,6 +146,7 @@ try {
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
   world.origin.onRecenter((dx, dz) => rig.shift(dx, dz));
+  underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, origin: world.origin, tier: quality.tier, seed });
   buildMs = performance.now() - buildStart;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
@@ -236,6 +243,20 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
   rig.update(0, time);
 }
 
+/** Debug-only camera override for reviewing the underwater view without the follow camera. */
+let peekDepth: number | null = null;
+
+function peekCamera(depth: number): void {
+  const w = whale.state;
+  const x = w.x - world.origin.x;
+  const z = w.z - world.origin.z;
+  const side = w.heading + Math.PI / 2;
+  const y = -depth;
+  camera.position.set(x + Math.cos(side) * 16, y, z - Math.sin(side) * 16);
+  // From below the whale, look straight at it so the surface and Snell's window fill the top of the frame.
+  camera.lookAt(x, y + (w.y - y) * (y < w.y ? 1 : 0.45), z);
+}
+
 function tick(now: number): void {
   if (disposed) return;
   frame = requestAnimationFrame(tick);
@@ -257,12 +278,14 @@ function tick(now: number): void {
   sky.update(dt);
   world.update(whale.state.x, whale.state.z, camera, dt, time);
   world.ocean.update(dt, sky.sunDirection, camera);
-  whale.update(dt, time, world.shore);
+  whale.update(dt, time, world.shore, world.land.heightAt(whale.state.x, whale.state.z));
   birds.update(time, whale.state.x, whale.state.z, dt);
 
   followWhale();
   rig.update(dt, time, motion.matches);
+  if (peekDepth !== null) peekCamera(peekDepth);
 
+  underwater.update(dt, time, camera);
   renderer.render(scene, camera);
 
   if (now - lastSave > 4000) {
@@ -296,7 +319,7 @@ if (debug) {
       for (let t = 0; t < Math.min(3600, Math.max(0, seconds || 0)); t += 1 / 30) {
         time += 1 / 30;
         world.update(whale.state.x, whale.state.z, camera, 1 / 30, time);
-        whale.update(1 / 30, time, world.shore);
+        whale.update(1 / 30, time, world.shore, world.land.heightAt(whale.state.x, whale.state.z));
       }
     },
     forceBreach(at?: number) {
@@ -322,6 +345,12 @@ if (debug) {
     },
     setShipsVisible(visible: boolean) {
       world.ships.setVisible(visible);
+    },
+    forceDeepDive(at?: number) {
+      whale.forcePhase('deep', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
+    },
+    peekUnderwater(depth: number | null) {
+      peekDepth = typeof depth === 'number' && Number.isFinite(depth) ? clamp(depth, -20, 40) : null;
     },
     frame(yaw: number, pitch: number, distance: number) {
       if (![yaw, pitch, distance].every(Number.isFinite)) return;
@@ -356,6 +385,8 @@ if (debug) {
         ...world.stats(),
         cycle: cycleDuration(),
         exposure: renderer.toneMappingExposure,
+        submersion: underwater.signal.submersion,
+        depth: underwater.signal.depth,
       };
     },
   };
@@ -388,5 +419,6 @@ window.addEventListener('pagehide', () => {
   whale.dispose();
   world.dispose();
   birds.dispose();
+  underwater.dispose();
   renderer.dispose();
 });

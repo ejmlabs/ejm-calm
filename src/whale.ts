@@ -27,6 +27,7 @@ import {
   SURFACE_Y,
   POSE_KEYS,
   emptyPose,
+  floorLimit,
   spineAngles,
   whaleOrientation,
   whalePose,
@@ -54,7 +55,8 @@ export type WhaleState = {
 export type WhaleHandle = {
   group: THREE.Group;
   state: WhaleState;
-  update: (dt: number, time: number, shore: Shore) => void;
+  /** `floorY` is the seafloor height under the whale; it then keeps FLOOR_CLEARANCE above it. */
+  update: (dt: number, time: number, shore: Shore, floorY?: number) => void;
   /** Jump to a phase for review; `at` overrides the normalised start time. */
   forcePhase: (phase: WhalePhase, at?: number) => void;
   /** World-space size of the posed body (skinned), for debug stats. */
@@ -404,9 +406,12 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   const tmpV = new THREE.Vector3();
   const blowhole = new THREE.Vector3(BLOWHOLE_X, sampleProfile(BLOWHOLE_U).top + 0.05, 0);
 
+  /** Seafloor height under the whale from the last update, if the caller supplied one. */
+  let floor: number | undefined;
+
   function applyPose(p: WhalePose, time: number): void {
     const bob = p.bob;
-    state.y = p.y + bob * 0.07 * Math.sin(time * 0.7);
+    state.y = floorLimit(p.y + bob * 0.07 * Math.sin(time * 0.7), floor);
     state.pitch = p.pitch + bob * 0.035 * Math.sin(time * 0.55);
     const roll = p.roll * (state.phase === 'breach' ? rollSide : 1);
     // Slow, lazy roll while cruising near the surface.
@@ -454,7 +459,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     state,
     forcePhase(phase: WhalePhase, at?: number) {
       forced = phase;
-      const preset = phase === 'breach' ? FORCED_BREACH_T : phase === 'spout' ? 0.5 : phase === 'surface' ? 0.45 : 0;
+      const preset = phase === 'breach' ? FORCED_BREACH_T : phase === 'spout' ? 0.5 : phase === 'surface' ? 0.45 : phase === 'deep' ? 0.3 : 0;
       const t = typeof at === 'number' && Number.isFinite(at) ? clamp(at, 0, 0.99) : preset;
       forcedT = PHASE_LEN[phase] * t;
       state.phase = phase;
@@ -464,7 +469,8 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       // Sync the mesh now so review framing sees the right pose immediately.
       syncNow(clock);
     },
-    update(rawDt: number, time: number, shore: Shore) {
+    update(rawDt: number, time: number, shore: Shore, floorY?: number) {
+      floor = floorY;
       const dt = Number.isFinite(rawDt) ? Math.max(0, rawDt) : 0;
       clock = time;
       // Start mid-surface so t≈0 shows the back; then follow the cycle.

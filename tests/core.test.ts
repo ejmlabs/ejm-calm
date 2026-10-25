@@ -232,9 +232,9 @@ test('whale behaviour cycle stays finite and periodic', () => {
     seen.add(phase);
     assert.ok(phaseT >= 0 && phaseT <= 1);
     assert.ok(Number.isInteger(cycle) && cycle >= 0);
-    assert.ok(['swim', 'surface', 'spout', 'dive', 'breach', 'splash'].includes(phase));
+    assert.ok(['swim', 'surface', 'spout', 'dive', 'deep', 'breach', 'splash'].includes(phase));
   }
-  assert.ok(seen.has('breach') && seen.has('spout') && seen.has('swim'));
+  assert.ok(seen.has('breach') && seen.has('spout') && seen.has('swim') && seen.has('deep'));
   assert.deepEqual(phaseAtCycleTime(0).phase, phaseAtCycleTime(duration).phase);
   assert.equal(phaseAtCycleTime(duration * 10 + 1).cycle, 10);
 });
