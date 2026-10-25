@@ -11,7 +11,6 @@ import { clamp } from './math.js';
 import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
-import { cycleDuration } from './whale.js';
 import { createUnderwater } from './underwater.js';
 
 type CalmReview = {
@@ -141,7 +140,11 @@ try {
     worker: true,
   });
   // Head along the composed opening view (forward = look direction), so the chase opens on the coast.
-  whale = createWhale(seed, layout.whaleHome, { tier: quality.tier, heading: layout.viewYaw - Math.PI / 2 });
+  whale = createWhale(seed, layout.whaleHome, {
+    tier: quality.tier,
+    heading: layout.viewYaw - Math.PI / 2,
+    floorAt: (x, z) => world.land.heightAt(x, z),
+  });
   world.root.add(whale.group);
   birds = createBirds(seed, mobile ? 3 : 6);
   world.root.add(birds.group);
@@ -279,7 +282,7 @@ function tick(now: number): void {
   sky.update(dt);
   world.update(whale.state.x, whale.state.z, camera, dt, time);
   world.ocean.update(dt, sky.sunDirection, camera);
-  whale.update(dt, time, world.shore, world.land.heightAt(whale.state.x, whale.state.z));
+  whale.update(dt, time, world.shore);
   birds.update(time, whale.state.x, whale.state.z, dt);
 
   followWhale();
@@ -321,7 +324,7 @@ if (debug) {
       for (let t = 0; t < Math.min(3600, Math.max(0, seconds || 0)); t += 1 / 30) {
         time += 1 / 30;
         world.update(whale.state.x, whale.state.z, camera, 1 / 30, time);
-        whale.update(1 / 30, time, world.shore, world.land.heightAt(whale.state.x, whale.state.z));
+        whale.update(1 / 30, time, world.shore);
       }
       rig.snap();
     },
@@ -386,7 +389,8 @@ if (debug) {
         buildMs: Math.round(buildMs),
         ships: world.ships.active().length,
         ...world.stats(),
-        cycle: cycleDuration(),
+        speed: whale.state.speed,
+        behavior: whale.state.behavior,
         exposure: renderer.toneMappingExposure,
         // Last rendered frame (three resets these per render).
         draws: renderer.info.render.calls,

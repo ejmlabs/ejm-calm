@@ -30,6 +30,10 @@ export type WhaleCourse = {
   /** Coarse cells already swum through (most recent last), so the journey prefers new water. */
   visited?: Map<string, true>;
   planCache?: PlanCache;
+  /** Forward speed, m/s; defaults to params.speed. */
+  speed?: number;
+  /** Steer for this point instead of the journey (feeding); land avoidance still applies. */
+  aim?: { x: number; z: number } | null;
 };
 
 export type WhaleCourseParams = {
@@ -102,9 +106,10 @@ function avoidLand(
   heading: number,
   desired: number,
   shore: Shore,
+  reach: number,
 ): number {
   const gap = shore.clearance(x, z);
-  const influence = WHALE_ISLAND_MARGIN + LAND_INFLUENCE;
+  const influence = WHALE_ISLAND_MARGIN + LAND_INFLUENCE * reach;
   if (!(gap < influence)) return desired;
   const away = shore.away(x, z);
   // Direction toward the land is the reverse of the way out.
@@ -303,11 +308,11 @@ export function planJourney(
 }
 
 /** How open a bearing is from (x, z): 0 when every probe has its clearance, growing as land closes in. */
-function blockage(x: number, z: number, bearing: number, shore: Shore): number {
+function blockage(x: number, z: number, bearing: number, shore: Shore, reach: number): number {
   const fwd = whaleForward(bearing);
   let cost = 0;
   for (const [d, want] of PROBES) {
-    const gap = shore.clearance(x + fwd.x * d, z + fwd.z * d);
+    const gap = shore.clearance(x + fwd.x * d * reach, z + fwd.z * d * reach);
     // Near probes weigh most: land at 60 m matters more than land at 400 m.
     if (gap < want) cost += ((want - gap) / want) * (500 / d);
   }
@@ -315,15 +320,15 @@ function blockage(x: number, z: number, bearing: number, shore: Shore): number {
 }
 
 /** Picks the detour from the journey heading that leads to the most open water. */
-function chooseDetour(course: WhaleCourse, journey: number, shore: Shore): number {
+function chooseDetour(course: WhaleCourse, journey: number, shore: Shore, reach: number): number {
   const previous = course.detour ?? 0;
-  if (blockage(course.x, course.z, journey, shore) === 0) return 0;
+  if (blockage(course.x, course.z, journey, shore, reach) === 0) return 0;
   let best = previous;
   let bestCost = Infinity;
   for (const detour of DETOURS) {
     const bearing = journey + detour;
     const cost =
-      blockage(course.x, course.z, bearing, shore) * 4 +
+      blockage(course.x, course.z, bearing, shore, reach) * 4 +
       Math.abs(detour) * 0.35 +
       // Holding the last choice keeps the whale from dithering between two gaps.
       Math.abs(shortestAngle(journey + previous, bearing)) * 0.25 +
@@ -354,6 +359,9 @@ export function stepWhaleCourse(
   noise: NoiseFunction2D,
 ): void {
   if (!(dt > 0) || !Number.isFinite(dt) || !Number.isFinite(time)) return;
+  const speed = course.speed ?? params.speed;
+  // A faster whale looks further ahead for land, so its wider curves still clear the coast.
+  const reach = Math.max(1, speed / 3);
 
   const n1 = noise(time * params.wanderFreq + params.wanderPhase, 2.5);
   const n2 = noise(time * params.wanderFreq * 0.37 + 11.0, params.wanderPhase * 0.2 + 4.0);
@@ -403,21 +411,22 @@ export function stepWhaleCourse(
   const slot = Math.floor(time / LOOK_EVERY);
   if (course.slot !== slot) {
     course.slot = slot;
-    course.detour = chooseDetour(course, journey, shore);
+    course.detour = chooseDetour(course, journey, shore, reach);
   }
   const detour = course.detour ?? 0;
   // The meander only plays in open water.
-  let desired = journey + detour + (detour === 0 ? wander : 0);
+  const aim = course.aim;
+  let desired = aim ? headingToward(aim.x - course.x, aim.z - course.z) : journey + detour + (detour === 0 ? wander : 0);
   course.leg = wrapAngle(desired);
-  desired = avoidLand(course.x, course.z, course.heading, desired, shore);
+  desired = avoidLand(course.x, course.z, course.heading, desired, shore, reach);
 
   const delta = shortestAngle(course.heading, desired);
   const maxStep = params.turnRate * dt;
   course.heading = wrapAngle(course.heading + clamp(delta, -maxStep, maxStep));
 
   const fwd = whaleForward(course.heading);
-  course.x += fwd.x * params.speed * dt;
-  course.z += fwd.z * params.speed * dt;
+  course.x += fwd.x * speed * dt;
+  course.z += fwd.z * speed * dt;
 
   const cleared = clampClearOfLand(course.x, course.z, shore, WHALE_ISLAND_MARGIN);
   course.x = cleared.x;

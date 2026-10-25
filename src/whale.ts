@@ -4,7 +4,7 @@ import { clamp, lerp, smoothstep } from './math.js';
 import { makeNoise2D } from './noise.js';
 import type { Shore } from './shore.js';
 import type { QualityTier } from './quality.js';
-import { createWhalePilot, whaleForward, type WhaleCourse } from './whale-course.js';
+import { createWhaleMover, type WhaleBehavior } from './whale-behavior.js';
 import {
   FLIPPER_DROOP,
   FLIPPER_L,
@@ -22,26 +22,24 @@ import {
 import {
   BREACH_EXIT,
   BREACH_SPLASH,
-  PHASE_LEN,
-  PHASE_ORDER,
   SURFACE_Y,
-  POSE_KEYS,
-  emptyPose,
   floorLimit,
   spineAngles,
   whaleOrientation,
-  whalePose,
   type WhalePhase,
   type WhalePose,
 } from './whale-motion.js';
 import { BLOWHOLE_U, BLOWHOLE_X, createWhaleSkin } from './whale-skin.js';
 
 export type { WhalePhase } from './whale-motion.js';
+export type { WhaleBehavior } from './whale-behavior.js';
 
 export type WhaleState = {
   phase: WhalePhase;
   phaseT: number;
-  cycle: number;
+  behavior: WhaleBehavior;
+  /** Horizontal speed, m/s. */
+  speed: number;
   x: number;
   y: number;
   z: number;
@@ -55,8 +53,7 @@ export type WhaleState = {
 export type WhaleHandle = {
   group: THREE.Group;
   state: WhaleState;
-  /** `floorY` is the seafloor height under the whale; it then keeps FLOOR_CLEARANCE above it. */
-  update: (dt: number, time: number, shore: Shore, floorY?: number) => void;
+  update: (dt: number, time: number, shore: Shore) => void;
   /** Jump to a phase for review; `at` overrides the normalised start time. */
   forcePhase: (phase: WhalePhase, at?: number) => void;
   /** World-space size of the posed body (skinned), for debug stats. */
@@ -70,23 +67,9 @@ export type WhaleOptions = {
   tier?: QualityTier;
   /** Starting heading; defaults to a seeded random one. */
   heading?: number;
+  /** Seafloor height (negative under water): the whale keeps FLOOR_CLEARANCE above it and feeds over it. */
+  floorAt?: (x: number, z: number) => number;
 };
-
-export function phaseAtCycleTime(t: number): { phase: WhalePhase; phaseT: number; cycle: number } {
-  const total = PHASE_ORDER.reduce((sum, p) => sum + PHASE_LEN[p], 0);
-  const cycle = Math.floor(t / total);
-  let local = ((t % total) + total) % total;
-  for (const phase of PHASE_ORDER) {
-    const len = PHASE_LEN[phase];
-    if (local < len) return { phase, phaseT: local / len, cycle };
-    local -= len;
-  }
-  return { phase: 'swim', phaseT: 0, cycle };
-}
-
-export function cycleDuration(): number {
-  return PHASE_ORDER.reduce((sum, p) => sum + PHASE_LEN[p], 0);
-}
 
 /** Base stroke frequency (Hz): slow, heavy beats for a 12 m animal. */
 const STROKE_HZ = 0.3;
@@ -381,43 +364,33 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   body.add(sheet);
   const splashFx = { age: Infinity, power: 0, x: 0, z: 0, radius: 2, exit: false, sheetAge: Infinity };
 
-  const pose = whalePose('surface', 0.45);
+  const mover = createWhaleMover(seed, home, startHeading, options.floorAt);
+  const motion = mover.motion;
   const state: WhaleState = {
-    phase: 'surface',
-    phaseT: 0.45,
-    cycle: 0,
-    x: home.x,
-    y: pose.y,
-    z: home.z,
+    phase: motion.phase,
+    phaseT: motion.phaseT,
+    behavior: motion.behavior,
+    speed: motion.speed,
+    x: motion.x,
+    y: motion.pose.y,
+    z: motion.z,
     heading: startHeading,
-    pitch: pose.pitch,
+    pitch: motion.pose.pitch,
     roll: 0,
     spout: 0,
     splash: 0,
   };
 
-  const course: WhaleCourse = { x: state.x, z: state.z, heading: state.heading, leg: state.heading };
-  const pilot = createWhalePilot(seed, home, state.heading);
-  let forced: WhalePhase | null = null;
-  let forcedT = 0;
   let strokePhase = (hash(seed, 0x57) / 0x100000000) * Math.PI * 2;
   let lastBreachT = -1;
-  // Offset that eases out a jump when a forced review phase hands back to the cycle.
-  const offset = emptyPose();
-  for (const key of POSE_KEYS) offset[key] = 0;
-  const lastPose = emptyPose();
-  const target = emptyPose();
   const angles = spineAngles(0, 0, 0);
   const tmpQ = new THREE.Quaternion();
   const tmpV = new THREE.Vector3();
   const blowhole = new THREE.Vector3(BLOWHOLE_X, sampleProfile(BLOWHOLE_U).top + 0.05, 0);
 
-  /** Seafloor height under the whale from the last update, if the caller supplied one. */
-  let floor: number | undefined;
-
   function applyPose(p: WhalePose, time: number): void {
     const bob = p.bob;
-    state.y = floorLimit(p.y + bob * 0.07 * Math.sin(time * 0.7), floor);
+    state.y = floorLimit(p.y + bob * 0.07 * Math.sin(time * 0.7), motion.floor);
     state.pitch = p.pitch + bob * 0.035 * Math.sin(time * 0.55);
     const roll = p.roll * (state.phase === 'breach' ? rollSide : 1);
     // Slow, lazy roll while cruising near the surface.
@@ -448,14 +421,15 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     }
   }
 
-  function syncNow(time: number): void {
-    whalePose(state.phase, state.phaseT, target);
-    for (const key of POSE_KEYS) {
-      offset[key] = 0;
-      lastPose[key] = target[key];
-    }
-    applyPose(target, time);
-    body.updateMatrixWorld(true);
+  function sync(time: number): void {
+    state.phase = motion.phase;
+    state.phaseT = motion.phaseT;
+    state.behavior = motion.behavior;
+    state.speed = motion.speed;
+    state.x = motion.x;
+    state.z = motion.z;
+    state.heading = motion.heading;
+    applyPose(motion.pose, time);
   }
 
   let clock = 0;
@@ -464,66 +438,21 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     group,
     state,
     forcePhase(phase: WhalePhase, at?: number) {
-      forced = phase;
       const preset = phase === 'breach' ? FORCED_BREACH_T : phase === 'spout' ? 0.5 : phase === 'surface' ? 0.45 : phase === 'deep' ? 0.3 : 0;
       const t = typeof at === 'number' && Number.isFinite(at) ? clamp(at, 0, 0.99) : preset;
-      forcedT = PHASE_LEN[phase] * t;
-      state.phase = phase;
-      state.phaseT = t;
+      mover.force(phase, t);
       // Starting exactly at 0 still fires the exit splash on the way up.
       lastBreachT = phase === 'breach' ? t - 1e-6 : -1;
       // Sync the mesh now so review framing sees the right pose immediately.
-      syncNow(clock);
+      sync(clock);
+      body.updateMatrixWorld(true);
     },
-    update(rawDt: number, time: number, shore: Shore, floorY?: number) {
-      floor = floorY;
+    update(rawDt: number, time: number, shore: Shore) {
       const dt = Number.isFinite(rawDt) ? Math.max(0, rawDt) : 0;
       clock = time;
-      // Start mid-surface so t≈0 shows the back; then follow the cycle.
-      const phaseOffset = PHASE_LEN.swim + PHASE_LEN.surface * 0.45;
-      const schedule = forced
-        ? { phase: forced, phaseT: clamp(forcedT / PHASE_LEN[forced], 0, 1), cycle: state.cycle }
-        : phaseAtCycleTime(time + phaseOffset);
-      let resumed = false;
-      if (forced) {
-        forcedT += dt;
-        if (forcedT >= PHASE_LEN[forced]) {
-          forced = null;
-          resumed = true;
-        }
-      }
-      state.phase = schedule.phase;
-      state.phaseT = schedule.phaseT;
-      state.cycle = schedule.cycle;
-
-      // Freeze the cruise while a review phase is forced so event framing stays locked.
-      if (!forced) {
-        pilot.step(course, dt, time, shore);
-        state.x = course.x;
-        state.z = course.z;
-        state.heading = course.heading;
-      }
-
-      whalePose(state.phase, state.phaseT, target);
-      if (resumed) {
-        for (const key of POSE_KEYS) offset[key] = lastPose[key] - target[key];
-      }
-      const fade = Math.exp(-1.1 * dt);
-      for (const key of POSE_KEYS) {
-        offset[key] *= fade;
-        target[key] += offset[key];
-        lastPose[key] = target[key];
-      }
-      strokePhase += dt * Math.PI * 2 * STROKE_HZ * target.rate;
-      if (target.surge !== 0) {
-        // Breach carries the whale forward along its heading, even in a forced review.
-        const fwd = whaleForward(state.heading);
-        state.x += fwd.x * target.surge * dt;
-        state.z += fwd.z * target.surge * dt;
-        course.x = state.x;
-        course.z = state.z;
-      }
-      applyPose(target, time);
+      mover.step(dt, time, shore);
+      strokePhase += dt * Math.PI * 2 * STROKE_HZ * motion.pose.rate;
+      sync(time);
 
       // Splash events: the body bursting out, then the much larger re-entry.
       if (state.phase === 'breach') {
@@ -537,7 +466,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
 
       updateSpout();
       updateSplash(dt);
-      updateWash(target);
+      updateWash(motion.pose);
     },
     measure() {
       body.updateMatrixWorld(true);
@@ -694,6 +623,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     washMat.opacity = 0.28 * w;
   }
 
-  syncNow(0);
+  sync(0);
+  body.updateMatrixWorld(true);
   return handle;
 }
