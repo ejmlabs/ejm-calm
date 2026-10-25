@@ -167,7 +167,9 @@ export function selectTiles(x: number, z: number, wasSplit: ReadonlySet<string>,
   return out.map((t) => t.key);
 }
 
-function overlaps(a: Tile, b: Tile): boolean {
+type Cell = { level: number; ix: number; iz: number };
+
+function overlaps(a: Cell, b: Cell): boolean {
   const sa = tileSize(a.level);
   const sb = tileSize(b.level);
   return a.ix * sa < (b.ix + 1) * sb && b.ix * sb < (a.ix + 1) * sa && a.iz * sa < (b.iz + 1) * sb && b.iz * sb < (a.iz + 1) * sa;
@@ -212,6 +214,7 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
   const requested = new Set<string>();
   let wanted = new Set<string>();
   let wantedList: string[] = [];
+  let wantedCells: Array<{ key: string; level: number; ix: number; iz: number }> = [];
   let split = new Set<string>();
   let lastX = Infinity;
   let lastZ = Infinity;
@@ -290,6 +293,10 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
     wantedList = selectTiles(x, z, split, next);
     split = next;
     wanted = new Set(wantedList);
+    wantedCells = wantedList.map((key) => {
+      const { lod, cx, cz } = parseChunkKey(key);
+      return { key, level: lod, ix: cx, iz: cz };
+    });
     queue = wantedList.filter((key) => !tiles.has(key));
     lastX = x;
     lastZ = z;
@@ -297,11 +304,9 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
 
   /** True when every wanted tile overlapping `tile` is solid (or empty sea). */
   function covered(tile: Tile): boolean {
-    for (const key of wantedList) {
-      const other = tiles.get(key);
-      const { lod, cx, cz } = parseChunkKey(key);
-      const probe = other ?? ({ level: lod, ix: cx, iz: cz } as Tile);
-      if (!overlaps(tile, probe)) continue;
+    for (const cell of wantedCells) {
+      if (!overlaps(tile, cell)) continue;
+      const other = tiles.get(cell.key);
       if (!other || other.state !== 'on') return false;
     }
     return true;

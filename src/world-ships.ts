@@ -131,12 +131,21 @@ export function createShipStream(options: {
   });
 
   const order: Array<{ ship: Ship; d: number }> = [];
+  const streamedAt = { x: Infinity, z: Infinity };
+  let filling = true;
 
   return {
     active: () => active,
     all: () => handles,
     update(dt, time, wx, wz, shore) {
-      streamer.update(wx, wz);
+      // Cells only change every few hundred metres: look again after 50, or while still filling in.
+      if (filling || Math.hypot(wx - streamedAt.x, wz - streamedAt.z) > 50) {
+        const before = streamer.loaded.size;
+        streamer.update(wx, wz);
+        filling = streamer.loaded.size > before;
+        streamedAt.x = wx;
+        streamedAt.z = wz;
+      }
       order.length = 0;
       for (const ship of ships) {
         const p = ship.handle.group.position;

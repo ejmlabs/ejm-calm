@@ -150,10 +150,11 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     ships: { active: ships.active, setVisible: ships.setVisible },
     update(wx, wz, camera, dt, time) {
       whale = [wx, wz];
-      origin.maybeRecenter(wx, wz);
+      // The camera is still in the old render space until the rig moves it: read it first.
       cameraWorld.copy(camera.position);
       cameraWorld.x += origin.x;
       cameraWorld.z += origin.z;
+      origin.maybeRecenter(wx, wz);
       landStream.update(cameraWorld.x, cameraWorld.z, dt);
       ships.update(dt, time, wx, wz, land);
 

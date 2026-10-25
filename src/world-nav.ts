@@ -15,8 +15,6 @@ export type NavField = Shore & {
   ready: (x: number, z: number) => boolean;
   /** Builds missing tiles within `radius` of (x, z), nearest first, for at most `budgetMs`; true once all are built. */
   prefetch: (x: number, z: number, radius: number, budgetMs: number) => boolean;
-  /** Copies signed distances on the lattice into `out` (size × size texels from lattice index i0, j0). */
-  sample: (i0: number, j0: number, size: number, out: Float32Array) => void;
   readonly min: number;
   readonly cell: number;
   readonly saturation: number;
@@ -219,11 +217,6 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
         if (over()) return false;
       }
       return true;
-    },
-    sample(i0, j0, size, out) {
-      for (let j = 0; j < size; j++) {
-        for (let i = 0; i < size; i++) out[j * size + i] = distanceAt(min + (i0 + i) * cell, min + (j0 + j) * cell);
-      }
     },
     stats() {
       return { tiles: tiles.size, blocks: blocks.size };

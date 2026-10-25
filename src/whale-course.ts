@@ -143,8 +143,14 @@ export const PLAN_START = 20;
 /** Coarse planning grid: cell size and radius in cells (≈1.6 km). */
 const PLAN_CELL = 80;
 const PLAN_RADIUS = 20;
-/** A coarse cell is open water when its centre has this much clearance (what the look-ahead wants). */
+/**
+ * Coarse cells with this much clearance are deep water; down to PLAN_CLEAR (what
+ * the look-ahead allows) they cost PLAN_SHALLOW_COST times as much to cross, so
+ * routes keep off the coast (calmer, bluer water) unless a passage needs it.
+ */
+const PLAN_DEEP = 150;
 const PLAN_CLEAR = 50;
+const PLAN_SHALLOW_COST = 3;
 /** Targets lie at least this many cells of path away; the plan steers for the path point PLAN_LEAD cells out. */
 const PLAN_MIN_DEPTH = 12;
 const PLAN_LEAD = 3;
@@ -164,11 +170,13 @@ const PLAN_CACHE_CAP = 40000;
 
 /**
  * Bearing toward the open water furthest along `journey` that the whale can
- * actually reach: a breadth-first search over a coarse grid of shore clearance
- * finds every reachable cell within ~1.6 km; the best is far along the journey
- * and not yet swum, and the whale steers for a point a few cells down the path
- * to it. A dead-end gulf is left by the way it was entered, and a bay by its
- * mouth, without pacing. Returns null when the whale is boxed in.
+ * actually reach: a cheapest-path search over a coarse grid of shore clearance
+ * finds every reachable cell within ~1.6 km, where water near the coast costs
+ * more than deep water, so routes keep off the shore unless a passage needs it.
+ * The best cell is far along the journey and not yet swum, and the whale steers
+ * for a point a few cells down the path to it. A dead-end gulf is left by the
+ * way it was entered, and a bay by its mouth, without pacing. A held target
+ * (`keep`) wins while it can still be reached. Returns null when boxed in.
  */
 export function planJourney(
   x: number,
@@ -182,7 +190,10 @@ export function planJourney(
   const side = PLAN_RADIUS * 2 + 1;
   const ci = Math.floor(x / PLAN_CELL);
   const cj = Math.floor(z / PLAN_CELL);
-  const water = (i: number, j: number): boolean => {
+  /** Cost of crossing a cell: 1 in deep water, more near the coast, Infinity where too close. */
+  const cost = (li: number, lj: number): number => {
+    const i = ci + li - PLAN_RADIUS;
+    const j = cj + lj - PLAN_RADIUS;
     const key = `${i}:${j}`;
     let m = cache.get(key);
     if (m === undefined) {
@@ -190,36 +201,66 @@ export function planJourney(
       cache.set(key, m);
       if (cache.size > PLAN_CACHE_CAP) cache.delete(cache.keys().next().value!);
     }
-    return m > PLAN_CLEAR;
+    return m > PLAN_DEEP ? 1 : m > PLAN_CLEAR ? PLAN_SHALLOW_COST : Infinity;
   };
-  const steps = new Int16Array(side * side).fill(-1);
-  const parent = new Int32Array(side * side).fill(-1);
-  const queue = new Int32Array(side * side);
+  const n = side * side;
+  const dist = new Float64Array(n).fill(Infinity);
+  const steps = new Int16Array(n);
+  const parent = new Int32Array(n).fill(-1);
+  const done = new Uint8Array(n);
+  // Binary heap of cell indices keyed by dist.
+  const heap: number[] = [];
+  const push = (k: number) => {
+    heap.push(k);
+    let c = heap.length - 1;
+    while (c > 0) {
+      const p = (c - 1) >> 1;
+      if (dist[heap[p]!]! <= dist[k]!) break;
+      heap[c] = heap[p]!;
+      c = p;
+    }
+    heap[c] = k;
+  };
+  const pop = (): number => {
+    const top = heap[0]!;
+    const last = heap.pop()!;
+    if (heap.length) {
+      let c = 0;
+      for (;;) {
+        const l = c * 2 + 1;
+        if (l >= heap.length) break;
+        const r = l + 1;
+        const m = r < heap.length && dist[heap[r]!]! < dist[heap[l]!]! ? r : l;
+        if (dist[heap[m]!]! >= dist[last]!) break;
+        heap[c] = heap[m]!;
+        c = m;
+      }
+      heap[c] = last;
+    }
+    return top;
+  };
   const start = PLAN_RADIUS * side + PLAN_RADIUS;
-  steps[start] = 0;
-  let head = 0;
-  let tail = 0;
-  queue[tail++] = start;
+  dist[start] = 0;
+  push(start);
   const fwd = whaleForward(journey);
-  let best = -1;
-  let bestScore = -Infinity;
-  // A held target wins while it can still be reached.
   const keepI = keep ? Math.floor(keep.x / PLAN_CELL) - ci + PLAN_RADIUS : -1;
   const keepJ = keep ? Math.floor(keep.z / PLAN_CELL) - cj + PLAN_RADIUS : -1;
   const keepK = keepI >= 0 && keepJ >= 0 && keepI < side && keepJ < side ? keepJ * side + keepI : -1;
-  while (head < tail) {
-    const k = queue[head++]!;
+  let best = -1;
+  let bestScore = -Infinity;
+  while (heap.length) {
+    const k = pop();
+    if (done[k]) continue;
+    done[k] = 1;
     const li = k % side;
     const lj = (k - li) / side;
-    const depth = steps[k]!;
-    if (depth >= PLAN_MIN_DEPTH) {
+    if (steps[k]! >= PLAN_MIN_DEPTH) {
       const wx = (ci + li - PLAN_RADIUS + 0.5) * PLAN_CELL;
       const wz = (cj + lj - PLAN_RADIUS + 0.5) * PLAN_CELL;
       const dx = wx - x;
       const dz = wz - z;
-      // Far along the journey, new water, and not too winding a way there.
-      const score =
-        dx * fwd.x + dz * fwd.z - (visited.has(visitKey(wx, wz)) ? 900 : 0) - 0.3 * (depth * PLAN_CELL - Math.hypot(dx, dz));
+      // Far along the journey, new water, and not too winding or shallow a way there.
+      const score = dx * fwd.x + dz * fwd.z - (visited.has(visitKey(wx, wz)) ? 900 : 0) - 0.3 * (dist[k]! * PLAN_CELL - Math.hypot(dx, dz));
       if (score > bestScore) {
         bestScore = score;
         best = k;
@@ -231,18 +272,23 @@ export function planJourney(
         const ni = li + di;
         const nj = lj + dj;
         if (ni < 0 || nj < 0 || ni >= side || nj >= side) continue;
-        const n = nj * side + ni;
-        if (steps[n] !== -1) continue;
-        if (!water(ci + ni - PLAN_RADIUS, cj + nj - PLAN_RADIUS)) continue;
-        // Diagonal moves may not squeeze between two land cells.
-        if (di !== 0 && dj !== 0 && !water(ci + li + di - PLAN_RADIUS, cj + lj - PLAN_RADIUS) && !water(ci + li - PLAN_RADIUS, cj + lj + dj - PLAN_RADIUS)) continue;
-        steps[n] = depth + 1;
-        parent[n] = k;
-        queue[tail++] = n;
+        const nk = nj * side + ni;
+        if (done[nk]) continue;
+        const c = cost(ni, nj);
+        if (c === Infinity) continue;
+        // Diagonal moves may not squeeze between two closed cells.
+        if (di !== 0 && dj !== 0 && cost(li + di, lj) === Infinity && cost(li, lj + dj) === Infinity) continue;
+        const next = dist[k]! + c * (di !== 0 && dj !== 0 ? Math.SQRT2 : 1);
+        if (next < dist[nk]!) {
+          dist[nk] = next;
+          steps[nk] = steps[k]! + 1;
+          parent[nk] = k;
+          push(nk);
+        }
       }
     }
   }
-  if (keepK >= 0 && steps[keepK]! > 0) best = keepK;
+  if (keepK >= 0 && done[keepK] && keepK !== start) best = keepK;
   if (best < 0) return null;
   const bi = best % side;
   const bj = (best - bi) / side;
@@ -330,7 +376,8 @@ export function stepWhaleCourse(
     const stalled = !!held && time - held.closestAt > STALL_SECONDS;
     const keep = held && !stalled && time - held.since < TARGET_SECONDS && gap > TARGET_REACHED ? held : undefined;
     const cache = (course.planCache ??= new Map());
-    let plan = planJourney(course.x, course.z, heading, visited, shore, cache, keep);
+    const plan2 = (k?: { x: number; z: number }) => planJourney(course.x, course.z, heading, visited, shore, cache, k);
+    let plan = plan2(keep);
     if (course.plan !== undefined && (stalled || (keep && (!plan || plan.x !== keep.x || plan.z !== keep.z)))) {
       // The way to the held target closed up ahead (or the whale made no headway): remember
       // that gap as shut, so it does not turn back and try it again a few minutes later.
@@ -338,7 +385,7 @@ export function stepWhaleCourse(
       for (let d = PLAN_CELL; d <= PLAN_CELL * 3; d += PLAN_CELL) {
         cache.set(`${Math.floor((course.x + fwd.x * d) / PLAN_CELL)}:${Math.floor((course.z + fwd.z * d) / PLAN_CELL)}`, -Infinity);
       }
-      plan = planJourney(course.x, course.z, heading, visited, shore, cache);
+      plan = plan2();
     }
     course.plan = plan?.bearing;
     if (!plan) course.target = undefined;
