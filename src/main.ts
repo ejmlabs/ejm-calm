@@ -66,7 +66,7 @@ const quality = createQuality({
   memory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 8,
 });
 
-const audio = new OceanAudio(memory?.sound ?? { enabled: false, volume: 0.35 });
+const audio = new OceanAudio(memory?.sound ?? { enabled: false, volume: 0.35 }, seed);
 const ui = createUI({
   share: () => `${location.origin}${location.pathname}?seed=${seed >>> 0}`,
   newSeed() {
@@ -140,7 +140,8 @@ try {
     mobile,
     worker: true,
   });
-  whale = createWhale(seed, layout.whaleHome, { tier: quality.tier });
+  // Head along the composed opening view (forward = look direction), so the chase opens on the coast.
+  whale = createWhale(seed, layout.whaleHome, { tier: quality.tier, heading: layout.viewYaw - Math.PI / 2 });
   world.root.add(whale.group);
   birds = createBirds(seed, mobile ? 3 : 6);
   world.root.add(birds.group);
@@ -285,7 +286,8 @@ function tick(now: number): void {
   rig.update(dt, time, motion.matches);
   if (peekDepth !== null) peekCamera(peekDepth);
 
-  underwater.update(dt, time, camera);
+  const signal = underwater.update(dt, time, camera);
+  audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin });
   renderer.render(scene, camera);
 
   if (now - lastSave > 4000) {
@@ -321,6 +323,7 @@ if (debug) {
         world.update(whale.state.x, whale.state.z, camera, 1 / 30, time);
         whale.update(1 / 30, time, world.shore, world.land.heightAt(whale.state.x, whale.state.z));
       }
+      rig.snap();
     },
     forceBreach(at?: number) {
       whale.forcePhase('breach', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
@@ -387,6 +390,7 @@ if (debug) {
         exposure: renderer.toneMappingExposure,
         submersion: underwater.signal.submersion,
         depth: underwater.signal.depth,
+        audio: audio.stats(),
       };
     },
   };
@@ -414,6 +418,7 @@ window.addEventListener('pagehide', () => {
   disposed = true;
   if (frame !== null) cancelAnimationFrame(frame);
   persist();
+  audio.dispose();
   ui.dispose();
   sky.dispose();
   whale.dispose();

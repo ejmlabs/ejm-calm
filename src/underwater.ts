@@ -450,7 +450,8 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
 
     // Exponential-fog equivalent of the FogExp2 visibility, for shaders that fade linearly.
     underwaterUniforms.underwaterMix.value = s;
-    underwaterUniforms.underwaterColor.value.copy(below.color);
+    // The land (the only reader) skips tone mapping, so it takes the display colour, like the clear colour.
+    underwaterUniforms.underwaterColor.value.copy(tint.color);
     underwaterUniforms.underwaterDensity.value = below.density * 1.73;
 
     const below0 = depth > 0;

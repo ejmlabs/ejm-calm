@@ -66,7 +66,11 @@ export type WhaleHandle = {
   dispose: () => void;
 };
 
-export type WhaleOptions = { tier?: QualityTier };
+export type WhaleOptions = {
+  tier?: QualityTier;
+  /** Starting heading; defaults to a seeded random one. */
+  heading?: number;
+};
 
 export function phaseAtCycleTime(t: number): { phase: WhalePhase; phaseT: number; cycle: number } {
   const total = PHASE_ORDER.reduce((sum, p) => sum + PHASE_LEN[p], 0);
@@ -213,7 +217,9 @@ function mistTexture(): THREE.CanvasTexture {
 export function createWhale(seed: number, home: { x: number; z: number }, options: WhaleOptions = {}): WhaleHandle {
   const rng = fork(seed, 'whale');
   // First draw is the starting heading; tests rely on that order.
-  const startHeading = rng() * Math.PI * 2;
+  // Always draw, so the rest of the seeded stream is the same either way.
+  const randomHeading = rng() * Math.PI * 2;
+  const startHeading = options.heading ?? randomHeading;
   const rollSide = hash(seed, 0x0b4e) & 1 ? 1 : -1;
   const tier = options.tier ?? 'high';
 
