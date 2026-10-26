@@ -1,68 +1,207 @@
 import * as THREE from 'three';
 import { fork } from './rng.js';
 import { damp } from './math.js';
+import { selectLod } from './lod.js';
+import { detailFor, type QualityTier } from './quality.js';
+import { buildBird, patchBirdShader, SPECIES, triangleCount } from './bird-mesh.js';
+import { stepFlock, type Boid, type Leader } from './flock.js';
+
+/** Metres from the camera at which birds drop to the mid and far meshes. */
+const LOD_BOUNDS = [40, 120] as const;
+/** Lowest height over the water (m). */
+const MIN_HEIGHT = 5;
+const MAX_HEIGHT = 70;
+const MAX_BIRDS = 24;
+/** Share of the flock that is a gull, a tern, an albatross (rest). */
+const MIX = [0.5, 0.85] as const;
+
+/** Seconds a bird takes to appear or vanish when the tier changes. */
+const FADE_SECONDS = 1;
+
+type Bird = Boid & { phase: number; heading: number; bank: number; lod: number; tint: THREE.Color; fade: number };
+
+export type Birds = {
+  group: THREE.Group;
+  update: (time: number, centerX?: number, centerZ?: number, dt?: number, camera?: { x: number; y: number; z: number }, calm?: boolean) => void;
+  setTier: (tier: QualityTier) => void;
+  stats: () => { birds: number; draws: number; triangles: number };
+  dispose: () => void;
+};
 
 /**
- * Distant V-shaped bird silhouettes — cheap Line loops. They wheel around a
- * centre that trails the whale (world coordinates), so they keep it company on
- * the journey.
+ * Gulls, terns and albatrosses flying as small flocks that circle the whale. Each species is an instanced
+ * mesh at three levels of detail; wing flap runs in the vertex shader. Same seed, same birds.
  */
-export function createBirds(
-  seed: number,
-  count = 5,
-): { group: THREE.Group; update: (time: number, centerX?: number, centerZ?: number, dt?: number) => void; dispose: () => void } {
+export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
   const rng = fork(seed, 'birds');
   const group = new THREE.Group();
-  const geos: THREE.BufferGeometry[] = [];
-  const mats: THREE.Material[] = [];
-  const birds: Array<{ line: THREE.Line; radius: number; speed: number; height: number; phase: number }> = [];
+  const time = { value: 0 };
+  const flap = { value: 1 };
+  const material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  material.onBeforeCompile = (shader) => patchBirdShader(shader, time, flap);
 
-  for (let i = 0; i < count; i++) {
-    const geo = new THREE.BufferGeometry();
-    const span = 0.9 + rng() * 0.5;
-    const points = new Float32Array([
-      -span, 0, 0,
-      0, 0.15, 0,
-      span, 0, 0,
-    ]);
-    geo.setAttribute('position', new THREE.BufferAttribute(points, 3));
-    geos.push(geo);
-    const mat = new THREE.LineBasicMaterial({ color: 0x1a2430, transparent: true, opacity: 0.55 });
-    mats.push(mat);
-    const line = new THREE.Line(geo, mat);
-    group.add(line);
+  const geometries: THREE.BufferGeometry[] = [];
+  // meshes[species][lod]
+  const meshes = SPECIES.map((species) =>
+    ([0, 1, 2] as const).map((level) => {
+      const geometry = buildBird(species, level);
+      const flapAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_BIRDS * 3), 3);
+      flapAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute('aFlap', flapAttr);
+      geometries.push(geometry);
+      const mesh = new THREE.InstancedMesh(geometry, material, MAX_BIRDS);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      // Instances move far from the geometry's own bounds.
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      mesh.visible = false;
+      group.add(mesh);
+      return { mesh, flapAttr };
+    }),
+  );
+
+  const birds: Bird[] = [];
+  for (let i = 0; i < MAX_BIRDS; i++) {
+    const roll = rng();
+    const species = roll < MIX[0] ? 0 : roll < MIX[1] ? 1 : 2;
+    const size = 0.9 + rng() * 0.3;
+    const heading = rng() * Math.PI * 2;
+    const speed = SPECIES[species]!.speed;
+    const tint = new THREE.Color().setScalar(0.92 + rng() * 0.08);
     birds.push({
-      line,
-      radius: 60 + rng() * 120,
-      speed: 0.05 + rng() * 0.08,
-      height: 12 + rng() * 18,
+      x: 0, y: 0, z: 0,
+      vx: Math.sin(heading) * speed, vy: 0, vz: Math.cos(heading) * speed,
+      group: species,
+      size,
       phase: rng() * Math.PI * 2,
+      heading,
+      bank: 0,
+      lod: 0,
+      tint,
+      fade: 0,
     });
   }
+  // One leader per species circles the flock centre at its own radius and height.
+  const orbits = SPECIES.map((species, index) => ({
+    radius: 45 + rng() * 30 + index * 20,
+    height: 14 + rng() * 8 + index * 5,
+    omega: (species.speed / (60 + index * 20)) * (rng() < 0.5 ? -1 : 1),
+    phase: rng() * Math.PI * 2,
+  }));
+  const leaders: Leader[] = orbits.map(() => ({ x: 0, y: 0, z: 0 }));
+  const speeds = SPECIES.map((species) => species.speed);
 
+  let active = detailFor(tier).birds;
   const center = { x: 0, z: 0, set: false };
+  const live: Bird[] = [];
+  const dummy = new THREE.Object3D();
+  dummy.rotation.order = 'YXZ';
+  const counts = SPECIES.map(() => [0, 0, 0]);
+  let draws = 0;
+  let triangles = 0;
+  const trianglesOf = meshes.map((row) => row.map(({ mesh }) => triangleCount(mesh.geometry)));
+
   return {
     group,
-    update(time: number, centerX = 0, centerZ = 0, dt = 0) {
-      // The flock drifts after the whale over half a minute or so; it never snaps.
-      if (!center.set || Math.hypot(centerX - center.x, centerZ - center.z) > 3000) {
+    update(t, centerX = 0, centerZ = 0, dt = 0, camera, calm = false) {
+      time.value = t;
+      flap.value = calm ? 0 : 1;
+      const first = !center.set;
+      if (first) {
         center.x = centerX;
         center.z = centerZ;
         center.set = true;
       } else {
+        // The flock drifts after the whale over half a minute or so; it never snaps.
         center.x = damp(center.x, centerX, 0.04, dt);
         center.z = damp(center.z, centerZ, 0.04, dt);
       }
-      for (const bird of birds) {
-        const a = time * bird.speed + bird.phase;
-        bird.line.position.set(center.x + Math.cos(a) * bird.radius, bird.height + Math.sin(a * 3) * 0.8, center.z + Math.sin(a) * bird.radius);
-        bird.line.rotation.y = -a + Math.PI / 2;
-        bird.line.rotation.z = Math.sin(time * 6 + bird.phase) * 0.25;
+      orbits.forEach((orbit, i) => {
+        const a = t * orbit.omega + orbit.phase;
+        const leader = leaders[i]!;
+        leader.x = center.x + Math.cos(a) * orbit.radius;
+        leader.z = center.z + Math.sin(a) * orbit.radius;
+        leader.y = orbit.height + Math.sin(a * 2.3) * 3;
+      });
+      const step = Math.min(dt, 0.1);
+      const place = (bird: Bird, index: number) => {
+        const leader = leaders[bird.group]!;
+        const around = (index / MAX_BIRDS) * Math.PI * 2;
+        bird.x = leader.x + Math.cos(around) * 12;
+        bird.z = leader.z + Math.sin(around) * 12;
+        bird.y = leader.y + (index % 3) * 2;
+      };
+      live.length = 0;
+      birds.forEach((bird, i) => {
+        const target = i < active ? 1 : 0;
+        if (first) {
+          // Spread a fresh flock around its leader on first sight.
+          place(bird, i);
+          bird.fade = target;
+        } else if (bird.fade !== target) {
+          // A bird that returns after a tier change joins its leader again rather than from where it left.
+          if (bird.fade === 0) place(bird, i);
+          const move = step / FADE_SECONDS;
+          bird.fade = target > bird.fade ? Math.min(1, bird.fade + move) : Math.max(0, bird.fade - move);
+        }
+        if (bird.fade > 0) live.push(bird);
+      });
+      stepFlock(live, leaders, { speeds, minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }, step);
+
+      for (const row of counts) row.fill(0);
+      for (const row of meshes) for (const { mesh } of row) mesh.count = 0;
+      for (const bird of live) {
+        const species = bird.group;
+        const heading = Math.atan2(bird.vx, bird.vz);
+        let turn = heading - bird.heading;
+        if (turn > Math.PI) turn -= Math.PI * 2;
+        else if (turn < -Math.PI) turn += Math.PI * 2;
+        bird.heading = heading;
+        const targetBank = step > 0 ? Math.max(-0.5, Math.min(0.5, (turn / step) * -1.2)) : 0;
+        bird.bank = damp(bird.bank, targetBank, 2, step);
+        const distance = camera ? Math.hypot(bird.x - camera.x, bird.y - camera.y, bird.z - camera.z) : 0;
+        bird.lod = selectLod(bird.lod, distance, LOD_BOUNDS);
+
+        const { mesh, flapAttr } = meshes[species]![bird.lod]!;
+        const slot = counts[species]![bird.lod]!++;
+        const horizontal = Math.hypot(bird.vx, bird.vz);
+        dummy.position.set(bird.x, bird.y, bird.z);
+        dummy.rotation.set(-Math.atan2(bird.vy, horizontal), heading, bird.bank);
+        const scale = bird.size * bird.fade;
+        dummy.scale.setScalar(scale);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(slot, dummy.matrix);
+        mesh.setColorAt(slot, bird.tint);
+        const sp = SPECIES[species]!;
+        flapAttr.setXYZ(slot, bird.phase, sp.rate * (0.9 + bird.size * 0.1), sp.glide);
+        mesh.count = slot + 1;
       }
+      draws = 0;
+      triangles = 0;
+      meshes.forEach((row, s) =>
+        row.forEach(({ mesh, flapAttr }, l) => {
+          const n = counts[s]![l]!;
+          mesh.visible = n > 0;
+          if (n > 0) {
+            mesh.instanceMatrix.needsUpdate = true;
+            if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+            flapAttr.needsUpdate = true;
+            draws++;
+            triangles += n * trianglesOf[s]![l]!;
+          }
+        }),
+      );
+    },
+    setTier(next) {
+      active = detailFor(next).birds;
+    },
+    stats() {
+      return { birds: active, draws, triangles };
     },
     dispose() {
-      for (const g of geos) g.dispose();
-      for (const m of mats) m.dispose();
+      for (const g of geometries) g.dispose();
+      material.dispose();
+      for (const row of meshes) for (const { mesh } of row) mesh.dispose();
     },
   };
 }

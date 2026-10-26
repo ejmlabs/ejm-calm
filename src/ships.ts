@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { fork } from './rng.js';
 import { SHIP_LAND_MARGIN, type ShipSpec } from './terrain.js';
 import { clampClearOfLand, type Shore } from './shore.js';
+import { swellAt, type SwellSample } from './swell.js';
 
 export type ShipHandle = {
   group: THREE.Group;
@@ -163,7 +164,7 @@ export function createShip(spec: ShipSpec, options: ShipOptions = {}): ShipHandl
     let z = spec.z;
     let heading = spec.heading;
     const drift = 0.35 + (spec.seed % 1000) / 1000 * 0.45;
-    const bobPhase = (spec.seed % 97) / 97 * Math.PI * 2;
+    const swell: SwellSample = { height: 0, slopeX: 0, slopeZ: 0 };
 
     return {
       group,
@@ -184,11 +185,12 @@ export function createShip(spec: ShipSpec, options: ShipOptions = {}): ShipHandl
           z = anchor.z + (z - anchor.z) * 0.96;
         }
 
-        const bob = Math.sin(time * 1.1 + bobPhase) * 0.12;
-        const roll = Math.sin(time * 0.85 + bobPhase) * 0.05;
-        const pitch = Math.sin(time * 1.15 + bobPhase * 1.3) * 0.03;
+        // Ride the shared swell: heave from its height, roll and pitch from its slope across and along the hull.
+        const sea = swellAt(x, z, time, swell);
+        const roll = Math.atan(sea.slopeX * Math.cos(heading) - sea.slopeZ * Math.sin(heading));
+        const pitch = -Math.atan(sea.slopeX * Math.sin(heading) + sea.slopeZ * Math.cos(heading));
         // ~35% of the hull below the waterline.
-        group.position.set(x, -0.25 + bob, z);
+        group.position.set(x, -0.25 + sea.height, z);
         group.rotation.order = 'YXZ';
         group.rotation.y = heading;
         group.rotation.z = roll;
