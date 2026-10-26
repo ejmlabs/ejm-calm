@@ -9,6 +9,7 @@ import {
   WHALE_MAX_TURN_RATE,
   createWhalePilot,
   headingToward,
+  planJourney,
   shortestAngle,
   whaleForward,
   type WhaleCourse,
@@ -175,4 +176,13 @@ test('whale heading for a real coastline turns away and never beaches', () => {
     assert.ok(land.clearance(course.x, course.z) >= WHALE_ISLAND_MARGIN - 1e-3, 'stayed off the beach');
     assert.ok(land.heightAt(course.x, course.z) < 0, 'stayed in the water');
   }
+});
+
+test('a spent target is not chosen again: the plan heads for other water', () => {
+  const open = { clearance: () => 1000, away: () => ({ x: 1, z: 0 }) };
+  const first = planJourney(0, 0, 0.5, open, new Map());
+  assert.ok(first);
+  const again = planJourney(0, 0, 0.5, open, new Map(), undefined, [{ x: first.x, z: first.z }]);
+  assert.ok(again);
+  assert.ok(Math.hypot(again.x - first.x, again.z - first.z) >= 1500, 'the same water was picked again');
 });

@@ -23,6 +23,8 @@ export type Wake = {
   /** A trail ribbon and a bow wave: two draws, added to the world group (world coordinates, floating origin applied by the parent). */
   group: THREE.Group;
   update: (source: WakeSource, dt: number) => void;
+  /** Daylight, 0 to 1: the foam darkens with the sea at dusk and night. */
+  setLight: (level: number) => void;
   /** Metres of trail drawn at more than `alpha` opacity right now (debug and tests). */
   length: (alpha?: number) => number;
   /** Draws made last frame. */
@@ -251,6 +253,9 @@ export function createWake(options: WakeOptions = {}): Wake {
         metres += Math.hypot(px[i]! - px[j]!, pz[i]! - pz[j]!);
       }
       return metres;
+    },
+    setLight(level) {
+      material.color.setScalar(0.1 + 0.9 * level);
     },
     draws: () => drawn,
     dispose() {

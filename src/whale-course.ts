@@ -29,6 +29,8 @@ export type WhaleCourse = {
   /** Open water the plans are heading for, held until reached, cut off or stale. */
   target?: { x: number; z: number; since: number; closest: number; closestAt: number };
   planCache?: PlanCache;
+  /** Targets that were reached, timed out or stalled on: open water around them is not planned for again for a while. */
+  spent?: Array<{ x: number; z: number; at: number }>;
   /** Forward speed, m/s; defaults to params.speed. */
   speed?: number;
   /** Steer for this point instead of the journey (feeding); land avoidance still applies. */
@@ -169,6 +171,11 @@ const STALL_SECONDS = 90;
 const CONE = -0.17;
 const BACKTRACK = 4000;
 
+/** Water this close to a spent target (m) is not picked as a new one, and for this long (s): at the head of a gulf the whale then turns for its mouth instead of coming back to the same spot. */
+const SPENT_RADIUS = 2200;
+const SPENT_SECONDS = 1200;
+const SPENT_MAX = 12;
+
 /** Coarse clearance samples on a fixed world lattice, shared by successive plans. */
 export type PlanCache = Map<string, number>;
 const PLAN_CACHE_CAP = 40000;
@@ -191,6 +198,7 @@ export function planJourney(
   shore: Shore,
   cache: PlanCache,
   keep?: { x: number; z: number },
+  spent: ReadonlyArray<{ x: number; z: number }> = [],
 ): { bearing: number; x: number; z: number; steps: number } | null {
   const side = PLAN_RADIUS * 2 + 1;
   const ci = Math.floor(x / PLAN_CELL);
@@ -271,7 +279,8 @@ export function planJourney(
       const along = dx * fwd.x + dz * fwd.z;
       // Behind the cone only the furthest reachable cell counts: out of a pocket by its mouth, not along its far wall.
       const score = (along < CONE * away ? away - BACKTRACK : along) - 0.3 * (dist[k]! * PLAN_CELL - away);
-      if (score > bestScore) {
+      // Water by a spent target is a way through, not somewhere to head for.
+      if (score > bestScore && !spent.some((t) => Math.hypot(wx - t.x, wz - t.z) < SPENT_RADIUS)) {
         bestScore = score;
         best = k;
       }
@@ -381,8 +390,12 @@ export function stepWhaleCourse(
     // Headway is measured along the planned path (held.closest is in path cells).
     const stalled = !!held && time - held.closestAt > STALL_SECONDS;
     const keep = held && !stalled && time - held.since < TARGET_SECONDS && gap > TARGET_REACHED ? held : undefined;
+    // A target let go (reached, stalled on or too old) is spent: no new target is picked by it for a while.
+    const spent = (course.spent ??= []);
+    if (held && !keep) spent.push({ x: held.x, z: held.z, at: time });
+    while (spent.length > SPENT_MAX || (spent.length && time - spent[0]!.at > SPENT_SECONDS)) spent.shift();
     const cache = (course.planCache ??= new Map());
-    const plan2 = (k?: { x: number; z: number }) => planJourney(course.x, course.z, heading, shore, cache, k);
+    const plan2 = (k?: { x: number; z: number }) => planJourney(course.x, course.z, heading, shore, cache, k, spent);
     let plan = plan2(keep);
     if (course.plan !== undefined && (stalled || (keep && (!plan || plan.x !== keep.x || plan.z !== keep.z)))) {
       // The way to the held target closed up ahead (or the whale made no headway): remember

@@ -22,7 +22,7 @@ behaviour, the regions it crosses, ship placement, and the coasts, islets and mo
 - Route indicator (off by default, remembered): the region's name and the distance swum, shown for six
   seconds whenever the whale enters a new region.
 
-Reduced-motion preferences keep the camera still aside from your own drag, with no field-of-view lift or lean at speed, half the cloud drift and a slower day.
+Reduced-motion preferences keep the camera still aside from your own drag, and freeze the sea: the whale, clouds and day stand still, with no field-of-view lift or lean. (The code also halves the cloud drift and slows the day, for any use that is not frozen.)
 Settings and the last seed are remembered in localStorage when available.
 
 ## Seeds
@@ -47,7 +47,7 @@ checks use Playwright Core and the system Chrome executable.
 
 `npm run budget` builds, then checks the gzipped JavaScript against the size
 before the ocean migration began plus its 25 KB allowance. `npx tsx tools/long-journey.ts 2 42 7` swims
-two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/frame-cost.ts`
+two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 24 60` swims an hour on each of seeds 1 to 24 and fails any under 0.6 net over path; `npx tsx tools/frame-cost.ts`
 times what the journey's feel adds per frame in Node; `npx tsx tools/feel-shots.ts <dir>` captures
 the regions, times of day, weather and indicator (after a build).
 

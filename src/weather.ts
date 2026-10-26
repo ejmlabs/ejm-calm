@@ -110,6 +110,7 @@ export function createWeather(seed: number, cover = WEATHER.clear.coverage): Wea
       return look;
     },
     set(state) {
+      if (!WEATHER_STATES.includes(state)) return;
       forced = state;
       target = state;
       WEATHER_STATES.forEach((s, k) => (mix[k] = s === state ? 1 : 0));

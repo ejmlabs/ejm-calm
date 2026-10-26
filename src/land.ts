@@ -56,6 +56,8 @@ export type LandOptions = {
   gridExtent?: number;
   /** Skip the opening search and use this continent offset (from `land.offset`). */
   offset?: { x: number; z: number };
+  /** False leaves out the rocks and islets of the open sea (tests compare against it). */
+  landmarks?: boolean;
 };
 
 /** The region modulation of the mask starts to fade in at the first radius and is whole at the second (the opening view's coast lies within 2 km). */
@@ -125,7 +127,22 @@ function channels(seed: number): Channels {
 export function createLand(seed: number, options: LandOptions): Land {
   const n = channels(seed);
   const regions = createRegions(seed);
-  const landmarks = createLandmarks(seed);
+  // A landmark stands only in open water: no natural coast within a kilometre, so it never narrows a way through.
+  const landmarks = createLandmarks(seed, options.landmarks === false ? () => false : (mark) => {
+    const saved = { held, lifted, raised, headland, wx, wz };
+    let open = true;
+    for (const ring of [0, 400, 1000]) {
+      const n = ring === 0 ? 1 : 16;
+      for (let k = 0; k < n && open; k++) {
+        const x = mark.x + Math.cos((k / n) * Math.PI * 2) * ring;
+        const z = mark.z + Math.sin((k / n) * Math.PI * 2) * ring;
+        warp(x, z);
+        if (maskWarped(x, z) > -0.05) open = false;
+      }
+    }
+    ({ held, lifted, raised, headland, wx, wz } = saved);
+    return open;
+  });
   const blend: RegionWeights = [0, 0, 0, 0];
   const jitter = (hash(seed, 'land-anchor') / 0x100000000 - 0.5) * 0.7;
   const anchorYaw = options.viewYaw + jitter;

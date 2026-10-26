@@ -47,7 +47,7 @@ export function createFlecks(seed: number, tier: QualityTier): Flecks {
   alphaMap.magFilter = THREE.LinearFilter;
   alphaMap.minFilter = THREE.LinearFilter;
   alphaMap.needsUpdate = true;
-  const material = new THREE.MeshBasicMaterial({ color: 0xffffff, alphaMap, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false, fog: false });
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff, alphaMap, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false, fog: false });
   const mesh = new THREE.InstancedMesh(geometry, material, max);
   mesh.count = count;
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -113,14 +113,14 @@ export function createFlecks(seed: number, tier: QualityTier): Flecks {
         const grow = edge * age[i]!;
         dummy.position.set(fx[i]! - origin.x, LIFT, fz[i]! - origin.z);
         dummy.rotation.set(0, source.heading - Math.PI / 2 + turn[i]!, 0);
-        dummy.scale.set(size[i]! * 0.7 * grow, 1, size[i]! * length * grow);
+        dummy.scale.set(size[i]! * 0.5 * grow, 1, size[i]! * length * grow);
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
       }
       mesh.instanceMatrix.needsUpdate = true;
     },
     setLight(level) {
-      material.color.setScalar(0.3 + 0.7 * level);
+      material.color.setScalar(0.08 + 0.92 * level);
     },
     setTier(next) {
       const was = count;

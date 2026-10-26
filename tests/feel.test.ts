@@ -12,6 +12,7 @@ import { patchShader } from '../src/ocean.js';
 import { layoutWorld } from '../src/terrain.js';
 import { createWhalePilot, type WhaleCourse } from '../src/whale-course.js';
 import { LANDMARK_CELL } from '../src/landmarks.js';
+import { createWeather } from '../src/weather.js';
 import { REGION_FROM, createLand } from '../src/land.js';
 import type { QualityTier } from '../src/quality.js';
 
@@ -301,7 +302,8 @@ test('landmarks that stand alone in the sea break the surface, small and low', (
       for (let j = -8; j <= 8; j++) {
         const mark = land.landmarks.cell(i, j);
         if (Math.hypot(mark.x, mark.z) < 5200) continue;
-        assert.ok(land.maskAt(mark.x, mark.z) > 0, `landmark ${i}:${j} of seed ${seed} stays under water`);
+        // Those that stand are what is judged; one near a coast has none.
+        if (land.maskAt(mark.x, mark.z) <= 0) continue;
         assert.equal(land.landmarks.at(mark.x + mark.radius * 6, mark.z), 0);
         // Beside a coast the landmark joins it; only the ones with open sea all round are judged.
         let sea = true;
@@ -312,20 +314,58 @@ test('landmarks that stand alone in the sea break the surface, small and low', (
         assert.ok(high > 0 && high < 60, `landmark ${i}:${j} of seed ${seed} is ${high.toFixed(0)} m high`);
       }
     }
-    assert.ok(alone > 100, `${alone} lone landmarks`);
+    assert.ok(alone > 60, `${alone} lone landmarks`);
   }
 });
 
-test('the opening is untouched: nothing is added to the mask within the region fade-in radius', () => {
+test('the opening is untouched: with or without landmarks the mask is the same within the region fade-in radius', () => {
   const land = layoutWorld(42).land;
-  for (let a = 0; a < 60; a++) {
-    const r = (a / 60) * REGION_FROM;
-    // The landmark term is multiplied by the fade-in, which is zero inside the radius.
-    assert.ok(Number.isFinite(land.maskAt(Math.cos(a) * r, Math.sin(a) * r)));
+  const bare = createLand(42, { viewYaw: land.viewYaw, offset: land.offset, landmarks: false });
+  let beyond = 0;
+  for (let a = 0; a < 400; a++) {
+    const r = (a / 400) * REGION_FROM;
+    const x = Math.cos(a * 2.4) * r;
+    const z = Math.sin(a * 2.4) * r;
+    assert.equal(bare.maskAt(x, z), land.maskAt(x, z), `the mask changed at ${r.toFixed(0)} m`);
   }
-  const base = createLand(42, { viewYaw: land.viewYaw, offset: land.offset });
-  for (let a = 0; a < 200; a++) {
-    const r = (a / 200) * REGION_FROM;
-    assert.equal(base.maskAt(Math.cos(a) * r, Math.sin(a) * r), land.maskAt(Math.cos(a) * r, Math.sin(a) * r));
+  // Out beyond it they are there: the masks differ somewhere.
+  for (let a = 0; a < 4000; a++) {
+    const x = Math.cos(a * 2.4) * (6000 + a * 3);
+    const z = Math.sin(a * 2.4) * (6000 + a * 3);
+    if (bare.maskAt(x, z) !== land.maskAt(x, z)) beyond++;
   }
+  assert.ok(beyond > 0, 'no landmark beyond the opening');
+});
+
+test('a landmark stands only in open water: sea all round it out to a kilometre', () => {
+  for (const seed of [3, 13, 42]) {
+    const land = layoutWorld(seed).land;
+    const bare = createLand(seed, { viewYaw: land.viewYaw, offset: land.offset, landmarks: false });
+    let stood = 0;
+    for (let i = -10; i <= 10; i++) {
+      for (let j = -10; j <= 10; j++) {
+        const mark = land.landmarks.cell(i, j);
+        if (Math.hypot(mark.x, mark.z) < 5200) continue;
+        // Land that is there without the landmark is the coast's own.
+        if (land.maskAt(mark.x, mark.z) <= 0 || bare.maskAt(mark.x, mark.z) > 0) continue;
+        stood++;
+        for (const ring of [400, 1000]) {
+          for (let k = 0; k < 16; k++) {
+            const x = mark.x + Math.cos((k / 16) * Math.PI * 2) * ring;
+            const z = mark.z + Math.sin((k / 16) * Math.PI * 2) * ring;
+            assert.ok(bare.maskAt(x, z) < 0, `landmark ${i}:${j} of seed ${seed} stands by a natural coast at ${ring} m`);
+          }
+        }
+      }
+    }
+    assert.ok(stood > 100, `${stood} landmarks stand on seed ${seed}`);
+  }
+});
+
+test('an unknown weather state is ignored', () => {
+  const w = createWeather(1);
+  w.set('overcast');
+  w.set('fog' as never);
+  w.update(1, 1, [1, 0, 0, 0]);
+  assert.ok(Number.isFinite(w.look.coverage) && w.target() === 'overcast');
 });

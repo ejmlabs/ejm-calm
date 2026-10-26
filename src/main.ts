@@ -373,6 +373,7 @@ function tick(now: number): void {
   world.landStream.setSky(sky.sunDirection, sky.hazeGradient, sky.hazeDensity, sky.level);
   world.landStream.setLook(regionLook.hazeDensity * weatherLook.haze, regionLook.land);
   flecks.setLight(sky.level);
+  wake.setLight(sky.level);
   birds.setMix(regionLook.birds);
   const swell = swellRate(whale.state.speed / TRAVEL_MAX);
   swellClock += dt * swell;
