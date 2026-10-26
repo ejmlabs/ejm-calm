@@ -37,6 +37,8 @@ export type LandStream = {
   tileState: (key: string) => 'in' | 'on' | 'out' | undefined;
   /** The land's look in a region: haze density scaled, vertex colours multiplied. */
   setLook: (hazeDensity: number, tint: THREE.Color) => void;
+  /** The light of the day: sun direction, haze colours (as many as at creation), base haze density and brightness (0 dark to 1 day). */
+  setSky: (sun: THREE.Vector3, haze: readonly THREE.Color[], density: number, light: number) => void;
   stats: () => {
     tiles: number;
     triangles: number;
@@ -114,6 +116,7 @@ uniform vec3 sunDirection;
 uniform vec3 sunTint;
 uniform float hazeDensity;
 uniform vec3 landTint;
+uniform float landLight;
 uniform float hazeAngles[${stops}];
 uniform vec3 hazeColors[${stops}];
 uniform float fade;
@@ -148,7 +151,7 @@ void main() {
   float distant = smoothstep( 2000.0, 5500.0, d );
   lambert = mix( lambert, 0.45 * max( 0.0, sunDirection.y ) + 0.25, distant );
   sky = mix( sky, 0.5, distant );
-  vec3 lit = vColor * landTint * ( sky + lambert * 0.78 * sunTint );
+  vec3 lit = vColor * landTint * landLight * ( sky + lambert * 0.78 * sunTint );
   // Air thins with altitude: high ridges and snowfields stay solid through the haze.
   float dh = d * mix( 1.0, 0.62, smoothstep( 150.0, 900.0, h ) );
   float a = min( 0.88, 1.0 - exp( -dh / 9000.0 - pow( dh * hazeDensity, 2.0 ) ) );
@@ -245,11 +248,14 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
   const patchNoise = makeNoise2D(land.seed, 21);
   // Without a gradient, a single haze colour at every elevation.
   const gradient = options.hazeGradient ?? { angles: [0, 90], colors: [options.hazeColor, options.hazeColor] };
+  let baseDensity = options.hazeDensity ?? HAZE;
+  let look = 1;
   const uniforms = {
     sunDirection: { value: sun },
     sunTint: { value: sunTint },
     hazeDensity: { value: options.hazeDensity ?? HAZE },
     landTint: { value: new THREE.Color(1, 1, 1) },
+    landLight: { value: 1 },
     hazeAngles: { value: gradient.angles.slice() },
     hazeColors: { value: gradient.colors.map((c) => c.clone()) },
     fade: { value: 1 },
@@ -495,8 +501,16 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
       }
     },
     setLook(hazeDensity, tint) {
-      uniforms.hazeDensity.value = (options.hazeDensity ?? HAZE) * hazeDensity;
+      look = hazeDensity;
+      uniforms.hazeDensity.value = baseDensity * look;
       uniforms.landTint.value.copy(tint);
+    },
+    setSky(direction, haze, density, light) {
+      sun.copy(direction).normalize();
+      for (let k = 0; k < uniforms.hazeColors.value.length; k++) uniforms.hazeColors.value[k]!.copy(haze[Math.min(k, haze.length - 1)]!);
+      baseDensity = density;
+      uniforms.hazeDensity.value = baseDensity * look;
+      uniforms.landLight.value = light;
     },
     tileState: (key) => tiles.get(key)?.state,
     stats() {
