@@ -15,7 +15,10 @@ const MAX_BIRDS = 24;
 /** Share of the flock that is a gull, a tern, an albatross (rest). */
 const MIX = [0.5, 0.85] as const;
 
-type Bird = Boid & { phase: number; heading: number; bank: number; lod: number; tint: THREE.Color };
+/** Seconds a bird takes to appear or vanish when the tier changes. */
+const FADE_SECONDS = 1;
+
+type Bird = Boid & { phase: number; heading: number; bank: number; lod: number; tint: THREE.Color; fade: number };
 
 export type Birds = {
   group: THREE.Group;
@@ -75,6 +78,7 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
       bank: 0,
       lod: 0,
       tint,
+      fade: 0,
     });
   }
   // One leader per species circles the flock centre at its own radius and height.
@@ -89,6 +93,7 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
 
   let active = detailFor(tier).birds;
   const center = { x: 0, z: 0, set: false };
+  const live: Bird[] = [];
   const dummy = new THREE.Object3D();
   dummy.rotation.order = 'YXZ';
   const counts = SPECIES.map(() => [0, 0, 0]);
@@ -118,18 +123,29 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
         leader.z = center.z + Math.sin(a) * orbit.radius;
         leader.y = orbit.height + Math.sin(a * 2.3) * 3;
       });
-      if (first) {
-        // Spread a fresh flock around its leader on first sight.
-        birds.forEach((bird, i) => {
-          const leader = leaders[bird.group]!;
-          const around = (i / MAX_BIRDS) * Math.PI * 2;
-          bird.x = leader.x + Math.cos(around) * 12;
-          bird.z = leader.z + Math.sin(around) * 12;
-          bird.y = leader.y + (i % 3) * 2;
-        });
-      }
-      const live = birds.slice(0, active);
       const step = Math.min(dt, 0.1);
+      const place = (bird: Bird, index: number) => {
+        const leader = leaders[bird.group]!;
+        const around = (index / MAX_BIRDS) * Math.PI * 2;
+        bird.x = leader.x + Math.cos(around) * 12;
+        bird.z = leader.z + Math.sin(around) * 12;
+        bird.y = leader.y + (index % 3) * 2;
+      };
+      live.length = 0;
+      birds.forEach((bird, i) => {
+        const target = i < active ? 1 : 0;
+        if (first) {
+          // Spread a fresh flock around its leader on first sight.
+          place(bird, i);
+          bird.fade = target;
+        } else if (bird.fade !== target) {
+          // A bird that returns after a tier change joins its leader again rather than from where it left.
+          if (bird.fade === 0) place(bird, i);
+          const move = step / FADE_SECONDS;
+          bird.fade = target > bird.fade ? Math.min(1, bird.fade + move) : Math.max(0, bird.fade - move);
+        }
+        if (bird.fade > 0) live.push(bird);
+      });
       stepFlock(live, leaders, { speeds, minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }, step);
 
       for (const row of counts) row.fill(0);
@@ -151,7 +167,7 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
         const horizontal = Math.hypot(bird.vx, bird.vz);
         dummy.position.set(bird.x, bird.y, bird.z);
         dummy.rotation.set(-Math.atan2(bird.vy, horizontal), heading, bird.bank);
-        const scale = bird.size;
+        const scale = bird.size * bird.fade;
         dummy.scale.setScalar(scale);
         dummy.updateMatrix();
         mesh.setMatrixAt(slot, dummy.matrix);

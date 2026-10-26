@@ -1,9 +1,11 @@
 import { test } from 'vitest';
+import * as THREE from 'three';
 import assert from 'node:assert/strict';
 import { SWELL_MAX, swellAt } from '../src/swell.js';
 import { selectLod } from '../src/lod.js';
 import { createQuality, detailFor, updateQuality } from '../src/quality.js';
 import { stepFlock, type Boid } from '../src/flock.js';
+import { createBirds } from '../src/birds.js';
 import { buildBird, SPECIES, triangleCount } from '../src/bird-mesh.js';
 
 test('swell is deterministic, bounded and its slope matches the height', () => {
@@ -96,4 +98,39 @@ test('bird meshes have three levels of detail with a wing weight and no lines or
     assert.ok(counts[0]! > counts[1]! && counts[1]! > counts[2]!, `${species.name}: ${counts}`);
     assert.ok(counts[0]! <= 200 && counts[2]! >= 8, `${species.name}: ${counts}`);
   }
+});
+
+test('birds fade out on a tier step-down and rejoin their leaders on step-up', () => {
+  const birds = createBirds(7, 'high');
+  const camera = { x: 0, y: 20, z: 0 };
+  let t = 0;
+  const run = (seconds: number, cx: number) => {
+    for (let i = 0; i < seconds * 30; i++) {
+      t += 1 / 30;
+      birds.update(t, cx, 0, 1 / 30, camera, false);
+    }
+  };
+  const instances = () => birds.group.children.reduce((n, mesh) => n + (mesh as THREE.InstancedMesh).count, 0);
+  run(2, 0);
+  assert.equal(instances(), 24);
+  birds.setTier('medium');
+  birds.update((t += 1 / 30), 0, 0, 1 / 30, camera, false);
+  assert.ok(instances() >= 23, 'no bird vanishes in a single frame');
+  run(2, 0);
+  assert.equal(instances(), 16);
+  birds.setTier('high');
+  run(1, 1000);
+  run(2, 1000);
+  assert.equal(instances(), 24);
+  // The whale moved 1 km while the extra birds were away: they must rejoin the flock, not stay behind.
+  const xs: number[] = [];
+  const matrix = new THREE.Matrix4();
+  for (const mesh of birds.group.children as THREE.InstancedMesh[]) {
+    for (let i = 0; i < mesh.count; i++) {
+      mesh.getMatrixAt(i, matrix);
+      xs.push(matrix.elements[12]!);
+    }
+  }
+  assert.ok(Math.max(...xs) - Math.min(...xs) < 400, `flock spans ${Math.max(...xs) - Math.min(...xs)} m`);
+  birds.dispose();
 });
