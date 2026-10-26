@@ -7,13 +7,6 @@ The whale SHALL leave a wake that fades with age and push a bow wave, both scale
 - **WHEN** the whale cruises above 16 m/s
 - **THEN** a wake trail at least 40 m long is visible behind it
 
-### Requirement: Surface flecks
-Instanced foam flecks SHALL respawn around the whale and slide past the camera, in one draw call, at most 200 instances on `low` and 400 on `high`.
-
-#### Scenario: Water moves
-- **WHEN** the whale cruises
-- **THEN** flecks cross the lower third of the screen in under 3 seconds
-
 ### Requirement: Passing scenery
 Seeded islets and rocks SHALL appear near the route, sparsely, at least one per 2 minutes on average, never within 20 m of the whale's path.
 
@@ -34,3 +27,14 @@ The camera SHALL respond to speed up to 28 m/s with a pull-back of at most 25 pe
 #### Scenario: Framed
 - **WHEN** the whale accelerates from 16 to 28 m/s
 - **THEN** its bounding box stays within the central 80 percent of the frame
+
+### Requirement: Ships read as vessels
+Ships SHALL read as proper vessels at the distances of the review shots: a hull with a sheer and a deck, shaped sails, a foam wake at the bow and stern, and a masthead lantern at night. The set of all ships SHALL add at most 2 draw calls for foam and lights, and SHALL NOT draw more calls in total than before.
+
+#### Scenario: Night lights
+- **WHEN** the sky is dark
+- **THEN** each ship in view shows a lantern, and none shows by day
+
+#### Scenario: Draws
+- **WHEN** eight ships are in view
+- **THEN** the draw calls of the ships and their foam and lights are no more than before this change

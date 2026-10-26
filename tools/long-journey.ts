@@ -9,7 +9,6 @@ import { createWorldOrigin } from '../src/world-origin.js';
 import { createWhaleMover, TRAVEL_MAX } from '../src/whale-behavior.js';
 import { PLAN_REACH } from '../src/whale-course.js';
 import { createBirds } from '../src/birds.js';
-import { createFlecks } from '../src/flecks.js';
 import { createWake } from '../src/wake.js';
 import { createSky } from '../src/sky.js';
 import { createWeather } from '../src/weather.js';
@@ -19,7 +18,7 @@ import { FollowCamera } from '../src/camera.js';
 
 /**
  * A long headless journey of the whole step-3 loop without a GPU: the real whale mover over the real world,
- * with the land, navigation and ship streams, birds, flecks, wake, day, weather and the chase camera running as
+ * with the land, navigation and ship streams, birds, wake, day, weather and the chase camera running as
  * the page runs them. Reports the distance made good in each ten minutes, stalls, tile counts and the heap.
  *
  * usage: npx tsx tools/long-journey.ts <hours> <seed> [seed ...]
@@ -55,7 +54,6 @@ for (const seed of seeds) {
   const ships = createShipStream({ seed, maskAt: land.maskAt, startSpecs: layout.ships, parent, cap: 8, shoreReady: land.nav.ready });
   const origin = createWorldOrigin();
   const birds = createBirds(seed, 'high');
-  const flecks = createFlecks(seed, 'high');
   const wake = createWake();
   const camera = new THREE.PerspectiveCamera(48, 1.6, 0.5, 12000);
   const rig = new FollowCamera(camera, { groundAt: (x, z) => floor.heightAt(x + origin.x, z + origin.z) });
@@ -97,7 +95,6 @@ for (const seed of seeds) {
     swell += DT * swellRate(m.speed / TRAVEL_MAX);
     const state = { x: m.x, y: m.pose.y, z: m.z, heading: m.heading, speed: m.speed };
     birds.update(time, m.x, m.z, DT, { x: camera.position.x + origin.x, y: camera.position.y, z: camera.position.z + origin.z }, false);
-    flecks.update(state, origin, DT);
     wake.update(state, DT);
     rig.setTarget({ x: m.x - origin.x, y: m.pose.y, z: m.z - origin.z, heading: m.heading });
     rig.update(DT, time);
@@ -168,7 +165,6 @@ for (const seed of seeds) {
   stream.dispose();
   ships.dispose();
   birds.dispose();
-  flecks.dispose();
   wake.dispose();
   sky.dispose();
 }

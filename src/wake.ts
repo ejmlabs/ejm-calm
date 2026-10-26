@@ -20,7 +20,7 @@ export type WakeOptions = {
 };
 
 export type Wake = {
-  /** A trail ribbon and a bow wave: two draws, added to the world group (world coordinates, floating origin applied by the parent). */
+  /** A trail ribbon and a bow wave: one draw, added to the world group (world coordinates, floating origin applied by the parent). */
   group: THREE.Group;
   update: (source: WakeSource, dt: number) => void;
   /** Daylight, 0 to 1: the foam darkens with the sea at dusk and night. */
@@ -74,11 +74,19 @@ export function createWake(options: WakeOptions = {}): Wake {
   let since = interval;
   let strength = 0;
 
-  const trailPositions = new Float32Array(count * COLUMNS * 3);
-  const trailColors = new Float32Array(count * COLUMNS * 4);
-  const trailGeometry = new THREE.BufferGeometry();
-  trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3).setUsage(THREE.DynamicDrawUsage));
-  trailGeometry.setAttribute('color', new THREE.BufferAttribute(trailColors, 4).setUsage(THREE.DynamicDrawUsage));
+  const ARM = 5;
+  const trailVerts = count * COLUMNS;
+  const bowVerts = ARM * 2 * 2;
+  // One buffer for the trail and the bow wave, so the whole wake is one draw.
+  const positions = new Float32Array((trailVerts + bowVerts) * 3);
+  const colors = new Float32Array((trailVerts + bowVerts) * 4);
+  const trailPositions = positions.subarray(0, trailVerts * 3);
+  const trailColors = colors.subarray(0, trailVerts * 4);
+  const bowBase = positions.subarray(trailVerts * 3);
+  const bowColors = colors.subarray(trailVerts * 4);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 4).setUsage(THREE.DynamicDrawUsage));
   const trailIndex: number[] = [];
   for (let i = 0; i + 1 < count; i++) {
     for (let c = 0; c + 1 < COLUMNS; c++) {
@@ -87,26 +95,16 @@ export function createWake(options: WakeOptions = {}): Wake {
       trailIndex.push(a, a + 1, b, a + 1, b + 1, b);
     }
   }
-  trailGeometry.setIndex(trailIndex);
-  trailGeometry.setDrawRange(0, 0);
 
   // Bow wave: a flat chevron whose two arms sweep back from the nose.
-  const ARM = 5;
-  const bowBase = new Float32Array(ARM * 2 * 2 * 3);
-  const bowColors = new Float32Array(ARM * 2 * 2 * 4);
-  const bowGeometry = new THREE.BufferGeometry();
-  const bowPos = new THREE.BufferAttribute(bowBase, 3).setUsage(THREE.DynamicDrawUsage);
-  bowGeometry.setAttribute('position', bowPos);
-  bowGeometry.setAttribute('color', new THREE.BufferAttribute(bowColors, 4).setUsage(THREE.DynamicDrawUsage));
-  const bowIndex: number[] = [];
-  // Two arms (port and starboard), each a strip of ARM segments of two vertices.
+  // Two arms (port and starboard), each a strip of ARM stations of two vertices, after the trail's vertices.
   for (let arm = 0; arm < 2; arm++) {
     for (let i = 0; i + 1 < ARM; i++) {
-      const a = arm * ARM * 2 + i * 2;
-      bowIndex.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      const a = trailVerts + arm * ARM * 2 + i * 2;
+      trailIndex.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
     }
   }
-  bowGeometry.setIndex(bowIndex);
+  geometry.setIndex(trailIndex);
 
   const material = new THREE.MeshBasicMaterial({
     color: COLOR,
@@ -118,23 +116,20 @@ export function createWake(options: WakeOptions = {}): Wake {
     toneMapped: false,
     fog: false,
   });
-  const trail = new THREE.Mesh(trailGeometry, material);
-  const bowMesh = new THREE.Mesh(bowGeometry, material);
-  for (const mesh of [trail, bowMesh]) {
-    mesh.frustumCulled = false;
-    mesh.renderOrder = 2;
-    mesh.visible = false;
-  }
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 2;
+  mesh.visible = false;
   const group = new THREE.Group();
   group.name = 'wake';
-  group.add(trail, bowMesh);
+  group.add(mesh);
 
   /** Opacity of a point of this age and strength. */
   const fade = (age: number, s: number): number => PEAK * s * (1 - smoothstep(0, LIFE, age)) ** 1.5 * smoothstep(0, 0.4, age);
 
   function writeTrail(source: WakeSource): void {
     // The mesh sits on the source, so vertices are small offsets.
-    trail.position.set(source.x, LIFT, source.z);
+    mesh.position.set(source.x, LIFT, source.z);
     let written = 0;
     for (let k = 0; k < filled; k++) {
       const i = (head - 1 - k + count * 2) % count;
@@ -161,15 +156,14 @@ export function createWake(options: WakeOptions = {}): Wake {
       }
       written++;
     }
-    trailGeometry.setDrawRange(0, Math.max(0, written - 1) * (COLUMNS - 1) * 6);
-    trailGeometry.attributes['position']!.needsUpdate = true;
-    trailGeometry.attributes['color']!.needsUpdate = true;
+    // Points not in use draw nothing.
+    trailPositions.fill(0, written * COLUMNS * 3);
+    trailColors.fill(0, written * COLUMNS * 4);
   }
 
   function writeBow(source: WakeSource, s: number): void {
     const fx = -Math.cos(source.heading);
     const fz = Math.sin(source.heading);
-    bowMesh.position.set(source.x + fx * bow, LIFT, source.z + fz * bow);
     // Longer and wider the faster it goes.
     const run = 2.2 + 5 * s;
     const open = 0.28 + 0.12 * s;
@@ -185,9 +179,9 @@ export function createWake(options: WakeOptions = {}): Wake {
         for (let edge = 0; edge < 2; edge++) {
           const w = out + side * (edge === 0 ? -thick : thick) * 0.5;
           // Right of the heading is (−fz, fx).
-          bowBase[o + edge * 3] = -fx * back + -fz * w;
+          bowBase[o + edge * 3] = fx * bow - fx * back + -fz * w;
           bowBase[o + edge * 3 + 1] = 0;
-          bowBase[o + edge * 3 + 2] = -fz * back + fx * w;
+          bowBase[o + edge * 3 + 2] = fz * bow - fz * back + fx * w;
         }
         const a = PEAK * 1.3 * s * (1 - u) ** 1.2;
         const c = (arm * ARM + i) * 8;
@@ -199,8 +193,6 @@ export function createWake(options: WakeOptions = {}): Wake {
         }
       }
     }
-    bowPos.needsUpdate = true;
-    bowGeometry.attributes['color']!.needsUpdate = true;
   }
 
   let drawn = 0;
@@ -236,12 +228,18 @@ export function createWake(options: WakeOptions = {}): Wake {
       }
       filled = live;
       const showTrail = filled > 1;
-      trail.visible = showTrail;
-      if (showTrail) writeTrail(source);
       const showBow = strength > 0.02;
-      bowMesh.visible = showBow;
+      mesh.visible = showTrail || showBow;
+      if (showTrail) writeTrail(source);
+      else {
+        trailPositions.fill(0);
+        trailColors.fill(0);
+      }
       if (showBow) writeBow(source, strength);
-      drawn = (showTrail ? 1 : 0) + (showBow ? 1 : 0);
+      else bowColors.fill(0);
+      geometry.attributes['position']!.needsUpdate = true;
+      geometry.attributes['color']!.needsUpdate = true;
+      drawn = mesh.visible ? 1 : 0;
     },
     length(alpha = 0.1) {
       let metres = 0;
@@ -259,8 +257,7 @@ export function createWake(options: WakeOptions = {}): Wake {
     },
     draws: () => drawn,
     dispose() {
-      trailGeometry.dispose();
-      bowGeometry.dispose();
+      geometry.dispose();
       material.dispose();
     },
   };

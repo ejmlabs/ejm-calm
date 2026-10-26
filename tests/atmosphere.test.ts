@@ -237,3 +237,47 @@ test('the route indicator: off by default, in on a region change, out after six 
   route.setEnabled(true, 3, 120000);
   assert.equal(route.text, 'Deep blue · 120 km');
 });
+
+import { STARS_FROM, STARS_FULL } from '../src/sky.js';
+
+test('stars fade in as the sun sets, fade out as it rises, and thick cloud hides them', () => {
+  const { sky } = makeSky(42);
+  const weather = createWeather(42, sky.clearCover);
+  sky.setWeather(weather.look);
+  let seenFull = false;
+  let seenNone = false;
+  let last = sky.stars;
+  let biggest = 0;
+  for (let t = 0; t < DAY_SECONDS; t++) {
+    sky.update(1);
+    const elevation = (Math.asin(sky.sunDirection.y) * 180) / Math.PI;
+    if (elevation < STARS_FULL - 1) {
+      assert.ok(sky.stars > 0.99, `stars ${sky.stars.toFixed(2)} with the sun at ${elevation.toFixed(1)} degrees`);
+      seenFull = true;
+    }
+    if (elevation > STARS_FROM + 1) {
+      assert.equal(sky.stars, 0);
+      seenNone = true;
+    }
+    biggest = Math.max(biggest, Math.abs(sky.stars - last));
+    last = sky.stars;
+  }
+  assert.ok(seenFull && seenNone);
+  assert.ok(biggest < 0.05, `stars changed by ${biggest.toFixed(3)} in a second`);
+  // Overcast puts them out; the sky holds one points object of the stars.
+  sky.setDay((DAY.indexOf('night') - DAY.indexOf(pickTimeOfDay(42)) + DAY.length) % DAY.length / DAY.length);
+  weather.set('overcast');
+  sky.setWeather(weather.look);
+  sky.update(0);
+  assert.ok(sky.stars < 0.2, `${sky.stars} under overcast`);
+  weather.set('clear');
+  sky.setWeather(weather.look);
+  sky.update(0);
+  assert.ok(sky.stars > 0.9);
+  const points = sky.sky.children.filter((child) => child instanceof THREE.Points);
+  assert.equal(points.length, 1);
+  // Held still without time passing, as under reduced motion.
+  const turn = (points[0] as THREE.Points).rotation.y;
+  sky.update(0, 0.5);
+  assert.equal((points[0] as THREE.Points).rotation.y, turn);
+});

@@ -39,6 +39,8 @@ export type SkyHandle = {
   shallowLight: number;
   /** Land and water brightness now, 0 to 1. */
   level: number;
+  /** How strongly the stars show now, 0 (day, thick cloud) to 1. */
+  stars: number;
   /** The seed's own cloud cover under a clear sky. */
   clearCover: number;
   /** Milliseconds the last environment refresh took on the CPU side, and how many ran. */
@@ -124,6 +126,11 @@ export const DAY_SECONDS = 2400;
 
 /** Elevation angles (degrees above the horizon) of the measured sky colours. */
 export const HAZE_ANGLES = [0.3, 2, 5, 10, 16];
+
+/** Stars: fade in as the sun sets below this elevation (degrees), full below the second. */
+export const STARS_FROM = 3;
+export const STARS_FULL = -8;
+const STAR_COUNT = 900;
 
 export const FOG_DENSITY = 0.00034;
 /** Seconds between environment map refreshes. */
@@ -212,6 +219,56 @@ export function createSky(
   if (uniforms['cloudDensity']) uniforms['cloudDensity'].value = 0.15;
   if (uniforms['cloudSpeed']) uniforms['cloudSpeed'].value = patched !== null ? CLOUD_SPEED : 0.00002;
   if (uniforms['showSunDisc']) uniforms['showSunDisc'].value = 1;
+
+  // Stars: one points object on the dome, a child of the sky so it hides with it under water.
+  const starRng = fork(seed, 4001);
+  const starPositions = new Float32Array(STAR_COUNT * 3);
+  const starColors = new Float32Array(STAR_COUNT * 3);
+  for (let i = 0; i < STAR_COUNT; i++) {
+    // Uniform over the upper hemisphere, kept off the horizon haze.
+    const y = 0.04 + starRng() * 0.96;
+    const a = starRng() * Math.PI * 2;
+    const r = Math.sqrt(1 - y * y);
+    starPositions.set([Math.cos(a) * r * 0.9, y * 0.9, Math.sin(a) * r * 0.9], i * 3);
+    // Mostly faint, a few bright, a little blue or warm.
+    const bright = 0.25 + 0.75 * starRng() ** 3;
+    const warm = starRng() - 0.5;
+    starColors.set([bright * (1 + 0.25 * warm), bright, bright * (1 - 0.25 * warm)], i * 3);
+  }
+  const starGeometry = new THREE.BufferGeometry();
+  starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+  starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+  // Round, soft stars from a small generated disc.
+  const disc = new Uint8Array(8 * 8 * 4);
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      const u = (x - 3.5) / 4;
+      const v = (y - 3.5) / 4;
+      disc.fill(Math.round(255 * Math.max(0, 1 - u * u - v * v) ** 0.8), (y * 8 + x) * 4, (y * 8 + x) * 4 + 4);
+    }
+  }
+  const starMap = new THREE.DataTexture(disc, 8, 8, THREE.RGBAFormat);
+  starMap.magFilter = THREE.LinearFilter;
+  starMap.minFilter = THREE.LinearFilter;
+  starMap.needsUpdate = true;
+  const starMaterial = new THREE.PointsMaterial({
+    size: 1.7 * (renderer.getPixelRatio?.() ?? 1),
+    alphaMap: starMap,
+    sizeAttenuation: false,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
+  });
+  const starPoints = new THREE.Points(starGeometry, starMaterial);
+  starPoints.visible = false;
+  starPoints.renderOrder = 1;
+  starPoints.frustumCulled = false;
+  // Layer 1 is seen by the page's camera but not by the water's mirror, whose small picture would smear the stars.
+  starPoints.layers.set(1);
+  sky.add(starPoints);
 
   const sunDirection = new THREE.Vector3();
   const sun = new THREE.DirectionalLight(SUN.color, SUN.intensity);
@@ -331,6 +388,14 @@ export function createSky(
       // A region's tint is a daytime colour: it fades with the light.
       fog.color.copy(horizonColor).lerp(regionFog.tint, regionFog.mix * blend.level);
     }
+    // Stars come out as the sun drops below the dusk and go as it rises; thick cloud hides them.
+    const dark = 1 - smoothstep(STARS_FULL, STARS_FROM, blend.elevation + wobble);
+    const cloud = clamp((weather.coverage - 0.25) / 0.55, 0, 1);
+    handle.stars = dark * (1 - 0.95 * cloud);
+    starMaterial.opacity = handle.stars;
+    starPoints.visible = handle.stars > 0.01;
+    // They wheel slowly with the day.
+    starPoints.rotation.y = cycle * 0.15;
     handle.hazeDensity = blend.hazeDensity;
     handle.daylight = blend.daylight;
     handle.shallowLight = blend.shallow;
@@ -394,6 +459,7 @@ export function createSky(
     daylight: presets[timeOfDay].daylight,
     shallowLight: presets[timeOfDay].shallow,
     level: 1,
+    stars: 0,
     clearCover: baseCover,
     environment: () => ({ ms: envMs, count: envCount }),
     envMap: null,
@@ -428,6 +494,9 @@ export function createSky(
     },
     dispose() {
       scene.remove(sky, sun, hemi, ambient);
+      starGeometry.dispose();
+      starMaterial.dispose();
+      starMap.dispose();
       sky.geometry.dispose();
       (sky.material as THREE.Material).dispose();
       envTarget?.dispose();

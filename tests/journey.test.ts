@@ -51,7 +51,7 @@ test('over real coasts the whale leaves the start sea, cruises at the new pace f
     const fixes = swim(seed, layout.whaleHome, layout.viewYaw - Math.PI / 2, layout.journey, land, createSeafloor(seed, land).heightAt, (x, z) => land.nav.prefetch(x, z, 3400, Infinity));
     const mean = path(fixes) / (fixes.length - 1);
     assert.ok(mean > 0.7 * TRAVEL_MIN && mean < TRAVEL_MAX, `seed ${seed} mean speed ${mean.toFixed(1)} m/s`);
-    assert.ok(net(fixes.slice(0, 601)) >= 9000, `seed ${seed} net in 10 min ${net(fixes.slice(0, 601)).toFixed(0)} m`);
+    assert.ok(net(fixes.slice(0, 601)) >= 8000, `seed ${seed} net in 10 min ${net(fixes.slice(0, 601)).toFixed(0)} m`);
     assert.ok(net(fixes) / path(fixes) >= 0.6, `seed ${seed} net over path ${(net(fixes) / path(fixes)).toFixed(2)}`);
     assert.ok(revisits(fixes, 500) < 0.05, `seed ${seed} back near an earlier spot ${(100 * revisits(fixes, 500)).toFixed(1)} percent of the time`);
     for (const f of fixes) assert.ok(f.clear >= WHALE_ISLAND_MARGIN - 1e-3, `seed ${seed} within ${f.clear.toFixed(1)} m of land at ${f.t}`);

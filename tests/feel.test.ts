@@ -3,22 +3,22 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { createWake, wakeStrength } from '../src/wake.js';
-import { createFlecks, FIELD, FLECKS } from '../src/flecks.js';
 import { createBirds } from '../src/birds.js';
 import { FOV, FOV_LIFT, FollowCamera, LEAN_MAX, PULL_BACK, pullBackAt } from '../src/camera.js';
 import { swellAt, swellRate, SWELL_SPEED_GAIN } from '../src/swell.js';
 import { cloudPatches } from '../src/sky.js';
 import { patchShader } from '../src/ocean.js';
 import { layoutWorld } from '../src/terrain.js';
+import { createShip } from '../src/ships.js';
+import { createShipFx } from '../src/ship-fx.js';
 import { createWhalePilot, type WhaleCourse } from '../src/whale-course.js';
 import { LANDMARK_CELL } from '../src/landmarks.js';
 import { createWeather } from '../src/weather.js';
 import { REGION_FROM, createLand } from '../src/land.js';
-import type { QualityTier } from '../src/quality.js';
 
 const forward = (heading: number) => ({ x: -Math.cos(heading), z: Math.sin(heading) });
 
-test('a cruising whale leaves a wake at least 40 m long in at most two draws, and a slow or sunk one leaves none', () => {
+test('a cruising whale leaves a wake at least 40 m long in one draw, and a slow or sunk one leaves none', () => {
   const wake = createWake();
   const heading = 0.4;
   const f = forward(heading);
@@ -30,8 +30,8 @@ test('a cruising whale leaves a wake at least 40 m long in at most two draws, an
     wake.update({ x, y: 0, z, heading, speed: 16 }, 1 / 30);
   }
   assert.ok(wake.length() >= 40, `trail ${wake.length().toFixed(0)} m at 16 m/s`);
-  assert.ok(wake.draws() <= 2 && wake.draws() >= 1, `${wake.draws()} draws`);
-  assert.ok(wake.group.children.length <= 2);
+  assert.equal(wake.draws(), 1, `${wake.draws()} draws`);
+  assert.equal(wake.group.children.length, 1, 'trail and bow wave are one mesh');
   // Vertices stay close to the source: far coordinates stay exact.
   for (const mesh of wake.group.children as THREE.Mesh[]) {
     const position = mesh.geometry.attributes['position']!;
@@ -52,63 +52,6 @@ test('the wake starts afresh after a jump rather than drawing a line across the 
   for (let i = 0; i < 60; i++) wake.update({ x: i * 0.5, y: 0, z: 0, heading: Math.PI, speed: 20 }, 1 / 30);
   wake.update({ x: 40000, y: 0, z: 0, heading: Math.PI, speed: 20 }, 1 / 30);
   assert.ok(wake.length(0) < 10, `trail ${wake.length(0).toFixed(1)} m after a jump`);
-});
-
-const TIERS: Array<[QualityTier, number]> = [['low', 200], ['medium', 300], ['high', 400]];
-
-test('flecks: one draw, 200 instances on low and 400 on high', () => {
-  for (const [tier, count] of TIERS) {
-    const flecks = createFlecks(42, tier);
-    assert.equal(FLECKS[tier], count);
-    assert.equal(flecks.mesh.count, count);
-    assert.ok(flecks.mesh instanceof THREE.InstancedMesh);
-    flecks.setTier('low');
-    assert.equal(flecks.mesh.count, 200);
-    flecks.dispose();
-  }
-});
-
-test('flecks cross the lower third of the screen in under 3 seconds at cruise and keep coming', () => {
-  const flecks = createFlecks(7, 'low');
-  const heading = 1.1;
-  const f = forward(heading);
-  const origin = { x: 0, z: 0 };
-  const m = new THREE.Matrix4();
-  const position = new THREE.Vector3();
-  // The chase camera sits about 18 m behind the whale; the lower third of the view lies 8 to 45 m ahead of it.
-  const band: [number, number] = [-10, 27];
-  for (const speed of [16, 22, 28]) {
-    let x = 500;
-    let z = 800;
-    const inside = new Map<number, number>();
-    let longest = 0;
-    let fewest = Infinity;
-    const dt = 1 / 30;
-    for (let step = 0; step < 30 * 40; step++) {
-      x += f.x * speed * dt;
-      z += f.z * speed * dt;
-      flecks.update({ x, z, heading, speed }, origin, dt);
-      let seen = 0;
-      for (let i = 0; i < flecks.mesh.count; i++) {
-        flecks.mesh.getMatrixAt(i, m);
-        // An instance that has faded out is a flat matrix: read its width off the matrix itself.
-        if (Math.hypot(m.elements[0]!, m.elements[1]!, m.elements[2]!) < 0.05) continue;
-        position.setFromMatrixPosition(m);
-        const ahead = (position.x - x) * f.x + (position.z - z) * f.z;
-        const wide = Math.abs(-(position.x - x) * f.z + (position.z - z) * f.x);
-        if (ahead >= band[0] && ahead <= band[1] && wide < 20) {
-          seen++;
-          const since = inside.get(i) ?? step;
-          inside.set(i, since);
-          longest = Math.max(longest, (step - since) * dt);
-        } else inside.delete(i);
-      }
-      if (step > 30 * 5) fewest = Math.min(fewest, seen);
-    }
-    assert.ok(longest < 3, `a fleck stayed in the lower third for ${longest.toFixed(1)} s at ${speed} m/s`);
-    assert.ok(fewest >= 6, `only ${fewest} flecks in the lower third at ${speed} m/s`);
-  }
-  assert.ok(FIELD.ahead > 0);
 });
 
 /** Birds in render space (the group sits at the origin in tests), by reading the instance matrices. */
@@ -345,7 +288,7 @@ test('a landmark stands only in open water: sea all round it out to a kilometre'
     for (let i = -10; i <= 10; i++) {
       for (let j = -10; j <= 10; j++) {
         const mark = land.landmarks.cell(i, j);
-        if (Math.hypot(mark.x, mark.z) < 5200) continue;
+        if (Math.hypot(mark.x, mark.z) < REGION_FROM) continue;
         // Land that is there without the landmark is the coast's own.
         if (land.maskAt(mark.x, mark.z) <= 0 || bare.maskAt(mark.x, mark.z) > 0) continue;
         stood++;
@@ -369,3 +312,59 @@ test('an unknown weather state is ignored', () => {
   w.update(1, 1, [1, 0, 0, 0]);
   assert.ok(Number.isFinite(w.look.coverage) && w.target() === 'overcast');
 });
+
+test('ships are two meshes each (hull and rig, and the sails), shaped, and sway without going wrong', () => {
+  for (const seed of [42, 7]) {
+    const specs = layoutWorld(seed).ships;
+    assert.ok(specs.length >= 2);
+    for (const spec of specs) {
+      const ship = createShip(spec);
+      assert.equal(ship.group.children.length, 2, 'a ship is two draws');
+      const hull = (ship.group.children[0] as THREE.Mesh).geometry.attributes['position']!;
+      assert.ok(hull.count > 300, 'a hull and its rig');
+      assert.equal(ship.lanterns.length, 2);
+      assert.ok(ship.size.length > 3 && ship.size.beam > 1);
+      const stub = { clearance: () => 1000, away: () => ({ x: 1, z: 0 }) };
+      for (let i = 0; i < 120; i++) ship.update(1 / 30, i / 30, stub);
+      const sails = (ship.group.children[1] as THREE.Mesh).geometry.attributes['position']!;
+      for (let i = 0; i < sails.count; i++) assert.ok(Number.isFinite(sails.getX(i) + sails.getY(i) + sails.getZ(i)));
+      // The sails hang inside the hull's reach: a ship is a ship, not a smear.
+      const box = new THREE.Box3().setFromBufferAttribute(sails as THREE.BufferAttribute);
+      assert.ok(box.max.y > 2 && box.max.y < 9 && box.max.x - box.min.x < 6, `sail box ${box.min.toArray()} ${box.max.toArray()}`);
+      ship.dispose();
+    }
+  }
+});
+
+test('ships have foam always and lanterns only in the dark, in two draws for all of them', () => {
+  const stub = { clearance: () => 1000, away: () => ({ x: 1, z: 0 }) };
+  const ships = layoutWorld(42).ships.map((spec) => createShip(spec));
+  ships.forEach((ship) => ship.update(1 / 30, 0, stub));
+  const fx = createShipFx();
+  fx.update(ships, 1);
+  assert.equal(fx.draws(), 1, 'by day only foam');
+  fx.update(ships, 0.05);
+  assert.equal(fx.draws(), 2, 'at night foam and lanterns');
+  fx.update([], 0.05);
+  assert.equal(fx.draws(), 0);
+  ships.forEach((ship) => ship.dispose());
+  fx.dispose();
+});
+
+test('the page\'s land and the worker\'s agree about every landmark near the start, on many seeds', () => {
+  // The page searches for its opening; the worker is handed the offset found. A landmark answer cached during
+  // the search for a trial offset must not outlive it.
+  let checked = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    const main = layoutWorld(seed).land;
+    const worker = createLand(seed, { viewYaw: main.viewYaw, offset: main.offset });
+    for (let i = -3; i <= 2; i++) {
+      for (let j = -3; j <= 2; j++) {
+        const mark = main.landmarks.cell(i, j);
+        assert.equal(main.maskAt(mark.x, mark.z), worker.maskAt(mark.x, mark.z), `seed ${seed}: landmark ${i}:${j} differs between the page's land and the worker's`);
+        checked++;
+      }
+    }
+  }
+  assert.equal(checked, 60 * 36);
+}, 180000);

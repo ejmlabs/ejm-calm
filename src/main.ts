@@ -21,7 +21,7 @@ import { TRAVEL_MAX } from './whale-behavior.js';
 import { createWeather, type WeatherState } from './weather.js';
 import { createRoute } from './route.js';
 import { createWake } from './wake.js';
-import { createFlecks } from './flecks.js';
+import { createShipFx } from './ship-fx.js';
 
 type CalmReview = {
   time: number;
@@ -174,8 +174,8 @@ let underwater: ReturnType<typeof createUnderwater>;
 let seafloor: ReturnType<typeof createSeafloor>;
 let regionLook: ReturnType<typeof createRegionLook>;
 let wake: ReturnType<typeof createWake>;
-let flecks: ReturnType<typeof createFlecks>;
 let weather: ReturnType<typeof createWeather>;
+let shipFx: ReturnType<typeof createShipFx>;
 
 try {
   const buildStart = performance.now();
@@ -219,8 +219,8 @@ try {
   sky.setEnvironmentRefresh(quality.tier !== 'low');
   wake = createWake();
   world.root.add(wake.group);
-  flecks = createFlecks(seed, quality.tier);
-  scene.add(flecks.mesh);
+  shipFx = createShipFx();
+  world.root.add(shipFx.group);
   birds = createBirds(seed, quality.tier);
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
@@ -357,7 +357,6 @@ function tick(now: number): void {
 
   if (updateQuality(quality, raw * 1000)) {
     birds.setTier(quality.tier);
-    flecks.setTier(quality.tier);
     sky.setEnvironmentRefresh(quality.tier !== 'low');
     renderer.setPixelRatio(quality.ratio);
     resize();
@@ -372,7 +371,6 @@ function tick(now: number): void {
   world.ocean.setWaterColor(regionLook.water);
   world.landStream.setSky(sky.sunDirection, sky.hazeGradient, sky.hazeDensity, sky.level);
   world.landStream.setLook(regionLook.hazeDensity * weatherLook.haze, regionLook.land);
-  flecks.setLight(sky.level);
   wake.setLight(sky.level);
   birds.setMix(regionLook.birds);
   const swell = swellRate(whale.state.speed / TRAVEL_MAX);
@@ -381,7 +379,7 @@ function tick(now: number): void {
   world.ocean.update(dt * swell, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
   wake.update(whale.state, dt);
-  flecks.update(whale.state, world.origin, dt);
+  shipFx.update(world.ships.active(), sky.level);
   markJourney();
   if (routeOn) {
     // Six seconds of the clock on the wall, not of the simulation: slow frames and reduced motion do not stretch it.
@@ -549,6 +547,7 @@ if (debug) {
         behavior: whale.state.behavior,
         exposure: renderer.toneMappingExposure,
         dayPhase: sky.phase().name,
+        stars: sky.stars,
         day: sky.phase().day,
         sunElevation: (Math.asin(sky.sunDirection.y) * 180) / Math.PI,
         weather: weather.target(),
@@ -556,8 +555,8 @@ if (debug) {
         fogDensity: (scene.fog as THREE.FogExp2).density,
         fov: camera.fov,
         wakeDraws: wake.draws(),
+        addedDraws: wake.draws() + (sky.stars > 0.01 ? 1 : 0) + shipFx.draws(),
         wakeLength: wake.length(),
-        flecks: flecks.count(),
         envMs: sky.environment().ms,
         envRefreshes: sky.environment().count,
         route: indicator.visible ? indicator.text : '',
@@ -602,7 +601,7 @@ window.addEventListener('pagehide', () => {
   sky.dispose();
   whale.dispose();
   wake.dispose();
-  flecks.dispose();
+  shipFx.dispose();
   world.dispose();
   birds.dispose();
   underwater.dispose();

@@ -17,7 +17,7 @@ Measured on main d93f95d (six seeds, headless run of the real whale mover and la
 - **World**: a large-scale region field (about 40 km cells, blended over 5 km) decides land density and ocean character. Open ocean dominates; islets are sparse; continents are rare passages.
 - **Regions**: temperate, tropical, polar and deep blue, each with its own water colour, fog, haze, land palette, islet density and bird mix.
 - **Atmosphere**: a slow day cycle and three weather states (clear, hazy, overcast) that change over a long journey.
-- **Sense of speed**: whale wake and bow wave, surface flecks, passing islets near the route, moving clouds and swell scaled with speed, camera pull-back and field-of-view lift.
+- **Sense of speed**: whale wake and bow wave, passing islets near the route, moving clouds and swell scaled with speed, camera pull-back and field-of-view lift.
 - **Streaming**: look-ahead, prefetch and recentre scaled with speed; open-ocean tiles stay empty and cheap.
 - **Stops**: breaths happen at a glide (not a stop) and feeding becomes rare and short.
 - **Route indicator**: optional, off by default: region name and distance travelled, fading in on a region change.
@@ -31,7 +31,7 @@ Nothing is built until the captain picks the options in `design.md`.
 
 - `ocean-route`: heading, speed, drift, no-backtrack, stops.
 - `ocean-regions`: region field, four regions, land density, blends.
-- `journey-feel`: wake, flecks, passing islets, clouds, camera.
+- `journey-feel`: wake, passing islets, clouds, camera, ships.
 - `journey-atmosphere`: day cycle and weather over a long run.
 - `migration-performance`: streaming, budgets and tier behaviour at speed.
 
@@ -41,7 +41,7 @@ None. The repository has no archived OpenSpec capabilities. The change builds on
 
 ## Impact
 
-- Code: `src/whale-behavior.ts`, `src/whale-course.ts`, `src/camera.ts` (`SPEED_CAP`), `src/land.ts` (region modulation of the mask), `src/world.ts` and `src/world-origin.ts` (lead, radii, recentre), `src/landmesh.ts` (lead, fade), `src/sky.ts` (cycle, weather, region tint), `src/ocean.ts` (tint, flecks), `src/birds.ts` and `src/flock.ts` (passing flocks), `src/world-ships.ts` (density by region), `src/ui.ts` (indicator), `src/persistence.ts` (indicator toggle). New: `src/regions.ts`, `src/current.ts`, `src/wake.ts` (shared with ship wakes in `add-world-detail` phase 2), `src/flecks.ts`.
+- Code: `src/whale-behavior.ts`, `src/whale-course.ts`, `src/camera.ts` (`SPEED_CAP`), `src/land.ts` (region modulation of the mask), `src/world.ts` and `src/world-origin.ts` (lead, radii, recentre), `src/landmesh.ts` (lead, fade), `src/sky.ts` (cycle, weather, region tint), `src/ocean.ts` (tint), `src/birds.ts` and `src/flock.ts` (passing flocks), `src/world-ships.ts` (density by region), `src/ui.ts` (indicator), `src/persistence.ts` (indicator toggle). New: `src/regions.ts`, `src/current.ts`, `src/wake.ts` (shared with ship wakes in `add-world-detail` phase 2), `src/weather.ts`, `src/landmarks.ts`, `src/route.ts`, `src/ship-fx.ts`.
 - Tests: region determinism and blend continuity, route never backtracks over a one-hour run for a seed set, speed bounds, tile seam and streaming throughput at 28 m/s, budget checks in `tools/smoke.ts`.
 - Saved seeds look different (land layout changes). Same call as the domain warp in `add-world-detail`; no fallback is kept unless the captain asks.
 - No new runtime dependencies, no third-party requests, CSP unchanged.

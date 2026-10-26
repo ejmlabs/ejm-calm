@@ -2,7 +2,7 @@
 
 A calm, beautiful, seeded ocean scene from **ejmlabs, an open source lab**.
 A whale swims on a long migration through open ocean, past rocks and islets, under a slow
-day of changing light and weather; it breathes and breaches, sailboats drift, and hazy coastlines
+day of changing light and weather, with stars at night; it breathes and breaches, sailboats drift, and hazy coastlines
 come and go. Everything is generated locally from one number. No accounts, tracking,
 analytics, or runtime network requests beyond this site's static files.
 
@@ -47,7 +47,7 @@ checks use Playwright Core and the system Chrome executable.
 
 `npm run budget` builds, then checks the gzipped JavaScript against the size
 before the ocean migration began plus its 25 KB allowance. `npx tsx tools/long-journey.ts 2 42 7` swims
-two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 24 60` swims an hour on each of seeds 1 to 24 and fails any under 0.6 net over path; `npx tsx tools/frame-cost.ts`
+two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 50 60` swims an hour on each of seeds 1 to 50 and fails any under 0.5 net over path or with ten minutes under 2 km (it also reports the seeds that dip under 1.5 km in five); `npx tsx tools/frame-cost.ts`
 times what the journey's feel adds per frame in Node; `npx tsx tools/feel-shots.ts <dir>` captures
 the regions, times of day, weather and indicator (after a build).
 

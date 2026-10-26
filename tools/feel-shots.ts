@@ -22,7 +22,8 @@ type Stats = Record<string, unknown> & {
   fov: number;
   wakeLength: number;
   wakeDraws: number;
-  flecks: number;
+  addedDraws: number;
+  stars: number;
   draws: number;
   triangles: number;
   route: string;
@@ -104,7 +105,7 @@ async function shot(page: Page, device: DeviceProfile, label: string): Promise<v
   await page.screenshot({ path: resolve(directory, `${device.name}-${label}.jpg`), type: 'jpeg', quality: 78, scale: 'css' });
   const entry = {
     shot: `${device.name}-${label}`, region: s.regionName, day: s.dayPhase, weather: s.weather, behavior: s.behavior, speed: round(s.speed),
-    fov: round(s.fov), wake: round(s.wakeLength), wakeDraws: s.wakeDraws, flecks: s.flecks, draws: s.draws, triangles: s.triangles,
+    fov: round(s.fov), wake: round(s.wakeLength), wakeDraws: s.wakeDraws, added: s.addedDraws, stars: round(s.stars), draws: s.draws, triangles: s.triangles,
     sun: round(s.sunElevation), cloud: round(s.cloudCover), fog: Number(s.fogDensity.toPrecision(3)), route: s.route,
   };
   log.push(entry);
@@ -118,6 +119,15 @@ await withBrowser(async (browser, base) => {
       await page.waitForTimeout(3000);
       // The opening, then the whale cruising near home.
       await shot(page, device, 'opening');
+      // The ships of the opening, by dusk and under the stars.
+      await call(page, 'setDay', dayFor('dusk'));
+      await page.waitForTimeout(2500);
+      await shot(page, device, 'opening-dusk');
+      await call(page, 'setDay', dayFor('night'));
+      await page.waitForTimeout(2500);
+      await shot(page, device, 'opening-night');
+      await call(page, 'setDay', 0);
+      await page.waitForTimeout(1500);
       await cruise(page);
       await shot(page, device, 'cruise-start');
 

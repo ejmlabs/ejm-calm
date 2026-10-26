@@ -1,7 +1,7 @@
 import { hash } from './rng.js';
 
 /** One rock or islet sits in every cell of this lattice (metres), well inside it. */
-export const LANDMARK_CELL = 2400;
+export const LANDMARK_CELL = 2000;
 const MARGIN = 0.2;
 const RADIUS_MIN = 30;
 const RADIUS_MAX = 90;
@@ -19,10 +19,12 @@ export type Landmarks = {
   cell: (i: number, j: number) => Landmark;
   /** Lift to add to the land mask at (x, z): 0 away from the landmark of its cell. The radius grows with the square root of `gain` (a region's islet gain, at most 1.7). */
   at: (x: number, z: number, gain?: number) => number;
+  /** Forgets which landmarks stand: call when the land underneath changes (the search for the opening offset). */
+  reset: () => void;
 };
 
 /**
- * Seeded rocks and islets spaced across the sea, one per 2.4 km cell: something always passes within reach of the route.
+ * Seeded rocks and islets spaced across the sea, one per 2 km cell: something always passes within reach of the route.
  * A cell whose landmark `isOpen` says is not in open water (near a coast, where it could narrow a passage) has none.
  */
 export function createLandmarks(seed: number, isOpen: (landmark: Landmark) => boolean = () => true): Landmarks {
@@ -48,6 +50,11 @@ export function createLandmarks(seed: number, isOpen: (landmark: Landmark) => bo
 
   return {
     cell: cellAt,
+    reset() {
+      stands.clear();
+      ci = NaN;
+      cj = NaN;
+    },
     at(x, z, gain = 1) {
       const i = Math.floor(x / LANDMARK_CELL);
       const j = Math.floor(z / LANDMARK_CELL);

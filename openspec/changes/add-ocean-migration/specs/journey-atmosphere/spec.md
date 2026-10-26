@@ -20,3 +20,14 @@ The environment map SHALL refresh at most every 90 s on `medium` and `high`, and
 #### Scenario: No hitch
 - **WHEN** the refresh runs
 - **THEN** the frame it runs in costs at most 8 ms more than the average on the desktop profile
+
+### Requirement: Stars
+The night sky SHALL show stars that fade in as the sun sets, fade out as it rises and are hidden by thick cloud, drawn in one call. They SHALL NOT move under reduced motion.
+
+#### Scenario: Stars follow the sun
+- **WHEN** the sun is more than 8 degrees below the horizon with a clear sky
+- **THEN** the stars are at full strength, and at 3 degrees above the horizon or higher they are not drawn
+
+#### Scenario: Reduced motion
+- **WHEN** the user prefers reduced motion
+- **THEN** the stars do not drift

@@ -132,10 +132,10 @@ export function createLand(seed: number, options: LandOptions): Land {
     const saved = { held, lifted, raised, headland, wx, wz };
     let open = true;
     for (const ring of [0, 400, 1000]) {
-      const n = ring === 0 ? 1 : 16;
-      for (let k = 0; k < n && open; k++) {
-        const x = mark.x + Math.cos((k / n) * Math.PI * 2) * ring;
-        const z = mark.z + Math.sin((k / n) * Math.PI * 2) * ring;
+      const around = ring === 0 ? 1 : 16;
+      for (let k = 0; k < around && open; k++) {
+        const x = mark.x + Math.cos((k / around) * Math.PI * 2) * ring;
+        const z = mark.z + Math.sin((k / around) * Math.PI * 2) * ring;
         warp(x, z);
         if (maskWarped(x, z) > -0.05) open = false;
       }
@@ -295,6 +295,8 @@ export function createLand(seed: number, options: LandOptions): Land {
     }
     ox = best.x;
     oz = best.z;
+    // The search tried many offsets; what it decided about landmarks was for those.
+    landmarks.reset();
   }
 
   function maskAt(x: number, z: number): number {
@@ -392,6 +394,12 @@ export function createLand(seed: number, options: LandOptions): Land {
     offset: { x: ox, z: oz },
     viewYaw: options.viewYaw,
     clearance: nav.clearance,
+    // About 500 m of sea for each unit of mask below the coast: rough, but needs no tile, so a plan can look 12 km out.
+    // Near the start the exit from the bay is a channel narrower than a coarse cell: the most open of five samples across the cell lets a plan through it.
+    reach: (x, z) =>
+      -(x * x + z * z < 8000 * 8000
+        ? Math.min(maskAt(x, z), maskAt(x + 220, z), maskAt(x - 220, z), maskAt(x, z + 220), maskAt(x, z - 220))
+        : maskAt(x, z)) * 500,
     away: nav.away,
   };
 }

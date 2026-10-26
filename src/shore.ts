@@ -6,6 +6,8 @@ export type Shore = {
   clearance: (x: number, z: number) => number;
   /** Unit XZ direction pointing away from the nearest land. */
   away: (x: number, z: number) => { x: number; z: number };
+  /** A cheap, rough `clearance` that works kilometres out (no navigation tile needed); `clearance` when absent. */
+  reach?: (x: number, z: number) => number;
 };
 
 export type Circle = { x: number; z: number; radius: number };

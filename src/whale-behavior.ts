@@ -75,6 +75,8 @@ export type WhaleMotion = {
 
 export type WhaleMover = {
   motion: WhaleMotion;
+  /** The pilot's course, for review and tools. */
+  course: WhaleCourse;
   step: (dt: number, time: number, shore: Shore) => void;
   /** Play `phase` from normalised time `t` for review; the whale holds position (surge aside) and snaps to it. */
   force: (phase: WhalePhase, t: number) => void;
@@ -370,6 +372,7 @@ export function createWhaleMover(
 
   return {
     motion,
+    course,
     step,
     place(x, z) {
       course.x = motion.x = x;

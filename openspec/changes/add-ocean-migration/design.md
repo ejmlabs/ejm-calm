@@ -153,3 +153,7 @@ Confirmed by the captain on 2026-10-25: option B on all ten (1B to 10B).
 8. Stops: breaths at a glide, feeding rare and brief.
 9. Sense of speed: wake, bow wave, surface flecks, passing islets, moving clouds, faster swell, passing birds.
 10. Delivery: three steps, M1 route and speed, M2 regions and streaming, M3 feel, light and indicator.
+
+## Amended after review
+
+The surface flecks of decision 9 were built and then removed: on the water they read as white streaks. Night gains stars, ships are redrawn as proper vessels, and the route plans over a wide coarse lattice and commits to a way out, so it makes headway on every seed.

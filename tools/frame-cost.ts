@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { createBirds } from '../src/birds.js';
-import { createFlecks } from '../src/flecks.js';
 import { createWake } from '../src/wake.js';
 import { createSky } from '../src/sky.js';
 import { createWeather } from '../src/weather.js';
@@ -29,8 +28,6 @@ const source = (i: number) => ({ x: f.x * 22 * DT * i, y: -0.4, z: f.z * 22 * DT
 const origin = { x: 0, z: 0 };
 
 for (const tier of ['low', 'high'] as QualityTier[]) {
-  const flecks = createFlecks(1, tier);
-  time(`flecks (${tier}, ${flecks.count()})`, (i) => flecks.update(source(i), origin, DT));
   const birds = createBirds(1, tier);
   time(`birds (${tier})`, (i) => {
     const s = source(i);

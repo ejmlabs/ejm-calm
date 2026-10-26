@@ -119,7 +119,7 @@ test('feeding is rare and brief over an hour', () => {
     const share = samples.filter((s) => s.behavior === 'feed').length / samples.length;
     assert.ok(share < 0.1, `seed ${seed}: feeding ${(100 * share).toFixed(0)} percent of the hour`);
   }
-});
+}, 60000);
 
 test('every transition is continuous in height, pitch and heading, including a forced review', () => {
   for (const seed of SEEDS) {

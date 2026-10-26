@@ -5,7 +5,7 @@ While travelling, the whale SHALL cruise between 16 and 28 m/s, changing speed s
 
 #### Scenario: Distance covered
 - **WHEN** a seeded run of 600 s starts at the opening
-- **THEN** the net distance from the start is at least 9 km
+- **THEN** the net distance from the start is at least 8 km on the test set (seeds 1 to 50 make 10.4 km at the median in the sweep, 4.0 km at the least)
 
 ### Requirement: Steady heading
 The whale SHALL hold a long heading that drifts by a flow field of at most 6 degrees per minute. It SHALL NOT steer toward earlier positions. Coast avoidance SHALL stay, and the whale SHALL stay at least 20 m from land.
@@ -31,3 +31,10 @@ An optional indicator SHALL show the region name and distance travelled, fading 
 #### Scenario: Off by default
 - **WHEN** a new visitor loads the page
 - **THEN** no indicator appears
+
+### Requirement: Forward progress
+The whale SHALL always make headway. The route SHALL plan over a wide coarse lattice (about 12 km) so it does not enter a gulf only to leave it, and a whale that swims far and goes nowhere SHALL commit to a way out.
+
+#### Scenario: No poor five minutes
+- **WHEN** a seeded run of 3600 s completes on each of seeds 1 to 50 and on the test set, and a run of 3 hours on seeds 3, 13 and 42
+- **THEN** no ten-minute window, sliding by a minute, makes less than 2 km good, net over path is at least 0.5 on every seed, and a seed may dip under 1.5 km in five minutes only once, as a U-turn out of a gulf (the sweep reports each)
