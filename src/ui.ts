@@ -5,12 +5,16 @@ export type UIActions = {
   share: () => string;
   newSeed: () => void;
   sound: () => void;
+  /** The route indicator switch in the info panel. */
+  route: (on: boolean) => void;
 };
 
 export type UIController = {
   ready: () => void;
   error: (message: string) => void;
-  sync: (state: { seed: number; sound: boolean }) => void;
+  sync: (state: { seed: number; sound: boolean; route: boolean }) => void;
+  /** Shows or hides the route indicator and sets its text. */
+  showRoute: (visible: boolean, text: string) => void;
   announce: (message: string) => void;
   dispose: () => void;
 };
@@ -29,6 +33,8 @@ export function createUI(actions: UIActions): UIController {
   const status = find('status');
   const toast = find('toast');
   const title = find('title');
+  const route = find('route');
+  const routeToggle = find('routeToggle') as HTMLInputElement | null;
 
   const controller = new AbortController();
   const { signal } = controller;
@@ -92,6 +98,7 @@ export function createUI(actions: UIActions): UIController {
   });
   listen(seedBtn, 'click', () => actions.newSeed());
   listen(soundBtn, 'click', () => actions.sound());
+  listen(routeToggle, 'change', () => actions.route(Boolean(routeToggle?.checked)));
   listen(document, 'keydown', (event) => {
     const e = event as KeyboardEvent;
     if (e.key === 'Escape' && aboutOpen) setAbout(false);
@@ -113,12 +120,18 @@ export function createUI(actions: UIActions): UIController {
       veil?.removeAttribute('hidden');
       document.body.dataset.ready = 'error';
     },
-    sync({ seed, sound }) {
+    sync({ seed, sound, route: routeOn }) {
       if (seedLabel) seedLabel.textContent = String(seed >>> 0);
+      if (routeToggle) routeToggle.checked = routeOn;
       if (soundBtn) {
         soundBtn.setAttribute('aria-pressed', String(sound));
         soundBtn.title = sound ? 'Sound on' : 'Sound off';
       }
+    },
+    showRoute(visible, text) {
+      if (!route) return;
+      if (route.textContent !== text) route.textContent = text;
+      route.classList.toggle('show', visible);
     },
     announce,
     dispose() {
