@@ -55,7 +55,7 @@ New `swell.ts`: `swellAt(x, z, t)` returns height and slope from three summed si
 
 ### D5 Birds: instanced meshes, flap in the vertex shader
 
-One `InstancedMesh` per species (gull, tern, albatross). Each mesh is a single geometry, body plus two three-segment wings, with a per-vertex `wing` weight (0 at the body, 1 at the tips). The vertex shader bends the wing by `sin(time * rate + phase)` scaled by `wing`, with instanced `phase`, `rate` and `glide` attributes (glide=1 stops the flap, for albatross soaring). Triangle counts: LOD0 about 200, LOD1 about 60, LOD2 a 2-triangle billboard with the same flap in the shader. Flocks use simple boids (separation, alignment, cohesion, plus a pull to a leader that orbits the whale) with n up to 24, O(n^2) is under 0.05 ms. Species mix and sizes are seeded.
+One `InstancedMesh` per species (gull, tern, albatross). Each mesh is a single geometry, body plus two three-segment wings, with a per-vertex `wing` weight (0 at the body, 1 at the tips). The vertex shader bends the wing by `sin(time * rate + phase)` scaled by `wing`, with instanced `phase`, `rate` and `glide` attributes (glide=1 stops the flap, for albatross soaring). Triangle counts: LOD0 about 120, LOD1 about 40, LOD2 a flat silhouette of about 12 triangles with the same flap in the shader. Flocks use simple boids (separation, alignment, cohesion, plus a pull to a leader that orbits the whale) with n up to 24, O(n^2) is under 0.05 ms. Species mix and sizes are seeded.
 
 ### D6 Ships: lofted hulls, shader sails, wake
 
@@ -87,12 +87,21 @@ Everything procedural. The micro-detail needs no texture. If a small tileable de
 
 Land in phases, each independently shippable behind the quality tier, each with its own screenshots and perf numbers: P1 shared swell, LOD and tier plumbing, plus birds; P2 ships; P3 terrain shape; P4 terrain material and scatter; P5 polish and budgets audit. No data migration (nothing persisted). Rollback is a revert of the phase.
 
-## Open Questions
+## Resolved Decisions
 
-1. Style: stylised low-poly (recommended) or semi-realistic?
-2. Ship types: three or four? Keep "tall" ship?
-3. Bird species: three (recommended) or five?
-4. Island and rock density: current, 1.5x or 2x?
-5. Quality tiers: keep three, or add `ultra` for desktop high-DPI?
-6. Keep old seed coastlines (layout version) or accept new ones?
-7. Should the water also visibly swell?
+Confirmed by the captain on 2026-10-25; they replace the former open questions.
+
+1. Style: soft stylised low-poly with smooth shading.
+2. Scope: all five phases, birds first. Phase 1 (swell, LOD and tier plumbing, birds) is built first.
+3. Ships: three types, sloop, schooner and trawler. The three-mast "tall" ship goes. No ferry in this change.
+4. Birds: three species, gull, tern and albatross.
+5. Density: 1.5x today's islets and rocks.
+6. Coastlines: accept the new ones (the domain warp changes every seed); no layout-version fallback is kept.
+7. Quality and water: keep the three tiers (`low`, `medium`, `high`) and keep the water flat; the swell is not displaced on the water.
+
+## Phase 1 notes
+
+- LOD2 for birds is a flat silhouette of about 12 triangles with the same shader flap, not a camera-facing billboard: it needs no per-frame orientation work. LOD0 is about 120 triangles and LOD1 about 40; the earlier 200 and 60 were estimates.
+- Bird LOD distances are 40 m and 120 m from the camera, with 10 percent hysteresis (`src/lod.ts`).
+- Birds are one instanced mesh per species and level (at most nine draws, in practice three to six), one shared material, 24 instances at most, never below 5 m over the water.
+- Ships use `swellAt` at their own position for heave and for roll and pitch from the slope; the per-ship random sines are gone. Hull, rigging, shader sails and wakes remain Phase 2.

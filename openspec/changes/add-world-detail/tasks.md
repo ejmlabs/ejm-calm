@@ -1,17 +1,17 @@
 ## 1. Foundations (P1)
 
-- [ ] 1.1 Add `src/swell.ts` with exported constants and `swellAt(x, z, t)`; unit test determinism and amplitude bounds
-- [ ] 1.2 Add detail tier table to `src/quality.ts` and tests for tier mapping and step-down
-- [ ] 1.3 Add LOD selector with hysteresis (`src/lod.ts`) and tests
-- [ ] 1.4 Add budget counters to the `?debug=1` stats (draws, triangles, per-element ms) and a `tools/smoke.ts` budget check
+- [x] 1.1 Add `src/swell.ts` with exported constants and `swellAt(x, z, t)`; unit test determinism and amplitude bounds
+- [x] 1.2 Add detail tier table to `src/quality.ts` and tests for tier mapping and step-down
+- [x] 1.3 Add LOD selector with hysteresis (`src/lod.ts`) and tests
+- [x] 1.4 Add budget counters to the `?debug=1` stats (draws, triangles, per-element ms) and a `tools/smoke.ts` budget check
 
 ## 2. Birds (P1)
 
-- [ ] 2.1 Procedural gull, tern, albatross geometry with `wing` weight attribute (LOD0, LOD1, LOD2)
-- [ ] 2.2 Vertex-shader flap with instanced phase, rate and glide attributes; reduced-motion freezes the flap
-- [ ] 2.3 `src/flock.ts` boids with leader orbit around the whale; tests for separation, cohesion and boundedness
-- [ ] 2.4 Replace `src/birds.ts` Line birds; keep the same `createBirds` interface used by `main.ts`
-- [ ] 2.5 Screenshot close, mid and far on desktop and mobile; record ms and draws
+- [x] 2.1 Procedural gull, tern, albatross geometry with `wing` weight attribute (LOD0, LOD1, LOD2)
+- [x] 2.2 Vertex-shader flap with instanced phase, rate and glide attributes; reduced-motion freezes the flap
+- [x] 2.3 `src/flock.ts` boids with leader orbit around the whale; tests for separation, cohesion and boundedness
+- [x] 2.4 Replace `src/birds.ts` Line birds; keep the same `createBirds` interface used by `main.ts`
+- [x] 2.5 Screenshot close, mid and far on desktop and mobile; record ms and draws
 
 ## 3. Ships (P2)
 

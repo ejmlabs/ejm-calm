@@ -34,7 +34,7 @@ Birds SHALL move as small flocks using separation, alignment and cohesion toward
 - **THEN** at most 10 birds are updated; on `high`, at most 24
 
 ### Requirement: Bird LOD
-Each bird SHALL have LOD0 (about 200 triangles), LOD1 (about 60), LOD2 (billboard with shader flap) and be hidden beyond the haze.
+Each bird SHALL have LOD0 (about 120 triangles), LOD1 (about 40), LOD2 (a flat silhouette of about 12 triangles with the same shader flap) and be hidden beyond the haze.
 
 #### Scenario: No popping
 - **WHEN** a bird crosses an LOD boundary
