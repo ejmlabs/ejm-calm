@@ -142,9 +142,11 @@ export const PLAN_EVERY = 5;
  * streamed navigation tiles it reads are built in the background.
  */
 export const PLAN_START = 20;
-/** Coarse planning grid: cell size and radius in cells (≈3.2 km, under two minutes at cruise). */
+/** Coarse planning disc: cell size and radius in cells (≈3.2 km, under two minutes at cruise). */
 const PLAN_CELL = 160;
-const PLAN_RADIUS = 20;
+export const PLAN_RADIUS = 20;
+/** Metres the planning disc reaches from the whale. */
+export const PLAN_REACH = PLAN_RADIUS * PLAN_CELL;
 /**
  * Coarse cells with this much clearance are deep water; down to PLAN_CLEAR (what
  * the look-ahead allows) they cost PLAN_SHALLOW_COST times as much to cross, so
@@ -193,6 +195,8 @@ export function planJourney(
   const cj = Math.floor(z / PLAN_CELL);
   /** Cost of crossing a cell: 1 in deep water, more near the coast, Infinity where too close. */
   const cost = (li: number, lj: number): number => {
+    // Only the disc is planned over: the square's corners lie beyond the navigation tiles kept built around the whale.
+    if ((li - PLAN_RADIUS) ** 2 + (lj - PLAN_RADIUS) ** 2 > PLAN_RADIUS * PLAN_RADIUS) return Infinity;
     const i = ci + li - PLAN_RADIUS;
     const j = cj + lj - PLAN_RADIUS;
     const key = `${i}:${j}`;
@@ -421,7 +425,7 @@ export function stepWhaleCourse(
   course.x += fwd.x * speed * dt;
   course.z += fwd.z * speed * dt;
 
-  const cleared = clampClearOfLand(course.x, course.z, shore, WHALE_ISLAND_MARGIN);
+  const cleared = clampClearOfLand(course.x, course.z, shore, WHALE_ISLAND_MARGIN + 0.05);
   course.x = cleared.x;
   course.z = cleared.z;
 

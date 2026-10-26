@@ -9,6 +9,8 @@ import type { Shore } from './shore.js';
 import type { ShipHandle } from './ships.js';
 import type { WorkerRequest } from './world-worker.js';
 import { damp } from './math.js';
+import { blendLook } from './regions.js';
+import { PLAN_REACH } from './whale-course.js';
 
 export type WorldOptions = {
   sunDirection: THREE.Vector3;
@@ -47,11 +49,11 @@ export type World = {
 
 /** All streaming work on the main thread (tiles, ships, navigation, shelf bakes) stays near this per frame. */
 const BUDGET_MS = 2.5;
-/** Navigation tiles are kept built this far around the whale (covers the route plan and the next shelf bake). */
-const NAV_RADIUS = 3400;
 /** Navigation tiles and ship cells are centred this many seconds ahead along the whale's motion (capped in metres). */
 const LEAD = 20;
 const LEAD_MAX = 700;
+/** Navigation tiles are kept built this far around the point ahead of the whale (covers the route plan, which reaches PLAN_REACH from a whale up to LEAD_MAX behind that point, and the next shelf bake). */
+const NAV_RADIUS = PLAN_REACH + LEAD_MAX;
 /** Faster than this between two frames is a jump (debug travel, reload), not swimming. */
 const JUMP_SPEED = 60;
 /** A camera further than this from the whale is not following it (e.g. during a fast-forward): stream around the whale. */
@@ -60,6 +62,11 @@ const CAMERA_LEASH = 200;
 const WORST_WINDOW = 10;
 const FAR_SIZE = 384;
 const FAR_EXTENT = 6400;
+/** Shelf maps are baked around the point ahead of the whale again once it is this far from the centre of the ones in use (the near map reaches 1.6 km, the far one 6.4 km, from their centres). */
+const NEAR_STEP = 700;
+const FAR_STEP = 1280;
+/** Shelf map centres lie on this lattice (the navigation field's own tile grid is finer). */
+const SHELF_SNAP = 256;
 
 export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scene, options: WorldOptions): World {
   const land = layout.land;
@@ -95,17 +102,20 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
   const ships = createShipStream({
     seed,
     maskAt: land.maskAt,
+    density: (x, z) => blendLook(land.regions.weightsAt(x, z), (look) => look.ships),
     startSpecs: layout.ships,
     parent: root,
     cap: options.mobile ? 5 : 8,
     shoreReady: land.nav.ready,
   });
 
-  // Shelf bakes for the ocean after a recentre: exact near map from the nav tiles, coarse far map.
+  // Shelf bakes for the ocean as the whale travels: exact near map from the nav tiles, coarse far map.
   let nearJob: Generator<void, ShelfMap> | null = null;
-  let nearCenter = { x: 0, z: 0 };
+  let nearAt = { x: 0, z: 0 };
   let farJob: Generator<void, ShelfMap> | null = null;
+  let farAt = { x: 0, z: 0 };
   let farId = 0;
+  let farWaiting = false;
   let worker: Worker | null = null;
   if (options.worker && typeof Worker !== 'undefined') {
     try {
@@ -113,12 +123,16 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
       const init: WorkerRequest = { type: 'init', seed: land.seed, viewYaw: land.viewYaw, offset: land.offset };
       worker.postMessage(init);
       worker.onmessage = (event: MessageEvent<{ type: string; id: number; shelf: ShelfMap }>) => {
-        if (event.data.type === 'far' && event.data.id === farId) ocean.setShelves({ far: event.data.shelf });
+        if (event.data.type === 'far' && event.data.id === farId) {
+          ocean.setShelves({ far: event.data.shelf });
+          farWaiting = false;
+        }
       };
       worker.onerror = () => {
         worker?.terminate();
         worker = null;
-        farJob = farSteps(origin.x, origin.z);
+        if (farWaiting) farJob = farSteps(farAt.x, farAt.z);
+        farWaiting = false;
       };
     } catch {
       worker = null;
@@ -132,19 +146,33 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     return yield* navShelfSteps(land, cx, cz);
   }
 
+  const snapShelf = (v: number) => Math.round(v / SHELF_SNAP) * SHELF_SNAP;
+
+  function bakeShelves(x: number, z: number): void {
+    const cx = snapShelf(x);
+    const cz = snapShelf(z);
+    if (!nearJob && Math.hypot(whale[0]! - nearAt.x, whale[1]! - nearAt.z) > NEAR_STEP) {
+      nearAt = { x: cx, z: cz };
+      nearJob = nearSteps(cx, cz);
+    }
+    if (!farJob && !farWaiting && Math.hypot(whale[0]! - farAt.x, whale[1]! - farAt.z) > FAR_STEP) {
+      farAt = { x: cx, z: cz };
+      if (worker) {
+        farId++;
+        farWaiting = true;
+        const request: WorkerRequest = { type: 'far', id: farId, size: FAR_SIZE, extent: FAR_EXTENT, cx, cz };
+        worker.postMessage(request);
+      } else {
+        farJob = farSteps(cx, cz);
+      }
+    }
+  }
+
   origin.onRecenter(() => {
     root.position.set(-origin.x, 0, -origin.z);
     root.updateMatrixWorld();
     ocean.setOrigin(origin.x, origin.z);
-    nearCenter = { x: origin.x, z: origin.z };
-    nearJob = nearSteps(origin.x, origin.z);
-    farId++;
-    if (worker) {
-      const request: WorkerRequest = { type: 'far', id: farId, size: FAR_SIZE, extent: FAR_EXTENT, cx: origin.x, cz: origin.z };
-      worker.postMessage(request);
-    } else {
-      farJob = farSteps(origin.x, origin.z);
-    }
+    recentres++;
   });
 
   const cameraWorld = new THREE.Vector3();
@@ -156,6 +184,8 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
   let worst = [0, 0];
   let lastMs = 0;
   let holeFrames = 0;
+  let recentres = 0;
+  let navMisses = 0;
 
   return {
     root,
@@ -191,12 +221,13 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
       const ax = wx + vx * k;
       const az = wz + vz * k;
       ships.update(dt, time, wx, wz, land, ax, az);
+      bakeShelves(ax, az);
 
       if (nearJob) {
         while (left() > 0) {
           const next = nearJob.next();
           if (next.done) {
-            if (nearCenter.x === origin.x && nearCenter.z === origin.z) ocean.setShelves({ near: next.value });
+            ocean.setShelves({ near: next.value });
             nearJob = null;
             break;
           }
@@ -219,6 +250,7 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
       }
       worst[1] = Math.max(worst[1]!, lastMs);
       if (landStream.stats().holes > 0) holeFrames++;
+      if (!land.nav.ready(wx + vx * 3, wz + vz * 3)) navMisses++;
     },
     stats() {
       const tiles = landStream.stats();
@@ -238,6 +270,10 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
         whaleSpeed: Math.hypot(vx, vz),
         landTriangles: tiles.triangles,
         navTiles: nav.tiles,
+        navBlocks: nav.blocks,
+        recentres,
+        /** Frames so far in which the navigation tile 3 s ahead of the whale was not built. */
+        navMisses,
         shipCells: fleet.cells,
         shipsLoaded: fleet.ships,
         shipsVisible: fleet.visible,

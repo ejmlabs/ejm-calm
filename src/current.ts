@@ -1,7 +1,7 @@
 import { makeNoise2D } from './noise.js';
 
 /** Metres per cell of the stream-function noise: eddies are a few of these across. */
-export const CURRENT_SCALE = 60000;
+export const CURRENT_SCALE = 200000;
 /** Strength of the eddies against the steady flow along the base heading (0.5 bends it by at most 30°). */
 export const CURRENT_EDDY = 0.5;
 

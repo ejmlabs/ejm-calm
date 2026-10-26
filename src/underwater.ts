@@ -69,6 +69,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   const fog = scene.fog instanceof THREE.FogExp2 ? scene.fog : null;
   const above: FogState = { color: fog ? fog.color.clone() : sky.horizonColor.clone(), density: fog?.density ?? 0.00034 };
   let writtenDensity = NaN;
+  const writtenColor = new THREE.Color(-1, -1, -1);
   const clearBase = renderer.getClearColor(new THREE.Color());
   const clearAlpha = renderer.getClearAlpha();
   const lights = [sky.sun, sky.hemi, sky.ambient].map((light) => ({ light, intensity: light.intensity, color: light.color.clone() }));
@@ -415,6 +416,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       fog.color.copy(above.color);
       fog.density = above.density;
       writtenDensity = fog.density;
+      writtenColor.copy(fog.color);
     }
     sky.sky.visible = true;
     renderer.setClearColor(clearBase, clearAlpha);
@@ -432,6 +434,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     waterSignal(camera.position.y, signal);
     // sky.update rewrites the density each frame; anything else is our own write from last frame.
     if (fog && fog.density !== writtenDensity) above.density = fog.density;
+    if (fog && !fog.color.equals(writtenColor)) above.color.copy(fog.color);
 
     const s = signal.submersion;
     const depth = signal.depth;
@@ -478,6 +481,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       fog.color.copy(blended.color);
       fog.density = blended.density;
       writtenDensity = fog.density;
+      writtenColor.copy(fog.color);
     }
 
     const light = lerp(1, surfaceLight(Math.max(0, depth)) * 0.9, s);

@@ -10,6 +10,8 @@ export type OceanHandle = {
   /** With a camera, the plane follows it (render space) while ripples stay fixed to the world. */
   update: (dt: number, sunDirection: THREE.Vector3, camera?: THREE.Camera) => void;
   /** World X/Z of render (0, 0); keeps ripples and shelf maps on the world after a recentre. */
+  /** The water's base colour (a region's look). */
+  setWaterColor: (color: THREE.Color) => void;
   setOrigin: (x: number, z: number) => void;
   /** Swaps in shelf maps baked elsewhere in the world (maps are in world coordinates). */
   setShelves: (shelves: { near?: ShelfMap; far?: ShelfMap }) => void;
@@ -159,6 +161,9 @@ export function createOcean(
     },
     setWhale(x: number, y: number, z: number, heading: number) {
       material.uniforms.whaleBody?.value.set(x, z, heading, y);
+    },
+    setWaterColor(color: THREE.Color) {
+      material.uniforms.waterColor?.value.copy(color);
     },
     setOrigin(x: number, z: number) {
       origin.x = x;

@@ -35,6 +35,8 @@ export type LandStream = {
   update: (x: number, z: number, dt: number, vx?: number, vz?: number) => void;
   /** A tile's dissolve state, or undefined when it is not placed. */
   tileState: (key: string) => 'in' | 'on' | 'out' | undefined;
+  /** The land's look in a region: haze density scaled, vertex colours multiplied. */
+  setLook: (hazeDensity: number, tint: THREE.Color) => void;
   stats: () => {
     tiles: number;
     triangles: number;
@@ -111,6 +113,7 @@ function fragmentShader(stops: number, dither: boolean): string {
 uniform vec3 sunDirection;
 uniform vec3 sunTint;
 uniform float hazeDensity;
+uniform vec3 landTint;
 uniform float hazeAngles[${stops}];
 uniform vec3 hazeColors[${stops}];
 uniform float fade;
@@ -145,7 +148,7 @@ void main() {
   float distant = smoothstep( 2000.0, 5500.0, d );
   lambert = mix( lambert, 0.45 * max( 0.0, sunDirection.y ) + 0.25, distant );
   sky = mix( sky, 0.5, distant );
-  vec3 lit = vColor * ( sky + lambert * 0.78 * sunTint );
+  vec3 lit = vColor * landTint * ( sky + lambert * 0.78 * sunTint );
   // Air thins with altitude: high ridges and snowfields stay solid through the haze.
   float dh = d * mix( 1.0, 0.62, smoothstep( 150.0, 900.0, h ) );
   float a = min( 0.88, 1.0 - exp( -dh / 9000.0 - pow( dh * hazeDensity, 2.0 ) ) );
@@ -246,6 +249,7 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
     sunDirection: { value: sun },
     sunTint: { value: sunTint },
     hazeDensity: { value: options.hazeDensity ?? HAZE },
+    landTint: { value: new THREE.Color(1, 1, 1) },
     hazeAngles: { value: gradient.angles.slice() },
     hazeColors: { value: gradient.colors.map((c) => c.clone()) },
     fade: { value: 1 },
@@ -489,6 +493,10 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
         if (tiles.get(cell.key)?.state === 'on') continue;
         if (cellDistance(x, z, cell.ix, cell.iz, tileSize(cell.level)) < HAZE_END && !solidAt(cell.level, cell.ix, cell.iz)) holes++;
       }
+    },
+    setLook(hazeDensity, tint) {
+      uniforms.hazeDensity.value = (options.hazeDensity ?? HAZE) * hazeDensity;
+      uniforms.landTint.value.copy(tint);
     },
     tileState: (key) => tiles.get(key)?.state,
     stats() {

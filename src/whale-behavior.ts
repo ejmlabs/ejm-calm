@@ -4,7 +4,7 @@ import { makeNoise2D } from './noise.js';
 import { clamp, damp, lerp, smoothstep } from './math.js';
 import { createSpring, springSet, springStep } from './spring.js';
 import { FEED_CELL, feedSiteInCell, type FeedSite } from './feed-sites.js';
-import { WHALE_ISLAND_MARGIN, createWhalePilot, shortestAngle, whaleForward, type WhaleCourse } from './whale-course.js';
+import { WHALE_ISLAND_MARGIN, WHALE_MAX_TURN_RATE, createWhalePilot, headingToward, shortestAngle, whaleForward, type WhaleCourse } from './whale-course.js';
 import {
   FLOOR_CLEARANCE,
   PHASE_LEN,
@@ -37,6 +37,8 @@ const FEED_FIRST: readonly [number, number] = [150, 300];
 const FEED_MAX = 25;
 /** Speeds while feeding, m/s: slow enough to turn inside a small swarm (turn radius is speed / turn rate). */
 const APPROACH_SLOW = 4;
+/** Slowest approach while still lining up on a swarm (m/s). */
+const APPROACH_CREEP = 1.2;
 const LUNGE_SPEED = 3.4;
 const CIRCLE_SPEED = 1.6;
 /** A feed starts only this long before a due breath, and holds that breath until at least FEED_HOLD after it starts. */
@@ -89,10 +91,12 @@ export function createWhaleMover(
   home: { x: number; z: number },
   heading: number,
   floorAt?: (x: number, z: number) => number,
+  /** Heading of the long journey; the whale turns to it from `heading`. */
+  journey = heading,
 ): WhaleMover {
   const rng = fork(seed, 'whale-behavior');
   const noise = makeNoise2D(seed, 23);
-  const pilot = createWhalePilot(seed, home, heading);
+  const pilot = createWhalePilot(seed, home, journey);
   const course: WhaleCourse = { x: home.x, z: home.z, heading, leg: heading, speed: 1 };
 
   /** Travel speed: two octaves of slow noise, so surges and lulls never repeat. */
@@ -266,6 +270,9 @@ export function createWhaleMover(
       if (feedStart === null) {
         course.aim = site;
         goalSpeed = lerp(APPROACH_SLOW, goalSpeed, smoothstep(30, 240, d));
+        // Slow enough to turn onto the swarm: the turning circle through it must fit in the distance left.
+        const off = Math.min(Math.PI / 2, Math.max(0.1, Math.abs(shortestAngle(course.heading, headingToward(-dx, -dz)))));
+        goalSpeed = Math.min(goalSpeed, Math.max(APPROACH_CREEP, (0.8 * WHALE_MAX_TURN_RATE * d) / (2 * Math.sin(off))));
         goalDepth = lerp(site.y, goalDepth, smoothstep(40, 160, d));
       } else {
         goalDepth = site.y;

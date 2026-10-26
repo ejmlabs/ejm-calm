@@ -1,9 +1,9 @@
 import type { FloatingOrigin, RecenterListener } from './seams.js';
 
 /** Render distance from the origin at which the world is recentred on the whale. */
-export const RECENTER_RADIUS = 1024;
-/** The origin only moves in steps of this many metres, so recentres stay rare and tidy. */
-export const ORIGIN_SNAP = 256;
+export const RECENTER_RADIUS = 3840;
+/** The origin only moves in steps of this many metres, so recentres stay rare and tidy: at most one every two minutes at the top cruise speed (28 m/s). */
+export const ORIGIN_SNAP = 512;
 
 /**
  * Where the origin should move for a whale at world (wx, wz), as a world delta,

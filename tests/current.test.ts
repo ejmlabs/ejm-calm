@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { CURRENT_EDDY, createCurrent } from '../src/current.js';
+import { TRAVEL_MAX } from '../src/whale-behavior.js';
 import { shortestAngle } from '../src/whale-course.js';
 
 test('current is deterministic per seed and differs between seeds', () => {
@@ -19,7 +20,7 @@ test('current is deterministic per seed and differs between seeds', () => {
 
 test('drift stays within the eddy bound and bends gently along a straight run', () => {
   const bound = Math.asin(CURRENT_EDDY) + 1e-9;
-  for (const seed of [42, 7, 1234, 99, 2024, 31337]) {
+  for (const seed of [42, 7, 1234, 99, 2024, 31337, 1, 2, 3, 4, 5, 6, 8, 9, 10]) {
     const base = 0.3 * seed;
     const current = createCurrent(seed, base);
     let last = current(0, 0);
@@ -30,7 +31,7 @@ test('drift stays within the eddy bound and bends gently along a straight run', 
       worst = Math.max(worst, Math.abs(shortestAngle(last, h)) / 100);
       last = h;
     }
-    // Radians per metre: under 0.15 rad per km, so a few degrees a minute at 20 m/s.
-    assert.ok(worst < 0.15 / 1000, `seed ${seed} curvature ${worst}`);
+    // Radians per metre: the spec allows 6 degrees a minute, which at the top cruise speed is 0.0623 rad per km.
+    assert.ok(worst < ((6 * Math.PI) / 180 / (TRAVEL_MAX * 60)), `seed ${seed} curvature ${worst * 1000} rad/km`);
   }
 });

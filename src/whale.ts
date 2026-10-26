@@ -67,6 +67,8 @@ export type WhaleOptions = {
   tier?: QualityTier;
   /** Starting heading; defaults to a seeded random one. */
   heading?: number;
+  /** Heading of the long journey (defaults to the starting heading). */
+  journey?: number;
   /** Seafloor height (negative under water): the whale keeps FLOOR_CLEARANCE above it and feeds over it. */
   floorAt?: (x: number, z: number) => number;
 };
@@ -364,7 +366,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   body.add(sheet);
   const splashFx = { age: Infinity, power: 0, x: 0, z: 0, radius: 2, exit: false, sheetAge: Infinity };
 
-  const mover = createWhaleMover(seed, home, startHeading, options.floorAt);
+  const mover = createWhaleMover(seed, home, startHeading, options.floorAt, options.journey);
   const motion = mover.motion;
   const state: WhaleState = {
     phase: motion.phase,

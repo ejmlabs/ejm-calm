@@ -20,6 +20,8 @@ export type SkyHandle = {
   hazeDensity: number;
   timeOfDay: TimeOfDay;
   envMap: THREE.Texture | null;
+  /** The fog of the place the sea is in: pulled toward `tint` by `mix`, its density scaled. */
+  setFog: (tint: THREE.Color, mix: number, density: number) => void;
   update: (dt: number) => void;
   dispose: () => void;
 };
@@ -139,6 +141,7 @@ export function createSky(
   pmrem.dispose();
 
   let time = 0;
+  const regionFog = { tint: new THREE.Color(), mix: 0, density: 1 };
   return {
     sky,
     sun,
@@ -152,6 +155,11 @@ export function createSky(
     hazeDensity: hazeDensity[timeOfDay],
     timeOfDay,
     envMap,
+    setFog(tint, mix, density) {
+      regionFog.tint.copy(tint);
+      regionFog.mix = mix;
+      regionFog.density = density;
+    },
     update(dt: number) {
       time += dt;
       if (uniforms['time']) uniforms['time'].value = time;
@@ -161,7 +169,8 @@ export function createSky(
       sun.position.copy(sunDirection).multiplyScalar(200);
       const fog = scene.fog as THREE.FogExp2 | null;
       if (fog) {
-        fog.density = lerp(FOG_DENSITY * 0.92, FOG_DENSITY * 1.08, 0.5 + 0.5 * Math.sin(time * 0.015));
+        fog.density = lerp(FOG_DENSITY * 0.92, FOG_DENSITY * 1.08, 0.5 + 0.5 * Math.sin(time * 0.015)) * regionFog.density;
+        fog.color.copy(horizonColor).lerp(regionFog.tint, regionFog.mix);
       }
     },
     dispose() {

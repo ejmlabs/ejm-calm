@@ -14,6 +14,8 @@ import { loadMemory, saveMemory, VERSION } from './persistence.js';
 import { createUnderwater } from './underwater.js';
 import { feedSitesNear } from './feed-sites.js';
 import { createSeafloor } from './seafloor.js';
+import { createRegionLook } from './region-look.js';
+import { REGION_LOOKS } from './regions.js';
 
 type CalmReview = {
   time: number;
@@ -42,14 +44,38 @@ type CalmReview = {
 const params = new URLSearchParams(location.search);
 const debug = params.get('debug') === '1';
 
-/** Debug journey probe: metres swum and the straight line from the start (`path`, `net` in the stats). */
-const journey = { path: 0, x: NaN, z: NaN, fromX: NaN, fromZ: NaN };
+/** Debug journey probe: metres swum, the straight line from the start, and how often the whale is back near an earlier spot (`path`, `net`, `revisit`). */
+const journey = { path: 0, x: NaN, z: NaN, fromX: NaN, fromZ: NaN, fixes: [] as number[], fixAt: -Infinity, back: 0 };
+/** A fix within this distance of one at least this many fixes (seconds) earlier counts as a revisit. */
+const REVISIT_RADIUS = 500;
+const REVISIT_AFTER = 120;
 function markJourney(): void {
   const { x, z } = whale.state;
   if (Number.isNaN(journey.x)) Object.assign(journey, { x, z, fromX: x, fromZ: z });
   journey.path += Math.hypot(x - journey.x, z - journey.z);
   journey.x = x;
   journey.z = z;
+  if (time - journey.fixAt < 1) return;
+  journey.fixAt = time;
+  const fixes = journey.fixes;
+  for (let i = 0; i + 2 * REVISIT_AFTER < fixes.length; i += 2) {
+    if (Math.hypot(x - fixes[i]!, z - fixes[i + 1]!) < REVISIT_RADIUS) {
+      journey.back++;
+      break;
+    }
+  }
+  fixes.push(x, z);
+}
+
+/** Metres to the nearest land sampled on rings around (x, z) out to `reach`, or `reach` when there is none. */
+function landWithin(x: number, z: number, reach: number): number {
+  for (let d = 250; d <= reach; d += 250) {
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      if (world.land.maskAt(x + Math.cos(a) * d, z + Math.sin(a) * d) > 0) return d;
+    }
+  }
+  return reach;
 }
 
 let storage: Storage | null;
@@ -126,6 +152,7 @@ let rig: FollowCamera;
 let underwater: ReturnType<typeof createUnderwater>;
 /** Seafloor height (world): pure per seed, so it matches the underwater view's own copy exactly. */
 let seafloor: ReturnType<typeof createSeafloor>;
+let regionLook: ReturnType<typeof createRegionLook>;
 
 try {
   const buildStart = performance.now();
@@ -154,10 +181,12 @@ try {
     worker: true,
   });
   seafloor = createSeafloor(seed, world.land);
+  regionLook = createRegionLook(world.land.regions);
   // Head along the composed opening view (forward = look direction), so the chase opens on the coast.
   whale = createWhale(seed, layout.whaleHome, {
     tier: quality.tier,
     heading: layout.viewYaw - Math.PI / 2,
+    journey: layout.journey,
     floorAt: seafloor.heightAt,
   });
   world.root.add(whale.group);
@@ -298,6 +327,11 @@ function tick(now: number): void {
   }
 
   sky.update(dt);
+  regionLook.update(whale.state.x, whale.state.z);
+  world.ocean.setWaterColor(regionLook.water);
+  sky.setFog(regionLook.fogTint, regionLook.fogMix, regionLook.fogDensity);
+  world.landStream.setLook(regionLook.hazeDensity, regionLook.land);
+  birds.setMix(regionLook.birds);
   world.update(whale.state.x, whale.state.z, camera, dt, time);
   world.ocean.update(dt, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
@@ -417,6 +451,10 @@ if (debug) {
         birdTriangles: flock.triangles,
         ...world.stats(),
         path: journey.path,
+        revisit: journey.fixes.length ? journey.back / (journey.fixes.length / 2) : 0,
+        region: world.land.regions.dominantAt(whale.state.x, whale.state.z),
+        regionName: REGION_LOOKS[world.land.regions.dominantAt(whale.state.x, whale.state.z)]!.name,
+        landNear: landWithin(whale.state.x, whale.state.z, 4500),
         net: Math.hypot(journey.x - journey.fromX, journey.z - journey.fromZ) || 0,
         speed: whale.state.speed,
         behavior: whale.state.behavior,

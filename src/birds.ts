@@ -12,18 +12,20 @@ const LOD_BOUNDS = [40, 120] as const;
 const MIN_HEIGHT = 5;
 const MAX_HEIGHT = 70;
 const MAX_BIRDS = 24;
-/** Share of the flock that is a gull, a tern, an albatross (rest). */
-const MIX = [0.5, 0.85] as const;
+/** Species of a bird by its fixed roll, for a share of gulls, terns, albatrosses (the rest). */
+const speciesFor = (roll: number, mix: readonly [number, number, number]): number => (roll < mix[0] ? 0 : roll < mix[0] + mix[1] ? 1 : 2);
 
 /** Seconds a bird takes to appear or vanish when the tier changes. */
 const FADE_SECONDS = 1;
 
-type Bird = Boid & { phase: number; heading: number; bank: number; lod: number; tint: THREE.Color; fade: number };
+type Bird = Boid & { roll: number; phase: number; heading: number; bank: number; lod: number; tint: THREE.Color; fade: number };
 
 export type Birds = {
   group: THREE.Group;
   update: (time: number, centerX?: number, centerZ?: number, dt?: number, camera?: { x: number; y: number; z: number }, calm?: boolean) => void;
   setTier: (tier: QualityTier) => void;
+  /** Share of gulls, terns and albatrosses (a region's mix); birds change species out of sight. */
+  setMix: (mix: readonly [number, number, number]) => void;
   stats: () => { birds: number; draws: number; triangles: number };
   dispose: () => void;
 };
@@ -34,6 +36,7 @@ export type Birds = {
  */
 export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
   const rng = fork(seed, 'birds');
+  let mix: readonly [number, number, number] = [0.5, 0.35, 0.15];
   const group = new THREE.Group();
   const time = { value: 0 };
   const flap = { value: 1 };
@@ -63,12 +66,13 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
   const birds: Bird[] = [];
   for (let i = 0; i < MAX_BIRDS; i++) {
     const roll = rng();
-    const species = roll < MIX[0] ? 0 : roll < MIX[1] ? 1 : 2;
+    const species = speciesFor(roll, mix);
     const size = 0.9 + rng() * 0.3;
     const heading = rng() * Math.PI * 2;
     const speed = SPECIES[species]!.speed;
     const tint = new THREE.Color().setScalar(0.92 + rng() * 0.08);
     birds.push({
+      roll,
       x: 0, y: 0, z: 0,
       vx: Math.sin(heading) * speed, vy: 0, vz: Math.cos(heading) * speed,
       group: species,
@@ -133,7 +137,10 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
       };
       live.length = 0;
       birds.forEach((bird, i) => {
-        const target = i < active ? 1 : 0;
+        // A bird whose species the region no longer wants fades out, changes unseen and returns.
+        const wanted = speciesFor(bird.roll, mix);
+        if (bird.fade === 0) bird.group = wanted;
+        const target = i < active && bird.group === wanted ? 1 : 0;
         if (first) {
           // Spread a fresh flock around its leader on first sight.
           place(bird, i);
@@ -194,6 +201,9 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
     },
     setTier(next) {
       active = detailFor(next).birds;
+    },
+    setMix(next) {
+      mix = next;
     },
     stats() {
       return { birds: active, draws, triangles };

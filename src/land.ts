@@ -3,6 +3,7 @@ import { fbm2, makeNoise2D, ridged2 } from './noise.js';
 import { hash } from './rng.js';
 import { clamp, smoothstep } from './math.js';
 import type { Shore } from './shore.js';
+import { createRegions, blendLook, type RegionWeights, type Regions } from './regions.js';
 import { createNavField, squaredDistance, type NavField } from './world-nav.js';
 
 /**
@@ -13,6 +14,7 @@ import { createNavField, squaredDistance, type NavField } from './world-nav.js';
  */
 export type Land = Shore & {
   seed: number;
+  regions: Regions;
   /** Centre of the landmass kept in view (world XZ). */
   anchor: { x: number; z: number };
   /** Signed coast field: > 0 on land, < 0 at sea. Cheap compared with heightAt. */
@@ -52,6 +54,14 @@ export type LandOptions = {
   /** Skip the opening search and use this continent offset (from `land.offset`). */
   offset?: { x: number; z: number };
 };
+
+/** The region modulation of the mask starts to fade in at the first radius and is whole at the second (the opening view's coast lies within 2 km). */
+export const REGION_FROM = 2200;
+export const REGION_FULL = 5000;
+
+/** Half-width of the full-depth exit channel from the opening bay, and the mask value it holds the sea to (tens of metres deep). */
+const EXIT_WIDTH = 180;
+const EXIT_FLOOR = -0.8;
 
 /** Open water is kept around the origin so the whale and ships have room. */
 export const HARBOUR_RADIUS = 260;
@@ -111,6 +121,8 @@ function channels(seed: number): Channels {
 
 export function createLand(seed: number, options: LandOptions): Land {
   const n = channels(seed);
+  const regions = createRegions(seed);
+  const blend: RegionWeights = [0, 0, 0, 0];
   const jitter = (hash(seed, 'land-anchor') / 0x100000000 - 0.5) * 0.7;
   const anchorYaw = options.viewYaw + jitter;
   const anchorDist = 1700 + (hash(seed, 'land-anchor-dist') / 0x100000000) * 500;
@@ -120,6 +132,10 @@ export function createLand(seed: number, options: LandOptions): Land {
   const anchorR2 = 1100 * 1100;
   const bankYaw = options.viewYaw + (hash(seed, 'land-bank') / 0x100000000 - 0.5) * 0.5;
   const bankDist = 110 + (hash(seed, 'land-bank-dist') / 0x100000000) * 90;
+  // One channel of open water leaves the opening bay to the side of the view, so no start sea is closed in.
+  const exitSide = hash(seed, 'land-exit') & 1 ? 1 : -1;
+  const exitTurn = exitSide * (0.95 + (hash(seed, 'land-exit-turn') / 0x100000000) * 0.6);
+  const exit = { x: look.x * Math.cos(exitTurn) - look.z * Math.sin(exitTurn), z: look.x * Math.sin(exitTurn) + look.z * Math.cos(exitTurn) };
   const bank = { x: -Math.sin(bankYaw) * bankDist, z: -Math.cos(bankYaw) * bankDist, r: 60 };
 
   // Domain-warped coordinates shared by the mask and the mountains.
@@ -162,12 +178,25 @@ export function createLand(seed: number, options: LandOptions): Land {
     const ahead = r > 1 ? (x * look.x + z * look.z) / r : 0;
     // Bounded to the start area: out on the journey the continents speak for themselves.
     const distant = 0.32 * smoothstep(3600, 5400, r) * smoothstep(0.25, 0.8, ahead) * (1 - smoothstep(9000, 14000, r));
+    // Regions thin the land away from the opening: open ocean dominates, islets and continents are rare.
+    const thin = smoothstep(REGION_FROM, REGION_FULL, r);
+    let isletGain = 1;
+    // Along the exit the mask is held at sea, easing out to nothing at the far end.
+    const along = x * exit.x + z * exit.z;
+    const across = Math.abs(x * -exit.z + z * exit.x);
+    const channel = along > 0 ? (1 - smoothstep(EXIT_WIDTH, EXIT_WIDTH * 2.3, across)) * smoothstep(450, 800, r) * (1 - smoothstep(REGION_FULL, REGION_FULL + 2000, r)) : 0;
     let m = rawMask() + held + distant - harbour;
+    if (channel > 0) m += (Math.min(m, EXIT_FLOOR) - m) * channel;
+    if (thin > 0) {
+      regions.weightsAt(x, z, blend);
+      m -= thin * blendLook(blend, (look) => look.landOffset);
+      isletGain = 1 + thin * (blendLook(blend, (look) => look.isletGain) - 1);
+    }
     // Offshore islets: blobs that only rise in the water off the coast.
     const isl = fbm2(n.islet, x / 340, z / 340, 2);
     const band =
       smoothstep(-0.45, -0.15, m) * (1 - smoothstep(-0.04, 0.06, m)) * smoothstep(HARBOUR_RADIUS + 40, HARBOUR_RADIUS + 140, r);
-    lifted = Math.max(0, isl - 0.36) * 1.5 * band;
+    lifted = Math.max(0, isl - 0.36) * 1.5 * band * isletGain;
     m += lifted;
     return m;
   }
@@ -319,6 +348,7 @@ export function createLand(seed: number, options: LandOptions): Land {
 
   return {
     seed,
+    regions,
     anchor,
     maskAt,
     heightAt,
@@ -393,18 +423,25 @@ export function depthForDistance(metres: number): number {
 /** Shallow, turquoise shelf width off every coast. */
 export const SHELF_WIDTH = 150;
 
-function shelfFromDistance(distance: ArrayLike<number>, size: number, min: number, extent: number): ShelfMap {
-  const data = new Uint8Array(size * size);
-  for (let i = 0; i < data.length; i++) {
-    data[i] = Math.round(clamp(1 - depthForDistance(distance[i]!) / 40, 0, 1) * 255);
-  }
-  // Clamp-to-edge sampling should read as open sea outside the map.
+/** Shallowness of a texel at this distance from the coast: 255 at the shore, 0 at 40 m of water or more. */
+function shelfTexel(distance: number): number {
+  return Math.round(clamp(1 - depthForDistance(distance) / 40, 0, 1) * 255);
+}
+
+/** Clamp-to-edge sampling should read as open sea outside the map. */
+function openEdges(data: Uint8Array, size: number): void {
   for (let i = 0; i < size; i++) {
     data[i] = 0;
     data[(size - 1) * size + i] = 0;
     data[i * size] = 0;
     data[i * size + size - 1] = 0;
   }
+}
+
+function shelfFromDistance(distance: ArrayLike<number>, size: number, min: number, extent: number): ShelfMap {
+  const data = new Uint8Array(size * size);
+  for (let i = 0; i < data.length; i++) data[i] = shelfTexel(distance[i]!);
+  openEdges(data, size);
   return { data, size, min, extent };
 }
 
@@ -455,16 +492,20 @@ export function* navShelfSteps(land: Land, cx: number, cz: number, size = 320): 
   const nav = land.nav;
   const i0 = Math.round((cx - nav.min) / nav.cell) - (size >> 1);
   const j0 = Math.round((cz - nav.min) / nav.cell) - (size >> 1);
-  const distance = new Float32Array(size * size);
-  for (let j = 0; j < size; j++) {
-    for (let i = 0; i < size; i++) distance[j * size + i] = nav.distanceAt(nav.min + (i0 + i) * nav.cell, nav.min + (j0 + j) * nav.cell);
-    if (j % 24 === 23) yield;
-  }
+  const data = new Uint8Array(size * size);
   // The clamped far field is open sea.
-  for (let i = 0; i < distance.length; i++) if (distance[i]! >= nav.saturation - 1e-3) distance[i] = 1e4;
+  const open = nav.saturation - 1e-3;
+  for (let j = 0; j < size; j++) {
+    for (let i = 0; i < size; i++) {
+      const distance = nav.distanceAt(nav.min + (i0 + i) * nav.cell, nav.min + (j0 + j) * nav.cell);
+      data[j * size + i] = shelfTexel(distance >= open ? 1e4 : distance);
+    }
+    if (j % 8 === 7) yield;
+  }
+  openEdges(data, size);
   const minX = nav.min + i0 * nav.cell;
   const minZ = nav.min + j0 * nav.cell;
-  const shelf: ShelfMap = { ...shelfFromDistance(distance, size, minX, nav.cell * (size - 1)), minZ };
+  const shelf: ShelfMap = { data, size, min: minX, extent: nav.cell * (size - 1), minZ };
   addSandBanks(land, shelf, minX, minZ, nav.cell);
   return shelf;
 }

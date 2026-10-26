@@ -112,27 +112,44 @@ await withBrowser(async (browser, base) => {
     }
   }
 
-  // Tile throughput at cruise: five minutes of travel in 20 s hops; after each hop the land tiles settle and the stats stay sane.
+  // Tile throughput at cruise: five minutes of continuous travel in short steps. Frames are the 30 Hz world steps of the
+  // real update; between steps the page yields so the tile worker and the renderer run as they would between frames.
   {
     const { page, context, errors } = await openCalm(browser, base, DESKTOP, { query: { debug: '1' } });
     try {
       await page.waitForTimeout(1500);
       type Review = { travel: (seconds: number) => void; stats: () => Record<string, number> };
-      let slowest = 0;
-      for (let hop = 0; hop < 15; hop++) {
-        await page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.travel(20));
-        const start = Date.now();
-        await page.waitForFunction(() => {
-          const s = (window as unknown as { __calmReview: Review }).__calmReview.stats();
-          return s['chunksPending'] === 0 && s['chunksReady'] !== undefined;
-        }, undefined, { timeout: 20000 });
-        slowest = Math.max(slowest, Date.now() - start);
-      }
-      const stats = await page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.stats());
-      assert.ok(stats['path']! > 4500, `cruise covers ground: ${stats['path']} m in 300 s`);
-      assert.ok(stats['navTiles']! <= 256 && stats['chunks']! < 400, `tiles stay bounded: ${stats['navTiles']} nav, ${stats['chunks']} land`);
+      const read = () => (window as unknown as { __calmReview: Review }).__calmReview.stats();
+      await page.waitForFunction(() => {
+        const s = (window as unknown as { __calmReview: Review }).__calmReview.stats();
+        return s['chunksPending'] === 0;
+      }, undefined, { timeout: 30000 });
+      const before = await page.evaluate(read);
+      const run = await page.evaluate(async () => {
+        const review = (window as unknown as { __calmReview: Review }).__calmReview;
+        const ms: number[] = [];
+        const start = performance.now();
+        // One 30 Hz world step at a time, a short yield after every fifth: about five times faster than real time.
+        for (let step = 0; step < 300 * 30; step++) {
+          review.travel(1 / 30);
+          ms.push(review.stats()['streamMs']!);
+          if (step % 5 === 4) await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        ms.sort((a, b) => a - b);
+        return { steps: ms.length, worst: ms.at(-1)!, p99: ms[Math.floor(ms.length * 0.99)]!, over: ms.filter((m) => m > 3).length / ms.length, ms: performance.now() - start };
+      });
+      const stats = await page.evaluate(read);
+      const gaps = stats['coverageMisses']! - before['coverageMisses']!;
+      const navMisses = stats['navMisses']! - before['navMisses']!;
+      assert.ok(stats['path']! - before['path']! > 4500, `cruise covers ground: ${stats['path']! - before['path']!} m in 300 s`);
+      assert.equal(gaps, 0, `${gaps} world steps showed a gap in the land inside the haze during continuous travel`);
+      assert.equal(navMisses, 0, `${navMisses} world steps found the navigation tile 3 s ahead unbuilt`);
+      // Software GL on a shared machine is no phone: the spec's 3 ms worst step is recorded below, and only a bad tail fails here.
+      assert.ok(run.over < 0.1, `${(100 * run.over).toFixed(1)} percent of stream steps took over 3 ms`);
+      assert.ok(stats['navTiles']! <= 256 && stats['navBlocks']! <= 320 && stats['chunks']! < 400, `tiles stay bounded: ${stats['navTiles']} nav, ${stats['navBlocks']} blocks, ${stats['chunks']} land`);
+      assert.ok(stats['recentres']! - before['recentres']! <= 5, `${stats['recentres']! - before['recentres']!} recentres in 300 s`);
       assert.deepEqual(errors, []);
-      console.log(`throughput: ${Math.round(stats['path']!)} m swum in 300 s, tiles settled within ${slowest} ms of each 20 s hop, ${stats['navTiles']} nav tiles, ${stats['chunks']} land tiles`);
+      console.log(`throughput: ${Math.round(stats['path']! - before['path']!)} m swum in 300 s (${run.steps} world steps in ${Math.round(run.ms / 1000)} s), ${gaps} coverage gaps, ${navMisses} nav misses, stream step p99 ${run.p99.toFixed(2)} ms, worst ${run.worst.toFixed(1)} ms, ${(100 * run.over).toFixed(1)} percent over 3 ms, ${stats['recentres']! - before['recentres']!} recentres, ${stats['navTiles']} nav tiles, ${stats['chunks']} land tiles`);
     } finally {
       await context.close();
     }

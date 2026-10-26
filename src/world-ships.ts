@@ -38,10 +38,10 @@ function openWater(maskAt: (x: number, z: number) => number, x: number, z: numbe
   return true;
 }
 
-/** 0–2 ships for a ship cell: a pure function of (seed, cx, cz). */
-export function shipSpecsForCell(seed: number, cx: number, cz: number, maskAt: (x: number, z: number) => number): ShipSpec[] {
+/** 0–2 ships for a ship cell: a pure function of (seed, cx, cz); `density` scales how many (1 is the open-sea norm). */
+export function shipSpecsForCell(seed: number, cx: number, cz: number, maskAt: (x: number, z: number) => number, density = 1): ShipSpec[] {
   const roll = hash(seed, SALT_COUNT, cx, cz) / 0x100000000;
-  const count = roll < 0.42 ? 0 : roll < 0.86 ? 1 : 2;
+  const count = roll < 1 - 0.58 * density ? 0 : roll < 1 - 0.14 * density ? 1 : 2;
   const rng = random(hash(seed, SALT_PLACE, cx, cz));
   const specs: ShipSpec[] = [];
   for (let k = 0; k < count; k++) {
@@ -78,6 +78,8 @@ export type ShipStream = {
 export function createShipStream(options: {
   seed: number;
   maskAt: (x: number, z: number) => number;
+  /** Ships per cell relative to the norm at a world position (a region's ship density). */
+  density?: (x: number, z: number) => number;
   startSpecs: ShipSpec[];
   parent: THREE.Object3D;
   cap: number;
@@ -107,7 +109,7 @@ export function createShipStream(options: {
           ? createShips(options.startSpecs, { anchor: { x: 0, z: 0 }, leash: 280, shoreReady: options.shoreReady })
           : (() => {
               const { cx, cz } = parseChunkKey(key);
-              return shipSpecsForCell(seed, cx, cz, maskAt).map((spec) =>
+              return shipSpecsForCell(seed, cx, cz, maskAt, options.density?.((cx + 0.5) * SHIP_CELL, (cz + 0.5) * SHIP_CELL)).map((spec) =>
                 createShip(spec, { anchor: { x: spec.x, z: spec.z }, leash: 90, shoreReady: options.shoreReady }),
               );
             })();
