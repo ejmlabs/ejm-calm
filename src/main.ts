@@ -151,7 +151,7 @@ try {
     floorAt: seafloor.heightAt,
   });
   world.root.add(whale.group);
-  birds = createBirds(seed, mobile ? 3 : 6);
+  birds = createBirds(seed, quality.tier);
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
   world.origin.onRecenter((dx, dz) => rig.shift(dx, dz));
@@ -282,6 +282,7 @@ function tick(now: number): void {
   if (!motion.matches) time += dt;
 
   if (updateQuality(quality, raw * 1000)) {
+    birds.setTier(quality.tier);
     renderer.setPixelRatio(quality.ratio);
     resize();
   }
@@ -291,7 +292,7 @@ function tick(now: number): void {
   world.ocean.update(dt, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
   world.ocean.setWhale(whale.state.x - world.origin.x, whale.state.y, whale.state.z - world.origin.z, whale.state.heading);
-  birds.update(time, whale.state.x, whale.state.z, dt);
+  birds.update(time, whale.state.x, whale.state.z, dt, { x: camera.position.x + world.origin.x, y: camera.position.y, z: camera.position.z + world.origin.z }, motion.matches);
 
   followWhale();
   rig.update(dt, time, motion.matches);
@@ -381,6 +382,7 @@ if (debug) {
     },
     stats() {
       const size = whale.measure();
+      const flock = birds.stats();
       return {
         seed,
         time,
@@ -398,6 +400,9 @@ if (debug) {
         camMode: rig.mode,
         buildMs: Math.round(buildMs),
         ships: world.ships.active().length,
+        birds: flock.birds,
+        birdDraws: flock.draws,
+        birdTriangles: flock.triangles,
         ...world.stats(),
         speed: whale.state.speed,
         behavior: whale.state.behavior,

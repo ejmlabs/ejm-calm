@@ -97,6 +97,21 @@ await withBrowser(async (browser, base) => {
     }
   }
 
+  // Added detail stays inside its budget (birds: at most 24 instances, 9 draws, 5,000 triangles).
+  {
+    const { page, context, errors } = await openCalm(browser, base, DESKTOP, { query: { debug: '1' } });
+    try {
+      await page.waitForTimeout(1500);
+      const stats = await page.evaluate(() => (window as unknown as { __calmReview: { stats: () => Record<string, number> } }).__calmReview.stats());
+      assert.ok(stats['birds']! > 0 && stats['birds']! <= 24, `birds ${stats['birds']}`);
+      assert.ok(stats['birdDraws']! <= 9 && stats['birdTriangles']! <= 5000, `bird draws ${stats['birdDraws']}, triangles ${stats['birdTriangles']}`);
+      assert.deepEqual(errors, []);
+      console.log(`budget: ${stats['birds']} birds, ${stats['birdDraws']} draws, ${stats['birdTriangles']} triangles`);
+    } finally {
+      await context.close();
+    }
+  }
+
   const { page, context, errors } = await openCalm(browser, base, DESKTOP, { reducedMotion: 'reduce', seed: 0 });
   try {
     await page.waitForTimeout(600);
