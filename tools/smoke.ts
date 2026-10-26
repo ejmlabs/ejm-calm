@@ -112,6 +112,32 @@ await withBrowser(async (browser, base) => {
     }
   }
 
+  // Tile throughput at cruise: five minutes of travel in 20 s hops; after each hop the land tiles settle and the stats stay sane.
+  {
+    const { page, context, errors } = await openCalm(browser, base, DESKTOP, { query: { debug: '1' } });
+    try {
+      await page.waitForTimeout(1500);
+      type Review = { travel: (seconds: number) => void; stats: () => Record<string, number> };
+      let slowest = 0;
+      for (let hop = 0; hop < 15; hop++) {
+        await page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.travel(20));
+        const start = Date.now();
+        await page.waitForFunction(() => {
+          const s = (window as unknown as { __calmReview: Review }).__calmReview.stats();
+          return s['chunksPending'] === 0 && s['chunksReady'] !== undefined;
+        }, undefined, { timeout: 20000 });
+        slowest = Math.max(slowest, Date.now() - start);
+      }
+      const stats = await page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.stats());
+      assert.ok(stats['path']! > 4500, `cruise covers ground: ${stats['path']} m in 300 s`);
+      assert.ok(stats['navTiles']! <= 256 && stats['chunks']! < 400, `tiles stay bounded: ${stats['navTiles']} nav, ${stats['chunks']} land`);
+      assert.deepEqual(errors, []);
+      console.log(`throughput: ${Math.round(stats['path']!)} m swum in 300 s, tiles settled within ${slowest} ms of each 20 s hop, ${stats['navTiles']} nav tiles, ${stats['chunks']} land tiles`);
+    } finally {
+      await context.close();
+    }
+  }
+
   const { page, context, errors } = await openCalm(browser, base, DESKTOP, { reducedMotion: 'reduce', seed: 0 });
   try {
     await page.waitForTimeout(600);

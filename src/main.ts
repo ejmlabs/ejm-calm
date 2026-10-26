@@ -42,6 +42,16 @@ type CalmReview = {
 const params = new URLSearchParams(location.search);
 const debug = params.get('debug') === '1';
 
+/** Debug journey probe: metres swum and the straight line from the start (`path`, `net` in the stats). */
+const journey = { path: 0, x: NaN, z: NaN, fromX: NaN, fromZ: NaN };
+function markJourney(): void {
+  const { x, z } = whale.state;
+  if (Number.isNaN(journey.x)) Object.assign(journey, { x, z, fromX: x, fromZ: z });
+  journey.path += Math.hypot(x - journey.x, z - journey.z);
+  journey.x = x;
+  journey.z = z;
+}
+
 let storage: Storage | null;
 try {
   storage = window.localStorage;
@@ -291,6 +301,7 @@ function tick(now: number): void {
   world.update(whale.state.x, whale.state.z, camera, dt, time);
   world.ocean.update(dt, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
+  if (debug) markJourney();
   world.ocean.setWhale(whale.state.x - world.origin.x, whale.state.y, whale.state.z - world.origin.z, whale.state.heading);
   birds.update(time, whale.state.x, whale.state.z, dt, { x: camera.position.x + world.origin.x, y: camera.position.y, z: camera.position.z + world.origin.z }, motion.matches);
 
@@ -334,6 +345,7 @@ if (debug) {
         time += 1 / 30;
         world.update(whale.state.x, whale.state.z, camera, 1 / 30, time);
         whale.update(1 / 30, time, world.shore);
+        markJourney();
       }
       rig.snap();
     },
@@ -404,6 +416,8 @@ if (debug) {
         birdDraws: flock.draws,
         birdTriangles: flock.triangles,
         ...world.stats(),
+        path: journey.path,
+        net: Math.hypot(journey.x - journey.fromX, journey.z - journey.fromZ) || 0,
         speed: whale.state.speed,
         behavior: whale.state.behavior,
         exposure: renderer.toneMappingExposure,

@@ -66,10 +66,10 @@ const FADE = 1.5;
 const RESELECT = 12;
 /** Tiles are refined this many seconds of motion before the camera reaches them (capped in metres). */
 const LEAD = 6;
-const LEAD_MAX = 80;
+const LEAD_MAX = 200;
 /** Tiles this far ahead are built early and held ready (not drawn) until wanted. */
 const PREFETCH = 12;
-const PREFETCH_MAX = 240;
+const PREFETCH_MAX = 600;
 const READY_CAP = 96;
 /** Built tiles start dissolving in at most this many per frame, so a burst of arrivals trickles in. */
 const PLACE_PER_FRAME = 2;

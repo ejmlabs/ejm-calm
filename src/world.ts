@@ -47,11 +47,11 @@ export type World = {
 
 /** All streaming work on the main thread (tiles, ships, navigation, shelf bakes) stays near this per frame. */
 const BUDGET_MS = 2.5;
-/** Navigation tiles are kept built this far around the whale (covers look-ahead and the next shelf bake). */
-const NAV_RADIUS = 2300;
+/** Navigation tiles are kept built this far around the whale (covers the route plan and the next shelf bake). */
+const NAV_RADIUS = 3400;
 /** Navigation tiles and ship cells are centred this many seconds ahead along the whale's motion (capped in metres). */
 const LEAD = 20;
-const LEAD_MAX = 300;
+const LEAD_MAX = 700;
 /** Faster than this between two frames is a jump (debug travel, reload), not swimming. */
 const JUMP_SPEED = 60;
 /** A camera further than this from the whale is not following it (e.g. during a fast-forward): stream around the whale. */

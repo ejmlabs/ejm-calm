@@ -3,6 +3,7 @@ import { fork } from './rng.js';
 import { makeNoise2D } from './noise.js';
 import { clamp } from './math.js';
 import { clampClearOfLand, type Shore } from './shore.js';
+import { createCurrent } from './current.js';
 
 /** Hard cap on |Δheading| / dt. Gentle enough that a turn reads as a curve, not a spin. */
 export const WHALE_MAX_TURN_RATE = 0.2;
@@ -27,8 +28,6 @@ export type WhaleCourse = {
   plan?: number;
   /** Open water the plans are heading for, held until reached, cut off or stale. */
   target?: { x: number; z: number; since: number; closest: number; closestAt: number };
-  /** Coarse cells already swum through (most recent last), so the journey prefers new water. */
-  visited?: Map<string, true>;
   planCache?: PlanCache;
   /** Forward speed, m/s; defaults to params.speed. */
   speed?: number;
@@ -43,9 +42,8 @@ export type WhaleCourseParams = {
   homeZ: number;
   speed: number;
   turnRate: number;
-  /** The journey heading swings slowly around baseHeading. */
-  journeyFreq: number;
-  journeyAmp: number;
+  /** The journey heading at a point: the flow field's drift around baseHeading. */
+  current: (x: number, z: number) => number;
   wanderFreq: number;
   wanderAmp: number;
   wanderPhase: number;
@@ -85,8 +83,7 @@ export function createWhaleCourseParams(
     homeZ: home.z,
     speed: 1.55 + rng() * 0.45,
     turnRate: WHALE_MAX_TURN_RATE,
-    journeyFreq: 1 / (900 + rng() * 500),
-    journeyAmp: 0.35 + rng() * 0.25,
+    current: createCurrent(seed, heading),
     wanderFreq: 0.013 + rng() * 0.01,
     wanderAmp: 0.25 + rng() * 0.15,
     wanderPhase: rng() * 64,
@@ -145,8 +142,8 @@ export const PLAN_EVERY = 5;
  * streamed navigation tiles it reads are built in the background.
  */
 export const PLAN_START = 20;
-/** Coarse planning grid: cell size and radius in cells (≈1.6 km). */
-const PLAN_CELL = 80;
+/** Coarse planning grid: cell size and radius in cells (≈3.2 km, under two minutes at cruise). */
+const PLAN_CELL = 160;
 const PLAN_RADIUS = 20;
 /**
  * Coarse cells with this much clearance are deep water; down to PLAN_CLEAR (what
@@ -160,14 +157,13 @@ const PLAN_SHALLOW_COST = 3;
 const PLAN_MIN_DEPTH = 12;
 const PLAN_LEAD = 3;
 /** A target is dropped once this close, or after this long. */
-const TARGET_REACHED = 300;
+const TARGET_REACHED = 600;
 const TARGET_SECONDS = 180;
 /** No headway toward the target for this long means the way is shut. */
 const STALL_SECONDS = 90;
-/** Side of the coarse cells the whale remembers swimming through. */
-const VISIT_CELL = 300;
-const VISIT_MEMORY = 600;
-const visitKey = (x: number, z: number) => `${Math.floor(x / VISIT_CELL)}:${Math.floor(z / VISIT_CELL)}`;
+/** Cells further behind the journey than this (cosine of the angle off it) lose BACKTRACK metres of score: a cone no-one turns back out of unless the way ahead is shut. */
+const CONE = -0.17;
+const BACKTRACK = 4000;
 
 /** Coarse clearance samples on a fixed world lattice, shared by successive plans. */
 export type PlanCache = Map<string, number>;
@@ -178,7 +174,8 @@ const PLAN_CACHE_CAP = 40000;
  * actually reach: a cheapest-path search over a coarse grid of shore clearance
  * finds every reachable cell within ~1.6 km, where water near the coast costs
  * more than deep water, so routes keep off the shore unless a passage needs it.
- * The best cell is far along the journey and not yet swum, and the whale steers
+ * The best cell is far along the journey and never behind it (outside the cone
+ * of the journey heading) unless the way ahead is shut, and the whale steers
  * for a point a few cells down the path to it. A dead-end gulf is left by the
  * way it was entered, and a bay by its mouth, without pacing. A held target
  * (`keep`) wins while it can still be reached. Returns null when boxed in.
@@ -187,7 +184,6 @@ export function planJourney(
   x: number,
   z: number,
   journey: number,
-  visited: ReadonlyMap<string, true>,
   shore: Shore,
   cache: PlanCache,
   keep?: { x: number; z: number },
@@ -264,8 +260,11 @@ export function planJourney(
       const wz = (cj + lj - PLAN_RADIUS + 0.5) * PLAN_CELL;
       const dx = wx - x;
       const dz = wz - z;
-      // Far along the journey, new water, and not too winding or shallow a way there.
-      const score = dx * fwd.x + dz * fwd.z - (visited.has(visitKey(wx, wz)) ? 900 : 0) - 0.3 * (dist[k]! * PLAN_CELL - Math.hypot(dx, dz));
+      // Far along the journey, never back across it, and not too winding or shallow a way there.
+      const away = Math.hypot(dx, dz);
+      const along = dx * fwd.x + dz * fwd.z;
+      // Behind the cone only the furthest reachable cell counts: out of a pocket by its mouth, not along its far wall.
+      const score = (along < CONE * away ? away - BACKTRACK : along) - 0.3 * (dist[k]! * PLAN_CELL - away);
       if (score > bestScore) {
         bestScore = score;
         best = k;
@@ -366,16 +365,9 @@ export function stepWhaleCourse(
   const n1 = noise(time * params.wanderFreq + params.wanderPhase, 2.5);
   const n2 = noise(time * params.wanderFreq * 0.37 + 11.0, params.wanderPhase * 0.2 + 4.0);
   const wander = (n1 * 0.78 + n2 * 0.22) * params.wanderAmp;
-  const swing = noise(time * params.journeyFreq + params.wanderPhase * 0.5, 7.3) * params.journeyAmp;
   let bias = course.bias ?? 0;
   const scan = Math.floor(time / PLAN_EVERY);
-  const visited = (course.visited ??= new Map());
-  const cell = visitKey(course.x, course.z);
-  if (!visited.has(cell)) {
-    visited.set(cell, true);
-    if (visited.size > VISIT_MEMORY) visited.delete(visited.keys().next().value!);
-  }
-  const heading = params.baseHeading + bias + swing;
+  const heading = params.current(course.x, course.z) + bias;
   if (course.scan !== scan && time >= PLAN_START) {
     course.scan = scan;
     const held = course.target;
@@ -384,7 +376,7 @@ export function stepWhaleCourse(
     const stalled = !!held && time - held.closestAt > STALL_SECONDS;
     const keep = held && !stalled && time - held.since < TARGET_SECONDS && gap > TARGET_REACHED ? held : undefined;
     const cache = (course.planCache ??= new Map());
-    const plan2 = (k?: { x: number; z: number }) => planJourney(course.x, course.z, heading, visited, shore, cache, k);
+    const plan2 = (k?: { x: number; z: number }) => planJourney(course.x, course.z, heading, shore, cache, k);
     let plan = plan2(keep);
     if (course.plan !== undefined && (stalled || (keep && (!plan || plan.x !== keep.x || plan.z !== keep.z)))) {
       // The way to the held target closed up ahead (or the whale made no headway): remember
@@ -406,7 +398,8 @@ export function stepWhaleCourse(
   }
   const journey = course.plan ?? heading;
   // Over ten minutes or so the journey itself turns the way the plans lead.
-  course.bias = wrapAngle(bias + shortestAngle(heading, journey) * clamp(dt / 600, 0, 1));
+  // The bias also relaxes back to the flow's heading, so the way around a coast does not become the new course.
+  course.bias = wrapAngle(bias + shortestAngle(heading, journey) * clamp(dt / 600, 0, 1) - bias * clamp(dt / 1200, 0, 1));
 
   const slot = Math.floor(time / LOOK_EVERY);
   if (course.slot !== slot) {

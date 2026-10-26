@@ -37,7 +37,7 @@ const UNDER_DISTANCE = 0.7;
 /** Under water the haze is thick: never trail further than this. */
 const UNDER_MAX_DISTANCE = 18;
 /** Distance and look-ahead grow with speed up to this many m/s. */
-const SPEED_CAP = 14;
+const SPEED_CAP = 28;
 const SPEED_DISTANCE = 0.015;
 const SPEED_LOOK_AHEAD = 0.6;
 /** Below about this speed the camera holds its bearing instead of following the heading. */

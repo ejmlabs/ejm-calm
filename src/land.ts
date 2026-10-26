@@ -311,6 +311,8 @@ export function createLand(seed: number, options: LandOptions): Land {
   const nav = createNavField(maskAt, {
     min: -gridExtent,
     cell: (gridExtent * 2) / (gridSize - 1),
+    // The route plan reads 3.4 km around the whale, the next shelf bake 2.3 km around the origin.
+    maxTiles: 256,
     // Reuse the start grid's samples once it exists.
     known: (i, j) => (grid && i >= 0 && j >= 0 && i < gridSize && j < gridSize ? grid.mask[j * gridSize + i] : undefined),
   });
