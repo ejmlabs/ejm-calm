@@ -112,6 +112,55 @@ await withBrowser(async (browser, base) => {
     }
   }
 
+  // The journey's feel: the wake and flecks stay inside their draws (4 on low, 8 on high), the day moves, and the route
+  // indicator is off until asked for, answers its switch, is gone six seconds later and keeps its setting.
+  for (const device of [DESKTOP, MOBILE]) {
+    const { page, context, errors } = await openCalm(browser, base, device, { query: { debug: '1' } });
+    try {
+      type Review = { travel: (seconds: number) => void; setDay: (day: number) => void; stats: () => Record<string, number | string> };
+      const stats = () => page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.stats());
+      await page.waitForTimeout(1500);
+      // Swim on at pace so the wake and flecks are both out.
+      for (let i = 0; i < 20; i++) {
+        await page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.travel(6));
+        const s = await stats();
+        if (s['behavior'] === 'travel' && (s['speed'] as number) > 14) break;
+      }
+      await page.waitForTimeout(1500);
+      const s = await stats();
+      const limit = device.name === 'mobile' ? 4 : 8;
+      const added = (s['wakeDraws'] as number) + 1;
+      assert.ok(added <= limit, `${device.name}: wake and flecks add ${added} draws (limit ${limit})`);
+      assert.ok((s['flecks'] as number) <= (device.name === 'mobile' ? 200 : 400), `${device.name}: ${s['flecks']} flecks`);
+      assert.equal(s['route'], '', 'no indicator for a new visitor');
+      assert.equal(await page.locator('#route').evaluate((el) => el.classList.contains('show')), false);
+      const day = s['dayPhase'];
+      await page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.setDay(0.4));
+      await page.waitForTimeout(500);
+      assert.notEqual((await stats())['dayPhase'], day, 'the day moves on');
+
+      await page.locator('#aboutBtn').click();
+      assert.equal(await page.locator('#routeToggle').isChecked(), false, 'the indicator is off by default');
+      await page.locator('#routeToggle').check();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('#route').evaluate((el) => el.classList.contains('show')), true, 'the switch shows the indicator');
+      assert.match(await page.locator('#route').innerText(), /\u00b7 [\d.]+ km$/);
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ejm-calm:v1')!).route), true, 'the setting is saved');
+      await page.waitForTimeout(6500);
+      assert.equal(await page.locator('#route').evaluate((el) => el.classList.contains('show')), false, 'gone six seconds later');
+      await page.keyboard.press('Escape');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('body[data-ready="true"]', { timeout: 30000 });
+      await page.locator('#aboutBtn').click();
+      assert.equal(await page.locator('#routeToggle').isChecked(), true, 'the setting survives a reload');
+      await page.locator('#routeToggle').uncheck();
+      assert.deepEqual(errors, []);
+      console.log(`feel (${device.name}): ${added} added draws, ${s['flecks']} flecks, wake ${Math.round(s['wakeLength'] as number)} m, indicator off by default, switch saved`);
+    } finally {
+      await context.close();
+    }
+  }
+
   // Tile throughput at cruise: five minutes of continuous travel in short steps. Frames are the 30 Hz world steps of the
   // real update; between steps the page yields so the tile worker and the renderer run as they would between frames.
   {

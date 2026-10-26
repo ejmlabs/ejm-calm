@@ -6,7 +6,7 @@ import { createSky, HAZE_ANGLES } from './sky.js';
 import { createWhale } from './whale.js';
 import { createWorld } from './world.js';
 import { createBirds } from './birds.js';
-import { FollowCamera } from './camera.js';
+import { FOV, FollowCamera } from './camera.js';
 import { clamp } from './math.js';
 import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
@@ -16,6 +16,12 @@ import { feedSitesNear } from './feed-sites.js';
 import { createSeafloor } from './seafloor.js';
 import { createRegionLook } from './region-look.js';
 import { REGION_LOOKS } from './regions.js';
+import { swellRate } from './swell.js';
+import { TRAVEL_MAX } from './whale-behavior.js';
+import { createWeather, type WeatherState } from './weather.js';
+import { createRoute } from './route.js';
+import { createWake } from './wake.js';
+import { createFlecks } from './flecks.js';
 
 type CalmReview = {
   time: number;
@@ -38,13 +44,19 @@ type CalmReview = {
   forceDeepDive: (at?: number) => void;
   /** Debug camera `depth` metres under the surface (negative is above), looking at the whale; null releases it. */
   peekUnderwater: (depth: number | null, site?: boolean) => void;
+  /** Where in the day (0 is the preset the seed began in, 1 a full day on), and the weather to hold. */
+  setDay: (day: number) => void;
+  setWeather: (state: WeatherState) => void;
+  setRoute: (on: boolean) => void;
+  /** Puts the whale in open water near world (x, z) and loads the sea around it. */
+  jumpTo: (x: number, z: number) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
 };
 
 const params = new URLSearchParams(location.search);
 const debug = params.get('debug') === '1';
 
-/** Debug journey probe: metres swum, the straight line from the start, and how often the whale is back near an earlier spot (`path`, `net`, `revisit`). */
+/** Metres swum since the page opened (the route indicator's distance); in debug also the straight line from the start and how often the whale is back near an earlier spot (`path`, `net`, `revisit`). */
 const journey = { path: 0, x: NaN, z: NaN, fromX: NaN, fromZ: NaN, fixes: [] as number[], fixAt: -Infinity, back: 0 };
 /** A fix within this distance of one at least this many fixes (seconds) earlier counts as a revisit. */
 const REVISIT_RADIUS = 500;
@@ -55,7 +67,7 @@ function markJourney(): void {
   journey.path += Math.hypot(x - journey.x, z - journey.z);
   journey.x = x;
   journey.z = z;
-  if (time - journey.fixAt < 1) return;
+  if (!debug || time - journey.fixAt < 1) return;
   journey.fixAt = time;
   const fixes = journey.fixes;
   for (let i = 0; i + 2 * REVISIT_AFTER < fixes.length; i += 2) {
@@ -86,6 +98,8 @@ try {
 }
 
 const memory = loadMemory(storage);
+let routeOn = memory?.route ?? false;
+const indicator = createRoute(REGION_LOOKS.map((look) => look.name));
 const resolved = resolveSeed(location.search, memory?.seed, () => {
   const word = new Uint32Array(1);
   crypto.getRandomValues(word);
@@ -116,6 +130,12 @@ const ui = createUI({
     persist();
     ui.announce(audio.enabled ? 'sound on' : 'sound off');
   },
+  route(on) {
+    routeOn = on;
+    indicator.setEnabled(on, world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
+    ui.showRoute(indicator.visible, indicator.text);
+    persist();
+  },
 });
 
 const canvasEl = document.getElementById('space') as HTMLCanvasElement | null;
@@ -138,7 +158,7 @@ renderer.autoClear = true;
 
 const scene = new THREE.Scene();
 const portrait = window.innerHeight > window.innerWidth;
-const camera = new THREE.PerspectiveCamera(portrait ? 62 : 48, 1, 0.5, 12000);
+const camera = new THREE.PerspectiveCamera(portrait ? FOV[1] : FOV[0], 1, 0.5, 12000);
 // Layer 1 is the spout mist. Water's mirror camera stays on layer 0, so the plume is not reflected.
 camera.layers.enable(1);
 
@@ -153,6 +173,9 @@ let underwater: ReturnType<typeof createUnderwater>;
 /** Seafloor height (world): pure per seed, so it matches the underwater view's own copy exactly. */
 let seafloor: ReturnType<typeof createSeafloor>;
 let regionLook: ReturnType<typeof createRegionLook>;
+let wake: ReturnType<typeof createWake>;
+let flecks: ReturnType<typeof createFlecks>;
+let weather: ReturnType<typeof createWeather>;
 
 try {
   const buildStart = performance.now();
@@ -171,8 +194,8 @@ try {
     hazeColor: sky.hazeColor,
     hazeDensity: sky.hazeDensity,
     hazeGradient: { angles: HAZE_ANGLES, colors: sky.hazeGradient },
-    // Low sun lights the shallows less.
-    shallowLight: sky.timeOfDay === 'golden' || sky.timeOfDay === 'dusk' ? 0.55 : 1,
+    // The sky sets how much light the shallows get as the day goes (a low sun lights them less).
+    shallowLight: 1,
     // Slightly under 1 / exposure: reflections sit a touch darker than the land itself.
     reflectionGain: 0.8 / renderer.toneMappingExposure,
     waterSize: quality.waterSize,
@@ -190,6 +213,14 @@ try {
     floorAt: seafloor.heightAt,
   });
   world.root.add(whale.group);
+  weather = createWeather(seed, sky.clearCover);
+  // A visitor who asked for the indicator sees it on the first change of region, not at once.
+  indicator.setEnabled(routeOn, world.land.regions.dominantAt(layout.whaleHome.x, layout.whaleHome.z), 0, false);
+  sky.setEnvironmentRefresh(quality.tier !== 'low');
+  wake = createWake();
+  world.root.add(wake.group);
+  flecks = createFlecks(seed, quality.tier);
+  scene.add(flecks.mesh);
   birds = createBirds(seed, quality.tier);
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
@@ -209,7 +240,7 @@ function resize(): void {
   renderer.setPixelRatio(quality.ratio);
   renderer.setSize(width, height, false);
   camera.aspect = width / Math.max(1, height);
-  camera.fov = isPortrait ? 62 : 48;
+  camera.fov = isPortrait ? FOV[1] : FOV[0];
   camera.far = 12000;
   camera.updateProjectionMatrix();
   rig.setPortrait(isPortrait);
@@ -249,6 +280,9 @@ canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
+/** The swell's own clock: it runs faster as the whale swims faster. */
+let swellClock = 0;
+let routeClock = performance.now();
 let time = 0;
 let last = performance.now();
 let frame: number | null = null;
@@ -256,7 +290,7 @@ let disposed = false;
 let lastSave = 0;
 
 function sync(): void {
-  ui.sync({ seed, sound: audio.enabled });
+  ui.sync({ seed, sound: audio.enabled, route: routeOn });
   audio.sync(!document.hidden).catch(() => {});
 }
 
@@ -266,6 +300,7 @@ function persist(): void {
     seed,
     sound: audio.settings(),
     framing: { ...rig.framing },
+    route: routeOn,
   });
 }
 
@@ -322,20 +357,37 @@ function tick(now: number): void {
 
   if (updateQuality(quality, raw * 1000)) {
     birds.setTier(quality.tier);
+    flecks.setTier(quality.tier);
+    sky.setEnvironmentRefresh(quality.tier !== 'low');
     renderer.setPixelRatio(quality.ratio);
     resize();
   }
 
-  sky.update(dt);
   regionLook.update(whale.state.x, whale.state.z);
-  world.ocean.setWaterColor(regionLook.water);
+  const weatherLook = weather.update(dt, time, regionLook.weights);
+  sky.setWeather(weatherLook);
   sky.setFog(regionLook.fogTint, regionLook.fogMix, regionLook.fogDensity);
-  world.landStream.setLook(regionLook.hazeDensity, regionLook.land);
+  sky.update(dt, motion.matches ? 0.5 : 1);
+  world.ocean.setSky(sky.hazeColor, sky.level, sky.shallowLight);
+  world.ocean.setWaterColor(regionLook.water);
+  world.landStream.setSky(sky.sunDirection, sky.hazeGradient, sky.hazeDensity, sky.level);
+  world.landStream.setLook(regionLook.hazeDensity * weatherLook.haze, regionLook.land);
+  flecks.setLight(sky.level);
   birds.setMix(regionLook.birds);
-  world.update(whale.state.x, whale.state.z, camera, dt, time);
-  world.ocean.update(dt, sky.sunDirection, camera);
+  const swell = swellRate(whale.state.speed / TRAVEL_MAX);
+  swellClock += dt * swell;
+  world.update(whale.state.x, whale.state.z, camera, dt, swellClock);
+  world.ocean.update(dt * swell, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
-  if (debug) markJourney();
+  wake.update(whale.state, dt);
+  flecks.update(whale.state, world.origin, dt);
+  markJourney();
+  if (routeOn) {
+    // Six seconds of the clock on the wall, not of the simulation: slow frames and reduced motion do not stretch it.
+    indicator.update(Math.min(1, (now - routeClock) / 1000), world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
+    ui.showRoute(indicator.visible, indicator.text);
+  }
+  routeClock = now;
   world.ocean.setWhale(whale.state.x - world.origin.x, whale.state.y, whale.state.z - world.origin.z, whale.state.heading);
   birds.update(time, whale.state.x, whale.state.z, dt, { x: camera.position.x + world.origin.x, y: camera.position.y, z: camera.position.z + world.origin.z }, motion.matches);
 
@@ -377,7 +429,8 @@ if (debug) {
     travel(seconds: number) {
       for (let t = 0; t < Math.min(3600, Math.max(0, seconds || 0)); t += 1 / 30) {
         time += 1 / 30;
-        world.update(whale.state.x, whale.state.z, camera, 1 / 30, time);
+        swellClock += swellRate(whale.state.speed / TRAVEL_MAX) / 30;
+        world.update(whale.state.x, whale.state.z, camera, 1 / 30, swellClock);
         whale.update(1 / 30, time, world.shore);
         markJourney();
       }
@@ -426,6 +479,41 @@ if (debug) {
     follow() {
       rig.setReview(null);
     },
+    setDay(day: number) {
+      if (Number.isFinite(day)) sky.setDay(day);
+    },
+    setWeather(state: WeatherState) {
+      weather.set(state);
+    },
+    jumpTo(x: number, z: number) {
+      if (![x, z].every(Number.isFinite)) return;
+      // The nearest spot with room round it: a spiral out from the asked-for one.
+      let best = { x, z };
+      search: for (let ring = 0; ring < 40; ring++) {
+        for (let k = 0; k < Math.max(1, ring * 8); k++) {
+          const a = (k / Math.max(1, ring * 8)) * Math.PI * 2;
+          const px = x + Math.cos(a) * ring * 200;
+          const pz = z + Math.sin(a) * ring * 200;
+          if (world.land.clearance(px, pz) > 400) {
+            best = { x: px, z: pz };
+            break search;
+          }
+        }
+      }
+      whale.place(best.x, best.z);
+      world.landStream.prime(best.x, best.z);
+      world.land.nav.prefetch(best.x, best.z, 1100, Infinity);
+      // The jump is not swimming: the distance travelled starts again from here.
+      journey.x = journey.z = NaN;
+      markJourney();
+      rig.snap();
+    },
+    setRoute(on: boolean) {
+      routeOn = Boolean(on);
+      indicator.setEnabled(routeOn, world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
+      ui.showRoute(indicator.visible, indicator.text);
+      sync();
+    },
     stats() {
       const size = whale.measure();
       const flock = birds.stats();
@@ -459,6 +547,20 @@ if (debug) {
         speed: whale.state.speed,
         behavior: whale.state.behavior,
         exposure: renderer.toneMappingExposure,
+        dayPhase: sky.phase().name,
+        day: sky.phase().day,
+        sunElevation: (Math.asin(sky.sunDirection.y) * 180) / Math.PI,
+        weather: weather.target(),
+        cloudCover: weather.look.coverage,
+        fogDensity: (scene.fog as THREE.FogExp2).density,
+        fov: camera.fov,
+        wakeDraws: wake.draws(),
+        wakeLength: wake.length(),
+        flecks: flecks.count(),
+        envMs: sky.environment().ms,
+        envRefreshes: sky.environment().count,
+        route: indicator.visible ? indicator.text : '',
+        swellClock,
         // Last rendered frame (three resets these per render).
         draws: renderer.info.render.calls,
         triangles: renderer.info.render.triangles,
@@ -498,6 +600,8 @@ window.addEventListener('pagehide', () => {
   ui.dispose();
   sky.dispose();
   whale.dispose();
+  wake.dispose();
+  flecks.dispose();
   world.dispose();
   birds.dispose();
   underwater.dispose();

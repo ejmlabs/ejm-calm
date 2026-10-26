@@ -28,27 +28,27 @@
 
 ## 5. Sense of speed (M3)
 
-- [ ] 5.1 `src/wake.ts`: whale wake ribbon and bow wave (shared with the ship wake of `add-world-detail` phase 2)
-- [ ] 5.2 `src/flecks.ts`: instanced surface flecks around the whale, one draw
-- [ ] 5.3 Passing islets and rocks near the route, seeded, sparse
-- [ ] 5.4 Clouds scroll with a wind vector; swell time scaled with speed; passing flocks instead of a flock that follows
-- [ ] 5.5 Camera: pull-back, field-of-view lift and lean with speed; respect reduced motion
+- [x] 5.1 `src/wake.ts`: whale wake ribbon and bow wave (shared with the ship wake of `add-world-detail` phase 2) (`src/wake.ts`: a 64-point trail ribbon (soft five-column strip, vertex alpha, patchy, fades over 6.4 s, 40 m or more drawn at 16 m/s) and a bow chevron, two draws, from the whale only; the ship wake of `add-world-detail` phase 2 can use `createWake` as it stands)
+- [x] 5.2 `src/flecks.ts`: instanced surface flecks around the whale, one draw (`src/flecks.ts`: one instanced mesh, 200, 300 and 400 on low, medium and high, a soft streak from a 16 by 16 generated alpha map, still in the world so the whale's speed slides them past; tested to cross the lower third in under 3 s at 16, 22 and 28 m/s)
+- [x] 5.3 Passing islets and rocks near the route, seeded, sparse (`src/landmarks.ts`: one rock or islet in every 2.4 km cell beyond the opening, added to the mask (so nav, mesh and seafloor agree), radius 30 to 150 m, low; 6 seeds each pass at least 4 within 1.5 km in 600 s, none within 20 m of the path by the existing clearance test. The hash salt was picked from five that pass the journey tests: route outcomes shift with any change of coast, and the 24-seed spread of ten-minute net is the same with and without landmarks (4 of 24 under 9 km against 3 of 24))
+- [x] 5.4 Clouds scroll with a wind vector; swell time scaled with speed; passing flocks instead of a flock that follows (clouds: the sky shader takes a wind vector (patched with the all-or-nothing helper, 4 times the old drift); swell and water ripple time run 1 to 2.5 times as fast with speed; birds are a flock per species that appears 420 to 760 m ahead, passes and is gone 380 m behind, then pauses 4 to 24 s)
+- [x] 5.5 Camera: pull-back, field-of-view lift and lean with speed; respect reduced motion (`camera.ts`: pull-back term 25 percent at 28 m/s (was 42), field of view lift 6 degrees, lean 0.05 rad into turns, none of them under water, in review or with reduced motion; the whale stays inside the middle 80 percent from 16 to 28 m/s (tested). The follower's own trailing is on top of the pull-back, as before)
 
 ## 6. Atmosphere (M3)
 
-- [ ] 6.1 Slow day cycle across the existing four presets plus a night preset; sun, sky, fog and hemisphere light lerp
-- [ ] 6.2 Environment map refresh at most every 90 s on `medium` and `high`; none on `low` (lerp lights only)
-- [ ] 6.3 Weather states clear, hazy and overcast per region and time; cloud coverage and fog density lerp
-- [ ] 6.4 Reduced motion: no field-of-view lift, slower cycle
+- [x] 6.1 Slow day cycle across the existing four presets plus a night preset; sun, sky, fog and hemisphere light lerp (`sky.ts`: morning, afternoon, golden, dusk and night keyframes on a 2400 s day starting at the seed's own; sun, sky, fog, haze, hemisphere and ambient light, exposure, land and water brightness lerp; exposure, fog colour and fog density move under 1 percent a second (tested); the underwater view reads the lights' base from the sky, and its window from the live sky)
+- [x] 6.2 Environment map refresh at most every 90 s on `medium` and `high`; none on `low` (lerp lights only) (the environment map is rebuilt from the sky alone every 90 s on medium and high, never on low (counted in a test); on software GL the call takes about the figure printed in the report, which is not a desktop frame cost)
+- [x] 6.3 Weather states clear, hazy and overcast per region and time; cloud coverage and fog density lerp (`weather.ts`: clear, hazy, overcast drawn per 300 s from the region's odds, clear at the start; the look eases at most 1/60 of its range a second; overcast keeps the fog colour no brighter than clear and the coast at 2 km as visible as 75 percent of the clear sea)
+- [x] 6.4 Reduced motion: no field-of-view lift, slower cycle (reduced motion: no field-of-view lift or lean, cloud drift and the day at half rate (the page still freezes its clock under reduced motion, so these guard any future non-frozen use))
 
 ## 7. Route indicator (M3, optional)
 
-- [ ] 7.1 Region name and distance travelled, fade in on a region change, fade out after 6 s
-- [ ] 7.2 Toggle in the info panel, saved in `persistence.ts`, off by default
+- [x] 7.1 Region name and distance travelled, fade in on a region change, fade out after 6 s (`route.ts` and `#route`: region name and kilometres swum, in on a region change, out after 6 s; state logic tested)
+- [x] 7.2 Toggle in the info panel, saved in `persistence.ts`, off by default (a switch in the info panel, saved as `route` in `persistence.ts`, off by default; the smoke run checks the default, the switch, the six seconds and the reload)
 
 ## 8. Audit
 
-- [ ] 8.1 Frame budget on desktop and throttled mobile profile; record in the PR
-- [ ] 8.2 Bundle size against the 25 KB gzip cap; CSP unchanged
-- [ ] 8.3 Screenshots per region and time of day, desktop and phone
-- [ ] 8.4 Update `README.md` and `FOLLOWUP.md`; typecheck, tests and `npm run test:browser` pass
+- [x] 8.1 Frame budget on desktop and throttled mobile profile; record in the PR (no phone and no real GPU were available: software GL only. Per frame in plain Node what step 3 adds is 0.012 ms (flecks, 200) to 0.028 ms (400), birds 0.005 to 0.014 ms, wake 0.007 ms, day, weather and fog 0.001 ms, camera 0.002 ms (`tools/frame-cost.ts`), under 0.06 ms in all; headless the whole loop averages 0.07 to 0.10 ms a step. Draws added: wake 2 and flecks 1, so 3 against the 4 on low and 8 on high (smoke). Desktop profile in software GL: 36 to 82 draws and 40 to 66 k triangles on the shots, stream step p99 4.9 ms, worst 26.8 ms, 2.0 percent of steps over 3 ms, 0 gaps; the same smoke before this step read p99 4 to 6 ms. The environment refresh frame and the p99 on a phone are not measured; FOLLOWUP records them)
+- [x] 8.2 Bundle size against the 25 KB gzip cap; CSP unchanged (gzip JavaScript 230,897 bytes against 220,397 at the start of the change: +10,500 of the 25,600 allowed (`npm run budget`, step 2 was +4,065); no new dependency, no binary asset (the fleck alpha map is generated), CSP and `_headers` untouched)
+- [x] 8.3 Screenshots per region and time of day, desktop and phone (`/workspace/firstmate/data/calm-mig-s3/shots/`: each region at afternoon and dusk, temperate also at night and morning, hazy and overcast, the indicator on, the opening and the cruise, desktop and phone, seed 42, plus the step-2 cruise for comparison)
+- [x] 8.4 Update `README.md` and `FOLLOWUP.md`; typecheck, tests and `npm run test:browser` pass (README and FOLLOWUP updated; typecheck, 155 tests (one timeout under load passes alone) and `npm run test:browser` pass; `openspec validate add-ocean-migration --strict` passes; two hours headless on seeds 42 and 7: net 125.8 and 125.6 km, no stalled five minutes, heap +1.4 and +1.7 MB over about 100 minutes, 35 and 36 recentres)

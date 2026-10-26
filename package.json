@@ -12,7 +12,8 @@
     "test:browser": "npm run build && npx tsx tools/smoke.ts",
     "shots": "npm run build && npx tsx tools/shots.ts",
     "serve": "npm run build && npx tsx tools/serve.ts",
-    "dev": "vite"
+    "dev": "vite",
+    "budget": "npm run build && npx tsx tools/budget.ts"
   },
   "devDependencies": {
     "@types/node": "20.19.43",
