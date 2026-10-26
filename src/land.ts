@@ -3,6 +3,7 @@ import { fbm2, makeNoise2D, ridged2 } from './noise.js';
 import { hash } from './rng.js';
 import { clamp, smoothstep } from './math.js';
 import type { Shore } from './shore.js';
+import { createLandmarks, type Landmarks } from './landmarks.js';
 import { createRegions, blendLook, type RegionWeights, type Regions } from './regions.js';
 import { createNavField, squaredDistance, type NavField } from './world-nav.js';
 
@@ -15,6 +16,8 @@ import { createNavField, squaredDistance, type NavField } from './world-nav.js';
 export type Land = Shore & {
   seed: number;
   regions: Regions;
+  /** Rocks and islets spaced across the sea. */
+  landmarks: Landmarks;
   /** Centre of the landmass kept in view (world XZ). */
   anchor: { x: number; z: number };
   /** Signed coast field: > 0 on land, < 0 at sea. Cheap compared with heightAt. */
@@ -122,6 +125,7 @@ function channels(seed: number): Channels {
 export function createLand(seed: number, options: LandOptions): Land {
   const n = channels(seed);
   const regions = createRegions(seed);
+  const landmarks = createLandmarks(seed);
   const blend: RegionWeights = [0, 0, 0, 0];
   const jitter = (hash(seed, 'land-anchor') / 0x100000000 - 0.5) * 0.7;
   const anchorYaw = options.viewYaw + jitter;
@@ -164,6 +168,8 @@ export function createLand(seed: number, options: LandOptions): Land {
 
   let held = 0;
   let lifted = 0;
+  // The lift a landmark added to the last mask sample: a low islet or rock, not the start of a hill.
+  let raised = 0;
   // Bay-scale octave of the last mask sample: high where land juts out as a headland.
   let headland = 0;
   function maskWarped(x: number, z: number): number {
@@ -202,7 +208,9 @@ export function createLand(seed: number, options: LandOptions): Land {
     const band =
       smoothstep(-0.45, -0.15, m) * (1 - smoothstep(-0.04, 0.06, m)) * smoothstep(HARBOUR_RADIUS + 40, HARBOUR_RADIUS + 140, r);
     lifted = Math.max(0, isl - 0.36) * 1.5 * band * isletGain;
-    m += lifted;
+    // A rock or islet of the cell, ragged by the same noise; none in the opening, where the view is composed.
+    raised = thin > 0 ? landmarks.at(x, z, isletGain) * thin * (0.9 + 0.35 * isl) : 0;
+    m += lifted + raised;
     return m;
   }
 
@@ -298,13 +306,13 @@ export function createLand(seed: number, options: LandOptions): Land {
     const beach = 2.3 * smoothstep(0, 0.1, m);
     // Coastal lowland: a low plain behind the beach before the land climbs inland.
     // Islets stay low: their lift raises a beach and a knoll, not a hill range.
-    const rise = m - lifted * 0.85;
+    const rise = m - lifted * 0.85 - raised * 0.9;
     const gentle = beach + smoothstep(0.1, 0.3, rise) * 7 + Math.max(0, rise - 0.3) * 190;
     // Cliffs step up to a low headland plateau, then follow the land inland.
     const cliffTop = smoothstep(0, 0.08, m) * (8 + 42 * steep) + Math.max(0, rise - 0.3) * 190;
     let h = gentle + (cliffTop - gentle) * steep;
     const inland = smoothstep(0.25, 0.65, rise);
-    const natural = m - held - lifted;
+    const natural = m - held - lifted - raised;
     // Hills on warped, low-frequency coordinates merge into ridges that grow inland.
     const hill = fbm2(n.hill, wx / 1300, wz / 1300, fine) * 0.5 + 0.5;
     h += hill * hill * (70 + 190 * smoothstep(0.3, 0.85, natural)) * inland;
@@ -354,6 +362,7 @@ export function createLand(seed: number, options: LandOptions): Land {
   return {
     seed,
     regions,
+    landmarks,
     anchor,
     maskAt,
     heightAt,

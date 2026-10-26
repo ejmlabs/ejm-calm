@@ -36,3 +36,11 @@ export function swellAt(x: number, z: number, t: number, out: SwellSample = { he
   out.slopeZ = slopeZ;
   return out;
 }
+
+/** How much faster the sea's clock runs at the top cruise speed than at rest (it runs 2.5 times as fast). */
+export const SWELL_SPEED_GAIN = 1.5;
+
+/** Rate of the swell's clock for a share of the top cruise speed, 0 to 1: the sea slides by faster the faster the whale swims. */
+export function swellRate(speedShare: number): number {
+  return 1 + SWELL_SPEED_GAIN * Math.min(1, Math.max(0, speedShare));
+}

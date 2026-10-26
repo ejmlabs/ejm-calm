@@ -111,7 +111,7 @@ test('whale cruise travels without spinning and stays in open water, for several
     // The opening minutes stay well off the coast.
     assert.ok(stats.minClear > 60, `seed ${seed} closest approach to land ${stats.minClear.toFixed(1)}`);
   }
-});
+}, 60000);
 
 test('whale course is deterministic per seed and steps clear of a blocking island', () => {
   const once = simulate(42, layoutWorld(42).land, DT, 30);

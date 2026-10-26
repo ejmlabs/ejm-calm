@@ -32,7 +32,7 @@ test('an hour of travel keeps tiles, navigation blocks, ship cells and caches in
   stream.prime(course.x, course.z);
   land.nav.prefetch(course.x, course.z, OPENING_NAV_RADIUS, Infinity);
 
-  const peak = { tiles: 0, ready: 0, navTiles: 0, navBlocks: 0, shipCells: 0, ships: 0, plan: 0 };
+  const peak = { tiles: 0, meshes: 0, triangles: 0, ready: 0, navTiles: 0, navBlocks: 0, shipCells: 0, ships: 0, plan: 0 };
   let px = course.x;
   let pz = course.z;
   let vx = 0;
@@ -58,6 +58,8 @@ test('an hour of travel keeps tiles, navigation blocks, ship cells and caches in
     const n = land.nav.stats();
     const f = ships.stats();
     peak.tiles = Math.max(peak.tiles, s.tiles);
+    peak.meshes = Math.max(peak.meshes, stream.group.children.length);
+    peak.triangles = Math.max(peak.triangles, s.triangles);
     peak.ready = Math.max(peak.ready, s.ready);
     peak.navTiles = Math.max(peak.navTiles, n.tiles);
     peak.navBlocks = Math.max(peak.navBlocks, n.blocks);
@@ -71,7 +73,9 @@ test('an hour of travel keeps tiles, navigation blocks, ship cells and caches in
   }
   collect();
   const growth = (process.memoryUsage().heapUsed - early) / 1e6;
-  assert.ok(peak.tiles < 400 && peak.ready <= 96, `land tiles ${peak.tiles}, ready ${peak.ready}`);
+  // Tiles of open sea are empty entries; the ones that carry a rock or islet are drawn, and dissolve in and out.
+  assert.ok(peak.tiles < 480 && peak.ready <= 96, `land tiles ${peak.tiles}, ready ${peak.ready}`);
+  assert.ok(peak.meshes <= 200 && peak.triangles <= 60000, `land meshes ${peak.meshes}, triangles ${peak.triangles}`);
   assert.ok(peak.navTiles <= 256 && peak.navBlocks <= 320, `nav tiles ${peak.navTiles}, blocks ${peak.navBlocks}`);
   assert.ok(peak.shipCells <= 60 && peak.ships <= 120, `ship cells ${peak.shipCells}, ships ${peak.ships}`);
   assert.ok(peak.plan <= 40000, `plan cache ${peak.plan}`);

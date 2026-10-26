@@ -78,6 +78,8 @@ export type WhaleMover = {
   step: (dt: number, time: number, shore: Shore) => void;
   /** Play `phase` from normalised time `t` for review; the whale holds position (surge aside) and snaps to it. */
   force: (phase: WhalePhase, t: number) => void;
+  /** Review only: put the whale at (x, z), keeping its heading. */
+  place: (x: number, z: number) => void;
 };
 
 /**
@@ -369,6 +371,10 @@ export function createWhaleMover(
   return {
     motion,
     step,
+    place(x, z) {
+      course.x = motion.x = x;
+      course.z = motion.z = z;
+    },
     force(phase, t) {
       forced = true;
       queue.length = 0;

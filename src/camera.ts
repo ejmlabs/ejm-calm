@@ -21,6 +21,15 @@ export type FollowCameraOptions = {
   groundAt?: (x: number, z: number) => number;
 };
 
+/** Vertical field of view in degrees: landscape, portrait. Speed lifts it by up to FOV_LIFT. */
+export const FOV: readonly [number, number] = [48, 62];
+export const FOV_LIFT = 6;
+/** Pull-back at the top speed, as a share of the framing distance (the follower's own trailing adds to it). */
+export const PULL_BACK = 0.25;
+/** The camera banks into a turn by up to this many radians (about 2.9 degrees), more the faster the whale swims. */
+export const LEAN_MAX = 0.05;
+const LEAN_GAIN = 0.5;
+
 export const DEFAULT_FRAMING: CameraFraming = { yaw: 0, pitch: 0.3, distance: 16 };
 export const FRAMING_DISTANCE: readonly [number, number] = [14, 40];
 const FRAMING_PITCH: readonly [number, number] = [0.1, 0.4];
@@ -38,7 +47,10 @@ const UNDER_DISTANCE = 0.7;
 const UNDER_MAX_DISTANCE = 18;
 /** Distance and look-ahead grow with speed up to this many m/s. */
 const SPEED_CAP = 28;
-const SPEED_DISTANCE = 0.015;
+const SPEED_DISTANCE = PULL_BACK / SPEED_CAP;
+
+/** How far the framing distance is pulled back at this speed, as a share of it (0 to PULL_BACK). */
+export const pullBackAt = (speed: number): number => SPEED_DISTANCE * Math.min(Math.max(speed, 0), SPEED_CAP);
 const SPEED_LOOK_AHEAD = 0.6;
 /** Below about this speed the camera holds its bearing instead of following the heading. */
 const COUPLING_SPEED: readonly [number, number] = [0.6, 3];
@@ -72,6 +84,7 @@ const W_REVIEW = 1.4;
 const W_SPEED = 1.2;
 const W_AIM = 2.5;
 const W_FIT = 1.5;
+const W_FEEL = 1.4;
 const W_LIFT_UP = 3;
 const W_LIFT_DOWN = 0.8;
 
@@ -115,6 +128,9 @@ export class FollowCamera {
   /** Extra eye height and distance factor that keep land or seabed out of the line of sight. */
   private readonly lift = createSpring();
   private readonly tighten = createSpring(1);
+  /** Field of view added by speed (degrees) and the lean into a turn (radians). */
+  private readonly fovLift = createSpring();
+  private readonly lean = createSpring();
   /** Distance factor ≥ 1 that backs off when the whale is wider than the frame (broadside, portrait). */
   private readonly fit = createSpring(1);
   /** Framed whale points (centre, head, tail) in render coordinates. */
@@ -254,7 +270,7 @@ export class FollowCamera {
       ? springSet(this.heading, toHeading)
       : springStep(this.heading, this.heading.x + (toHeading - this.heading.x) * coupling, W_HEADING, step);
     const fast = Math.min(speed, SPEED_CAP);
-    let distGoal = this.framing.distance * (this.portrait ? 1.12 : 1) * (1 + SPEED_DISTANCE * fast);
+    let distGoal = this.framing.distance * (this.portrait ? 1.12 : 1) * (1 + pullBackAt(fast));
     if (this.under) distGoal = Math.min(distGoal * UNDER_DISTANCE, UNDER_MAX_DISTANCE);
     const dist = go(this.dist, distGoal, W_FRAMING) * this.tighten.x * this.fit.x;
     const pitch = go(this.pitch, this.framing.pitch + (this.portrait ? 0.02 : 0), W_FRAMING);
@@ -393,6 +409,17 @@ export class FollowCamera {
     this.lookAt.set(lookX + (t.x - lookX) * aim, lookAtY + (t.y - lookAtY) * aim, lookZ + (t.z - lookZ) * aim);
     this.camera.position.set(eyeX, eyeY, eyeZ);
     this.camera.lookAt(this.lookAt);
+
+    // Speed feels like a wider view and a lean into the turn; neither under water, in the review view, or with reduced motion.
+    const feel = reducedMotion || this.under || b > 1e-4 ? 0 : smoothstep(6, SPEED_CAP, speed);
+    const lift = go(this.fovLift, FOV_LIFT * feel, W_FEEL);
+    const lean = go(this.lean, clamp(this.heading.v * LEAN_GAIN, -LEAN_MAX, LEAN_MAX) * feel, W_FEEL);
+    const fov = FOV[this.portrait ? 1 : 0] + lift;
+    if (Math.abs(this.camera.fov - fov) > 1e-3) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    if (lean !== 0) this.camera.rotateZ(lean);
   }
 
   /** Keep a height out of the surface band, on the side the camera is following. */

@@ -56,6 +56,8 @@ export type WhaleHandle = {
   update: (dt: number, time: number, shore: Shore) => void;
   /** Jump to a phase for review; `at` overrides the normalised start time. */
   forcePhase: (phase: WhalePhase, at?: number) => void;
+  /** Review only: put the whale at world (x, z). */
+  place: (x: number, z: number) => void;
   /** World-space size of the posed body (skinned), for debug stats. */
   measure: () => THREE.Vector3;
   /** Detail level currently drawn by the LOD. */
@@ -439,6 +441,11 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   const handle: WhaleHandle = {
     group,
     state,
+    place(x: number, z: number) {
+      mover.place(x, z);
+      state.x = x;
+      state.z = z;
+    },
     forcePhase(phase: WhalePhase, at?: number) {
       const preset = phase === 'breach' ? FORCED_BREACH_T : phase === 'spout' ? 0.5 : phase === 'surface' ? 0.45 : phase === 'deep' ? 0.3 : 0;
       const t = typeof at === 'number' && Number.isFinite(at) ? clamp(at, 0, 0.99) : preset;
