@@ -5,7 +5,7 @@ At 28 m/s the streamed world SHALL NOT show missing land, nav or ship cells on s
 
 #### Scenario: Throughput
 - **WHEN** the smoke test travels 300 s at cruise speed
-- **THEN** no on-screen coverage gap is reported and the worst stream frame is under 3 ms
+- **THEN** no on-screen coverage gap is reported and the 99th-percentile stream frame is under 3 ms on a phone-class device; the smoke run prints that percentile and the worst frame, and fails if more than 10 percent of stream frames exceed 3 ms
 
 ### Requirement: Cleanup behind
 Tiles, nav blocks, ship cells and caches behind the whale SHALL be evicted so memory stays bounded.

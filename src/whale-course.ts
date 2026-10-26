@@ -142,6 +142,8 @@ export const PLAN_EVERY = 5;
  * streamed navigation tiles it reads are built in the background.
  */
 export const PLAN_START = 20;
+/** Navigation tiles built around the start before the first frame: the look-ahead of the first steps reads no further, so the whale's first step builds none. */
+export const OPENING_NAV_RADIUS = 1100;
 /** Coarse planning disc: cell size and radius in cells (≈3.2 km, under two minutes at cruise). */
 const PLAN_CELL = 160;
 export const PLAN_RADIUS = 20;

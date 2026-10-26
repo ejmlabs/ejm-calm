@@ -182,9 +182,14 @@ export function createLand(seed: number, options: LandOptions): Land {
     const thin = smoothstep(REGION_FROM, REGION_FULL, r);
     let isletGain = 1;
     // Along the exit the mask is held at sea, easing out to nothing at the far end.
-    const along = x * exit.x + z * exit.z;
-    const across = Math.abs(x * -exit.z + z * exit.x);
-    const channel = along > 0 ? (1 - smoothstep(EXIT_WIDTH, EXIT_WIDTH * 2.3, across)) * smoothstep(450, 800, r) * (1 - smoothstep(REGION_FULL, REGION_FULL + 2000, r)) : 0;
+    let channel = 0;
+    if (r > 450 && r < REGION_FULL + 2000) {
+      const along = x * exit.x + z * exit.z;
+      if (along > 0) {
+        const across = Math.abs(x * -exit.z + z * exit.x);
+        channel = (1 - smoothstep(EXIT_WIDTH, EXIT_WIDTH * 2.3, across)) * smoothstep(450, 800, r) * (1 - smoothstep(REGION_FULL, REGION_FULL + 2000, r));
+      }
+    }
     let m = rawMask() + held + distant - harbour;
     if (channel > 0) m += (Math.min(m, EXIT_FLOOR) - m) * channel;
     if (thin > 0) {

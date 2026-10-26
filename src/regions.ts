@@ -55,19 +55,11 @@ export type Regions = {
 export function createRegions(seed: number): Regions {
   const noiseX = makeNoise2D(hash(seed, 'regions'), 1);
   const noiseZ = makeNoise2D(hash(seed, 'regions'), 2);
-  const cache = new Map<string, RegionId>();
   const half = REGION_BLEND / 2 / REGION_CELL;
 
   function cellRegion(i: number, j: number): RegionId {
     if (i === 0 && j === 0) return 0;
-    const key = `${i}:${j}`;
-    let id = cache.get(key);
-    if (id === undefined) {
-      id = (hash(seed, 'region-cell', i, j) % 4) as RegionId;
-      if (cache.size > 512) cache.clear();
-      cache.set(key, id);
-    }
-    return id;
+    return (hash(seed, 0, i, j) % 4) as RegionId;
   }
 
   /** Weights of the cell holding `f` and its two neighbours along one axis: [before, own, after]. */

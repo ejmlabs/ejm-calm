@@ -6,7 +6,7 @@ import { setFlagsFromString } from 'node:v8';
 import { layoutWorld } from '../src/terrain.js';
 import { createLandStream } from '../src/landmesh.js';
 import { createShipStream } from '../src/world-ships.js';
-import { PLAN_REACH, createWhalePilot, type WhaleCourse } from '../src/whale-course.js';
+import { OPENING_NAV_RADIUS, PLAN_REACH, createWhalePilot, type WhaleCourse } from '../src/whale-course.js';
 import { createWorldOrigin } from '../src/world-origin.js';
 
 setFlagsFromString('--expose-gc');
@@ -30,7 +30,7 @@ test('an hour of travel keeps tiles, navigation blocks, ship cells and caches in
   let recentres = 0;
   origin.onRecenter(() => recentres++);
   stream.prime(course.x, course.z);
-  land.nav.prefetch(course.x, course.z, 700, Infinity);
+  land.nav.prefetch(course.x, course.z, OPENING_NAV_RADIUS, Infinity);
 
   const peak = { tiles: 0, ready: 0, navTiles: 0, navBlocks: 0, shipCells: 0, ships: 0, plan: 0 };
   let px = course.x;
@@ -80,3 +80,16 @@ test('an hour of travel keeps tiles, navigation blocks, ship cells and caches in
   stream.dispose();
   ships.dispose();
 }, 600000);
+
+test('the first whale steps build no navigation tile once the opening ones are built', () => {
+  for (const seed of [42, 7, 1234, 99, 2024, 31337]) {
+    const layout = layoutWorld(seed);
+    const land = layout.land;
+    const pilot = createWhalePilot(seed, layout.whaleHome, layout.journey);
+    const course: WhaleCourse = { x: layout.whaleHome.x, z: layout.whaleHome.z, heading: layout.journey, leg: layout.journey, speed: CRUISE };
+    land.nav.prefetch(course.x, course.z, OPENING_NAV_RADIUS, Infinity);
+    const built = land.nav.stats().tiles;
+    for (let i = 0; i < 3 * 30; i++) pilot.step(course, DT, i * DT, land);
+    assert.equal(land.nav.stats().tiles, built, `seed ${seed} built tiles in its first steps`);
+  }
+}, 60000);

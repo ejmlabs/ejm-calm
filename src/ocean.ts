@@ -9,9 +9,9 @@ export type OceanHandle = {
   mesh: THREE.Mesh;
   /** With a camera, the plane follows it (render space) while ripples stay fixed to the world. */
   update: (dt: number, sunDirection: THREE.Vector3, camera?: THREE.Camera) => void;
-  /** World X/Z of render (0, 0); keeps ripples and shelf maps on the world after a recentre. */
   /** The water's base colour (a region's look). */
   setWaterColor: (color: THREE.Color) => void;
+  /** World X/Z of render (0, 0); keeps ripples and shelf maps on the world after a recentre. */
   setOrigin: (x: number, z: number) => void;
   /** Swaps in shelf maps baked elsewhere in the world (maps are in world coordinates). */
   setShelves: (shelves: { near?: ShelfMap; far?: ShelfMap }) => void;

@@ -10,7 +10,7 @@ import type { ShipHandle } from './ships.js';
 import type { WorkerRequest } from './world-worker.js';
 import { damp } from './math.js';
 import { blendLook } from './regions.js';
-import { PLAN_REACH } from './whale-course.js';
+import { OPENING_NAV_RADIUS, PLAN_REACH } from './whale-course.js';
 
 export type WorldOptions = {
   sunDirection: THREE.Vector3;
@@ -97,7 +97,7 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
   landStream.prime(layout.whaleHome.x, layout.whaleHome.z);
 
   // The whale's first minutes need no stall: build the water around the start now.
-  land.nav.prefetch(layout.whaleHome.x, layout.whaleHome.z, 700, Infinity);
+  land.nav.prefetch(layout.whaleHome.x, layout.whaleHome.z, OPENING_NAV_RADIUS, Infinity);
 
   const ships = createShipStream({
     seed,

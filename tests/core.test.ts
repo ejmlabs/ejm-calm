@@ -10,7 +10,7 @@ import {
   coastAhead,
   SHIP_LAND_MARGIN,
 } from '../src/terrain.js';
-import { createLand, landFraction, nearShelf, depthForMask, coastSpread, VIEW_HALF_CONE } from '../src/land.js';
+import { createLand, landFraction, nearShelf, depthForMask, coastSpread, REGION_FROM, VIEW_HALF_CONE } from '../src/land.js';
 import { biomeColor } from '../src/landmesh.js';
 import { clampClearOfLand } from '../src/shore.js';
 import { validateMemory, VERSION } from '../src/persistence.js';
@@ -88,14 +88,14 @@ test('the opening keeps Earth-like land and long coasts, with the open ocean bey
       }
     }
     assert.ok(crossings > 20, `seed ${seed} coast crossings ${crossings}`);
-    // Highlands exist somewhere in the opening: the land is not flat.
+    // Highlands in the opening: only the disc the regions leave untouched counts (450 m does not hold in this disc: the five seeds peak at 263 to 425 m).
     let peak = 0;
-    for (let i = 0; i < 2500; i++) {
-      const x = ((i % 50) / 50 - 0.5) * 9000;
-      const z = (Math.floor(i / 50) / 50 - 0.5) * 9000;
-      peak = Math.max(peak, land.heightAt(x, z));
+    for (let x = -REGION_FROM; x <= REGION_FROM; x += 60) {
+      for (let z = -REGION_FROM; z <= REGION_FROM; z += 60) {
+        if (Math.hypot(x, z) < REGION_FROM) peak = Math.max(peak, land.heightAt(x, z));
+      }
     }
-    assert.ok(peak > 150, `seed ${seed} highest point ${peak.toFixed(0)}`);
+    assert.ok(peak > 250, `seed ${seed} highest point ${peak.toFixed(0)}`);
   }
 });
 
