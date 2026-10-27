@@ -7,7 +7,7 @@ import { FollowCamera } from '../src/camera.js';
 import { detailFor, type QualityTier } from '../src/quality.js';
 import { layoutWorld } from '../src/terrain.js';
 import { makeNoise2D } from '../src/noise.js';
-import { buildTile, tileSize } from '../src/world-tiles.js';
+import { buildTile, MAP_LEVEL, tileSize } from '../src/world-tiles.js';
 import { createLandLife } from '../src/land-life.js';
 
 /**
@@ -72,3 +72,6 @@ function build(label: string, run: () => void): void {
 }
 build('tile build, bare', () => buildTile(land, patch, 0, tx, tz, 24));
 for (const tier of ['low', 'high'] as QualityTier[]) build(`tile build, life (${tier})`, () => buildTile(land, patch, 0, tx, tz, 24, { life, objects: detailFor(tier).objects }));
+// A coarse tile over the same town (2 km) with its shading maps, as the worker builds it.
+const far = MAP_LEVEL + 2;
+build('far tile build, maps', () => buildTile(land, patch, far, Math.floor(town.x / tileSize(far)), Math.floor(town.z / tileSize(far)), 24, { life, objects: detailFor('high').objects }, true));

@@ -5,7 +5,7 @@ import { withBrowser, openCalm, DESKTOP, MOBILE, type DeviceProfile } from './br
 import { DAY, pickTimeOfDay } from '../src/sky.js';
 
 /**
- * Review shots of the land: the opening by day, dusk and night, then a close coast from a review camera on the
+ * Review shots of the land: the opening by day, dusk and night, the highest range in sight by afternoon and dusk, then a close coast from a review camera on the
  * water off the nearest town and the nearest herd. Uses the ?debug=1 hooks only. Writes JPEGs (CSS pixels) and
  * shots.json to the directory given as the first argument (run `npm run build` first).
  *
@@ -63,6 +63,16 @@ await withBrowser(async (browser, base) => {
         await page.waitForTimeout(2500);
         await shot(page, device, `land-opening-${day}`);
       }
+      // The highest range 2.5 to 7 km out, from the water where the whale is, a little up.
+      const peak = (await call(page, 'peak', 2500, 7000)) as { x: number; y: number; z: number };
+      const whale = ((await stats(page))['whale'] as number[]);
+      await call(page, 'view', [whale[0], 14, whale[2]], [peak.x, peak.y * 0.6, peak.z]);
+      for (const day of ['afternoon', 'dusk'] as const) {
+        await call(page, 'setDay', dayFor(day));
+        await settle(page, 3500);
+        await shot(page, device, `far-range-${day}`);
+      }
+      await call(page, 'view', null);
       const life = (await page.evaluate('window.__calmReview.life(8000)')) as Life[];
       const seen = life.filter((l) => l.vantage);
       const town = seen.find((l) => l.kind === 'town');

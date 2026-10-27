@@ -106,6 +106,7 @@ type Channels = {
   ridge: NoiseFunction2D;
   range: NoiseFunction2D;
   gully: NoiseFunction2D;
+  erode: NoiseFunction2D;
 };
 
 function channels(seed: number): Channels {
@@ -123,6 +124,7 @@ function channels(seed: number): Channels {
     bay: makeNoise2D(s, 10),
     shoal: makeNoise2D(s, 11),
     gully: makeNoise2D(s, 12),
+    erode: makeNoise2D(s, 13),
   };
 }
 
@@ -346,6 +348,10 @@ export function createLand(seed: number, options: LandOptions): Land {
     const far = smoothstep(1200, 2800, r);
     const scale = 800 + 900 * smoothstep(1800, 4800, r);
     h += peaks * scale * smoothstep(0.04, 0.55, natural) * (0.12 + 0.88 * ranges) * far;
+    // Spurs and gullies down every slope with real relief, finer as `lod` falls: far tiles' shading maps sample
+    // more of them than their own vertices can hold.
+    const relief = smoothstep(30, 400, h);
+    if (relief > 0) h += (ridged2(n.erode, wx / 640, wz / 640, Math.max(1, 6 - lod), 2.1, 0.5) - 0.4) * relief * Math.min(h, 900) * 0.3;
     // Cliff faces (land only, so the coast mask and the sea are untouched): gullies and buttresses
     // break the top edge.
     const face = steep * smoothstep(0.0, 0.03, m) * (1 - smoothstep(0.12, 0.2, m));

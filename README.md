@@ -48,14 +48,16 @@ checks use Playwright Core and the system Chrome executable.
 two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 50 60` swims an hour on each of seeds 1 to 50 and fails any under 0.5 net over path or with ten minutes under 2 km (it also reports the seeds that dip under 1.5 km in five); `npx tsx tools/frame-cost.ts`
 times what the journey's feel adds per frame in Node; `npx tsx tools/feel-shots.ts <dir>` captures
 the regions, times of day, weather and indicator, and `npx tsx tools/land-shots.ts <dir>` the land by day,
-dusk and night and a close coast with a town and a herd (after a build).
+dusk and night, the highest range in sight, and a close coast with a town and a herd (after a build).
 
 There is no byte cap: load time is the size bar. `npx tsx tools/load-time.ts <base dist> <new dist>` times
 first paint, first contentful paint and the first frame of the sea over cold loads on a throttled normal
-connection (9 Mbps, 170 ms; phones also at a 4x slower CPU), and fails if the new build adds a second or more.
+connection (9 Mbps, 170 ms; phones also at a 4x slower CPU), each in a fresh browser and alternating between
+the builds, and fails if the new build adds a second or more.
 
 Review hooks (`window.__calmReview`) are available only with `?debug=1`, among them
-`setDay`, `setWeather`, `setRoute`, `jumpTo`, `life` (towns and herds nearby) and `view` (a fixed review camera).
+`setDay`, `setWeather`, `setRoute`, `jumpTo`, `life` (towns and herds nearby), `peak` (the highest land in a ring)
+and `view` (a fixed review camera).
 
 ## Static deployment
 

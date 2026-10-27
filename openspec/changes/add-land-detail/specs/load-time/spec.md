@@ -9,7 +9,7 @@ The project SHALL NOT cap bundle bytes, asset bytes or the number of dependencie
 
 #### Scenario: Load time measured against the base
 - **WHEN** `npx tsx tools/load-time.ts <base build> <new build>` runs on the desktop and phone profiles through a 9 Mbps, 170 ms connection
-- **THEN** it reports the median first paint, first contentful paint and first frame for both builds, and fails if any grows by 1,000 ms or more
+- **THEN** it alternates cold loads between the two builds, reports the median first paint, first contentful paint and first frame for both, and fails if any grows by 1,000 ms or more
 
 ### Requirement: three.js used fully
 Rendering and geometry SHALL use three.js and its maintained addons where they do the job (geometries, `BufferGeometryUtils`, instancing), rather than hand-rolled equivalents.

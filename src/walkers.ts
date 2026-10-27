@@ -17,6 +17,8 @@ export type Walkers = {
   /** Refills the instances when the drawn tiles change; `clock` drives the animation. */
   update: (cameraX: number, cameraZ: number, clock: number) => void;
   setCap: (cap: number) => void;
+  /** The people's and animals' materials, to compile ahead of their first draw. */
+  materials: readonly THREE.Material[];
   stats: () => { walkers: number; draws: number; triangles: number };
   dispose: () => void;
 };
@@ -187,6 +189,7 @@ export function createWalkers(stream: LandStream, initialCap: number): Walkers {
 
   return {
     group,
+    materials: kinds.map((kind) => kind.material),
     update(cameraX, cameraZ, time) {
       clock.value = time;
       const next = stream.walkerVersion();

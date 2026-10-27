@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { layoutWorld } from '../src/terrain.js';
 import { makeNoise2D } from '../src/noise.js';
-import { buildTile, tileSize, treesIn } from '../src/world-tiles.js';
+import { buildTile, MAP_LEVEL, tileSize, treesIn } from '../src/world-tiles.js';
 import { createLandLife, TOWN_CELL, TREE, WALKER_LEVELS, type Town } from '../src/land-life.js';
 import { detailFor } from '../src/quality.js';
 import type { Land } from '../src/land.js';
@@ -99,6 +99,51 @@ test('tiles with life are deterministic, keep to the cap and fit a 16-bit index'
     assert.ok(a.positions.length / 3 <= 65536, `${tier}: ${a.positions.length / 3} vertices`);
     assert.ok(a.objectTriangles > 0 && a.objectTriangles < a.triangles);
   }
+});
+
+test('a bare first-frame tile has exactly the ground of its full build', () => {
+  const { land, ix, iz } = townTile(42);
+  const bare = buildTile(land, makeNoise2D(42, 21), 0, ix, iz, CELLS)!;
+  const full = buildTile(land, makeNoise2D(42, 21), 0, ix, iz, CELLS, { life: createLandLife(land), objects: 110 }, true)!;
+  // The full build dissolves in over the bare one: the ground must match to the bit, or the two would fight.
+  const ground = bare.positions.length;
+  assert.deepEqual(full.positions.slice(0, ground), bare.positions);
+  assert.deepEqual(full.index.slice(0, bare.index.length), bare.index);
+  assert.ok(full.objects > 0 && bare.objects === 0);
+  // The finest levels carry no shading maps.
+  assert.equal(full.maps, null);
+});
+
+test('coarse tiles carry pure shading maps that leave their geometry alone', () => {
+  const { land, town } = townTile(42);
+  const life = createLandLife(land);
+  const level = MAP_LEVEL + 2;
+  const [ix, iz] = [Math.floor(town.x / tileSize(level)), Math.floor(town.z / tileSize(level))];
+  const build = (maps: boolean) => buildTile(land, makeNoise2D(42, 21), level, ix, iz, CELLS, { life, objects: 110 }, maps)!;
+  const a = build(true);
+  const b = build(true);
+  const plain = build(false);
+  assert.ok(a.maps && b.maps);
+  assert.equal(a.maps.size, CELLS * 4);
+  assert.equal(a.maps.color.length, a.maps.size * a.maps.size * 4);
+  assert.deepEqual(a.maps, b.maps);
+  assert.equal(plain.maps, null);
+  assert.deepEqual(a.positions, plain.positions);
+  assert.deepEqual(a.index, plain.index);
+  // Normals are unit length, and the map has relief: lit and shaded texels, ridges and gullies.
+  const n = a.maps.normal;
+  let steep = 0;
+  const cavities = new Set<number>();
+  for (let t = 0; t < n.length; t += 4) {
+    const v = [n[t]!, n[t + 1]!, n[t + 2]!].map((c) => c / 127.5 - 1);
+    assert.ok(Math.abs(Math.hypot(...v) - 1) < 0.03);
+    if (v[1]! < 0.9) steep++;
+    cavities.add(n[t + 3]! >> 5);
+  }
+  assert.ok(steep > 0, 'some slopes');
+  assert.ok(cavities.size >= 4, 'ridges and gullies');
+  // A tile below the map level has none, even when asked.
+  assert.equal(buildTile(land, makeNoise2D(42, 21), MAP_LEVEL - 1, ix, iz, CELLS, undefined, true)?.maps ?? null, null);
 });
 
 test('people stand in the tile of their town, on its finest levels only', () => {

@@ -18,10 +18,12 @@ The owner also set a new rule for the project: no byte, bundle or dependency cap
   - a fine bump normal on `medium` and `high`.
 
   Each detail fades out once a pixel spans too much of it, so nothing shimmers, and all of it fades with distance.
-- **Shape:** gullies and buttresses break the tops of sea cliffs. This is on land only, so the coast mask and the sea depths stay exactly as they are.
+- **Shape:** gullies and buttresses break the tops of sea cliffs, and spurs and gullies run down every slope with real relief. This is on land only, so the coast mask and the sea depths stay exactly as they are.
+- **Far ranges:** tiles from 512 m across carry colour and normal shading maps baked in the worker at four times their vertex density, so distant ranges show spurs, gullies, rock and snow lines instead of flat facets, with thinner aerial haze that still closes before the streamed edge. No triangles are added.
 - **Vegetation by biome:** trees in land tiles (conifers, broadleaf trees, palms in the tropics) and shrubs and boulders, built into the tile geometry by the tile worker from three.js primitives merged with its `BufferGeometryUtils`. They are seeded, add no draw calls and dissolve with their tile.
 - **Towns:** villages of 6 to 18 houses, some with a tower, on gentle coastal land behind the beach. They are placed from the seed and the land, and are visible from the sea out to about 3 km.
 - **People and animals:** tiny people walking about each town, and grazing herds on open meadows (sheep and cows near towns, deer in the temperate wild, reindeer in polar land, goats in the tropics). They take two instanced draws, move gently, and freeze under reduced motion.
+- **First frame first:** the opening tiles are built bare on the main thread; their life and shading maps come from the worker after the first frame and dissolve in, so land detail adds no time to the first frame.
 - **Budgets:** per-tier caps on objects per tile, object triangles and walkers, all reported in the debug stats and checked in smoke.
 - **No size caps:** remove `npm run budget` and its script, the audio size assertion, and the byte and dependency rules in the `add-ocean-migration` and `add-world-detail` changes. Add `tools/load-time.ts`, which times first paint, first contentful paint and the first frame of the sea on a throttled normal connection with Playwright, and fails when a build adds a second or more against another.
 
@@ -39,9 +41,9 @@ None archived. The open changes `add-ocean-migration` (`migration-performance`) 
 ## Impact
 
 - Code:
-  - `src/land.ts`: cliff gullies, on land only.
-  - `src/world-tiles.ts`: detail weights, and objects baked into tiles.
-  - `src/landmesh.ts`: the shader, and walkers per tile.
+  - `src/land.ts`: cliff gullies, and spurs and gullies on slopes, on land only.
+  - `src/world-tiles.ts`: detail weights, objects baked into tiles, and shading maps for coarse tiles.
+  - `src/landmesh.ts`: the shader, shading maps, bare first tiles upgraded from the worker, and walkers per tile.
   - `src/world-worker.ts`: transfers.
   - new `src/land-life.ts`: placement of trees, towns and herds.
   - new `src/land-objects.ts`: the object shapes, from three.js geometries.

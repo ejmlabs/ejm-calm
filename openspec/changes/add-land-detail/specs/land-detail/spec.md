@@ -22,10 +22,28 @@ Each surface detail SHALL fade out where one pixel spans a large part of its per
 
 #### Scenario: Far land stays calm
 - **WHEN** land is more than 4 km away
-- **THEN** no fine detail is drawn and the land melts into the haze as before
+- **THEN** no fine shader detail (strata, grit, mottling, bump) is drawn, and the land still closes into the haze before the streamed edge
+
+### Requirement: Far ranges show their relief
+Tiles from 512 m across up SHALL carry shading maps baked in the worker from the heightfield at four times their vertex density: a colour map from the same biome rules, and a normal map with a cavity term. The land shader SHALL light and colour those tiles from the maps, mipmapped so they never shimmer. The tile grid's cells and split distance SHALL NOT change.
+
+#### Scenario: A far range in daylight
+- **WHEN** the highest range 2.5 to 7 km from the start of seed 42 is in view by afternoon or dusk
+- **THEN** its slopes show lit spurs, shaded gullies, rock and grass, not a few flat triangles of one tone
+
+#### Scenario: Shading maps are pure
+- **WHEN** the same coarse tile is built twice with shading maps
+- **THEN** both maps are identical, and the tile's own geometry is identical to its build without maps
+
+### Requirement: Thin aerial haze over far land
+Aerial haze over land SHALL stay thin enough that a range 3 to 5 km out keeps the relief of its shading maps, and SHALL still close completely before the streamed edge.
+
+#### Scenario: Haze still hides the edge
+- **WHEN** land lies near the streamed edge
+- **THEN** it is fully hazed and sunk, so no edge shows
 
 ### Requirement: Shape detail on land only
-Cliff tops SHALL gain gullies and buttresses, only where the coast mask is above sea. Cliff faces SHALL NOT be terraced. The coast mask (`maskAt`) and every height below sea level SHALL be unchanged, so the route, navigation, shelf maps and seafloor are unaffected.
+Cliff tops SHALL gain gullies and buttresses, and slopes with real relief (from about 30 m up) SHALL gain spurs and gullies whose finer octaves follow the level of detail, only where the coast mask is above sea. Cliff faces SHALL NOT be terraced. The coast mask (`maskAt`) and every height below sea level SHALL be unchanged, so the route, navigation, shelf maps and seafloor are unaffected.
 
 #### Scenario: Mask and sea unchanged
 - **WHEN** `maskAt` and `heightAt` are sampled at sea for a seed before and after this change
@@ -36,11 +54,15 @@ Cliff tops SHALL gain gullies and buttresses, only where the coast mask is above
 - **THEN** it reports the same figures as before this change
 
 ### Requirement: Vegetation, rocks and towns in land tiles
-Land tiles at the five finest levels SHALL carry seeded objects built into the tile geometry:
+Land tiles at the five finest levels SHALL carry seeded objects built into the tile geometry, except the tiles built on the main thread for the first frame, which are rebuilt with them after it:
 - trees by biome (conifers, broadleaf trees, and palms in the tropics), shrubs and boulders;
 - town houses.
 
 The objects SHALL stand on the tile's own drawn surface, dissolve with their tile and add no draw calls.
+
+#### Scenario: First frame without life
+- **WHEN** the page opens with a worker available
+- **THEN** the first tiles are built bare on the main thread, and their trees, houses, walkers and shading maps follow from the worker after the first frame, dissolving in over the bare land without leaving a hole
 
 #### Scenario: Biome rules
 - **WHEN** objects are placed

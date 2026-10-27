@@ -42,6 +42,11 @@ export type World = {
   landStream: LandStream;
   /** People and animals drawn now may number at most this (follows the quality tier). */
   setWalkerCap: (cap: number) => void;
+  /**
+   * Materials first drawn only after the opening frame (land dissolving in, people and animals), to compile ahead of
+   * that frame.
+   */
+  laterMaterials: readonly THREE.Material[];
   ships: {
     /** Ships afloat and visible (stable array). */
     active: () => readonly ShipHandle[];
@@ -208,6 +213,7 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     ocean,
     landStream,
     setWalkerCap: walkers.setCap,
+    laterMaterials: [...landStream.materials, ...walkers.materials],
     ships: { active: ships.active, setVisible: ships.setVisible },
     update(wx, wz, camera, dt, time) {
       const start = performance.now();

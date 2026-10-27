@@ -56,6 +56,8 @@ type CalmReview = {
    * open water with a clear sightline to them (null when there is none within 400 m).
    */
   life: (radius: number) => Array<{ kind: 'town' | 'herd'; x: number; y: number; z: number; count: number; vantage: [number, number, number] | null }>;
+  /** The highest land between `near` and `far` metres from the whale (world coordinates). */
+  peak: (near: number, far: number) => { x: number; y: number; z: number };
   /** Review camera at world `from` looking at `to`, the whale and the land streamed around it; null returns to the chase. */
   view: (from: [number, number, number] | null, to?: [number, number, number]) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
@@ -420,7 +422,25 @@ function tick(now: number): void {
   }
 }
 
+/**
+ * Compiles what the opening frame does not draw yet (the land's full tiles dissolving in over the bare ones, people
+ * and animals) before it, by drawing each once as a single degenerate point, so their first use a few seconds later
+ * does not stall a frame.
+ */
+function warm(): void {
+  const point = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+  const stage = new THREE.Scene();
+  for (const material of world.laterMaterials) {
+    const mesh = new THREE.Mesh(point, material);
+    mesh.frustumCulled = false;
+    stage.add(mesh);
+  }
+  renderer.render(stage, camera);
+  point.dispose();
+}
+
 function start(): void {
+  warm();
   ui.ready();
   sync();
   persist();
@@ -568,6 +588,20 @@ if (debug) {
         }
       }
       return out.sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z));
+    },
+    peak(near: number, far: number) {
+      const { x, z } = whale.state;
+      let best = { x, y: -Infinity, z };
+      for (let k = 0; k < 72; k++) {
+        const a = (k / 72) * Math.PI * 2;
+        for (let d = clamp(near, 0, 12000); d <= clamp(far, 0, 12000); d += 200) {
+          const px = x + Math.cos(a) * d;
+          const pz = z + Math.sin(a) * d;
+          const py = world.land.heightAt(px, pz);
+          if (py > best.y) best = { x: px, y: py, z: pz };
+        }
+      }
+      return best;
     },
     view(from, to) {
       const finite = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);

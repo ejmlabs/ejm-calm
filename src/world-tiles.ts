@@ -35,7 +35,21 @@ export type TileData = {
   objectTriangles: number;
   /** People and animals standing on the tile: WALKER_STRIDE floats each (see `Walker`), x and z local to the tile. */
   walkers: Float32Array | null;
+  /** Shading maps of a coarse tile (see `MAP_LEVEL`), or null. */
+  maps: ShadingMaps | null;
 };
+
+/**
+ * A coarse tile's surface at four times its vertex density, so far ranges show their spurs, gullies, rock and snow
+ * lines instead of the facets of their mesh: `size`² texels over the tile, texel centres at (t + 0.5) / size,
+ * colour as sRGB, and the normal (xyz from 0 to 255) with a cavity term in alpha (dark in gullies, light on ridges).
+ */
+export type ShadingMaps = { size: number; color: Uint8Array; normal: Uint8Array };
+
+/** Tiles from this level up (512 m and more, with vertices 21 m or more apart) carry shading maps. */
+export const MAP_LEVEL = 2;
+/** Shading map texels per vertex step. */
+const MAP_DENSITY = 4;
 
 /** kind, x, y, z, yaw, range, phase, tint. */
 export const WALKER_STRIDE = 8;
@@ -129,6 +143,7 @@ export function buildTile(
   iz: number,
   cells: number,
   extras?: TileLife,
+  maps = false,
 ): TileData | null {
   const N = cells;
   const size = tileSize(level);
@@ -324,7 +339,67 @@ export function buildTile(
     objects,
     objectTriangles: (index.length - ground) / 3,
     walkers,
+    maps: maps && level >= MAP_LEVEL ? shadingMaps(land, patchNoise, x0, z0, size, N * MAP_DENSITY, biome ? (x, z, h, slopeY, cliff) => extras!.life.forestAt(x, z, h, slopeY, cliff, biome) : undefined) : null,
   };
+}
+
+const toSrgb = (c: number): number => Math.round(255 * clamp(c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055, 0, 1));
+
+/** Bakes a tile's shading maps from the heightfield sampled at the texels' own spacing (see `ShadingMaps`). */
+function shadingMaps(
+  land: Pick<Land, 'surfaceAt'>,
+  patchNoise: NoiseFunction2D,
+  x0: number,
+  z0: number,
+  size: number,
+  M: number,
+  forestAt?: (x: number, z: number, h: number, slopeY: number, cliff: number) => number,
+): ShadingMaps {
+  const step = size / M;
+  const ring = Math.max(0, Math.round(Math.log2(step / 4)));
+  // Texel centres with a two-texel border for the normals and the cavity.
+  const S = M + 4;
+  const heights = new Float32Array(S * S);
+  const cliffs = new Float32Array(S * S);
+  const surface = { cliff: 0 };
+  for (let j = 0; j < S; j++) {
+    for (let i = 0; i < S; i++) {
+      heights[j * S + i] = land.surfaceAt(x0 + (i - 1.5) * step, z0 + (j - 1.5) * step, ring, surface);
+      cliffs[j * S + i] = surface.cliff;
+    }
+  }
+  const color = new Uint8Array(M * M * 4);
+  const normal = new Uint8Array(M * M * 4);
+  const rgb: Color = [0, 0, 0];
+  for (let j = 0; j < M; j++) {
+    for (let i = 0; i < M; i++) {
+      const k = (j + 2) * S + (i + 2);
+      const h = heights[k]!;
+      let nx = (heights[k - 1]! - heights[k + 1]!) / (2 * step);
+      let nz = (heights[k - S]! - heights[k + S]!) / (2 * step);
+      const len = Math.hypot(nx, 1, nz);
+      nx /= len;
+      nz /= len;
+      const ny = 1 / len;
+      const wx = x0 + (i + 0.5) * step;
+      const wz = z0 + (j + 0.5) * step;
+      const patch = patchNoise(wx / 140, wz / 140) * 0.7 + patchNoise(wx / 37, wz / 37) * 0.3;
+      const slopeY = Math.min(ny, 1 - cliffs[k]! * 0.75);
+      biomeColor(h, slopeY, patch, rgb, forestAt?.(wx, wz, h, slopeY, cliffs[k]!));
+      const t = (j * M + i) * 4;
+      color[t] = toSrgb(rgb[0]);
+      color[t + 1] = toSrgb(rgb[1]);
+      color[t + 2] = toSrgb(rgb[2]);
+      color[t + 3] = 255;
+      // Height against the ring two texels out, as a slope: positive on ridges and spurs, negative in gullies.
+      const around = (heights[k - 2]! + heights[k + 2]! + heights[k - 2 * S]! + heights[k + 2 * S]!) * 0.25;
+      normal[t] = Math.round(127.5 + 127.5 * nx);
+      normal[t + 1] = Math.round(127.5 + 127.5 * ny);
+      normal[t + 2] = Math.round(127.5 + 127.5 * nz);
+      normal[t + 3] = Math.round(255 * clamp(0.5 + ((h - around) / (2 * step)) * 1.5, 0, 1));
+    }
+  }
+  return { size: M, color, normal };
 }
 
 type Arrays = { positions: Float32Array; normals: Float32Array; colors: Float32Array; detail: Uint8Array };
