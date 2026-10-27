@@ -39,8 +39,8 @@ export const EYE_CLEARANCE = SURFACE_BAND + 0.15;
 /** Hysteresis on the whale's depth for following it under (and back up). */
 export const DIVE_BELOW = -3;
 export const RISE_ABOVE = -2;
-/** Seconds below DIVE_BELOW before the camera follows, so short dips (a breach's re-entry) do not flip it. */
-export const DIVE_DWELL = 2.5;
+/** Seconds below DIVE_BELOW before the camera follows, so short dips (the run-up to a breach, its re-entry) do not flip it. */
+export const DIVE_DWELL = 3.5;
 const UNDER_EYE = 1.5;
 const UNDER_DISTANCE = 0.7;
 /** Under water the haze is thick: never trail further than this. */

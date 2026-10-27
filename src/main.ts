@@ -466,7 +466,7 @@ if (debug) {
       whale.forcePhase('deep', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
     },
     forceWhale(phase: WhalePhase, at?: number) {
-      if (!(phase in PHASE_LEN)) return;
+      if (!Object.hasOwn(PHASE_LEN, phase)) return;
       whale.forcePhase(phase, typeof at === 'number' && Number.isFinite(at) ? at : undefined);
     },
     peekUnderwater(depth: number | null, site?: boolean) {

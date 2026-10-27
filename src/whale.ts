@@ -89,6 +89,8 @@ const FLUKE_FLEX_AMP = 0.16;
 const FLUKE_LAG = 4.2;
 /** Flipper tips lag their own sweep by this much of the stroke. */
 const FLIPPER_LAG = 0.9;
+/** Flipper trunk bone, tip bone and side. */
+const FLIPPERS = [[FLIPPER_L, FLIPPER_TIP_L, 1], [FLIPPER_R, FLIPPER_TIP_R, -1]] as const;
 /** Forced review breach starts just after the exit so the shot lands near the apex. */
 const FORCED_BREACH_T = 0.26;
 
@@ -446,7 +448,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     // Flippers scull with the stroke and spread wide in the air; into a turn the inside one
     // drops and reaches forward and the outside one lifts, as a humpback steers with them.
     const sweep = Math.sin(strokePhase + 1.1) * p.stroke;
-    for (const [index, tip, side] of [[FLIPPER_L, FLIPPER_TIP_L, 1], [FLIPPER_R, FLIPPER_TIP_R, -1]] as const) {
+    for (const [index, tip, side] of FLIPPERS) {
       const inside = turn * side;
       flipperQuaternion(
         side,

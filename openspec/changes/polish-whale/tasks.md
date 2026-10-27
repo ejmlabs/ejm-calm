@@ -4,7 +4,9 @@
 - [x] 1.2 `whale-behavior.ts`: `travel` is the long dive (100 to 300 s, seeded per dive) on a depth rail capped at `VERTICAL_SPEED`; `breathe` is the climb and 2 to 5 blows; breach now and then before one more blow and the dive; shallow water keeps the whale up
 - [x] 1.3 Segment hand-over carries leftover time and eases only the mismatch between sources
 - [x] 1.4 Surfacing glide at 0.75 of cruise; the climb keeps the travel pace
-- [x] 1.5 Camera `DIVE_DWELL` 2.5 s
+- [x] 1.5 Camera `DIVE_DWELL` 3.5 s
+- [x] 1.6 Floor read along a fan of arcs ahead sets the rail's floor at the capped climb; rail capped at the glide depth; eased floor for the floor limit
+- [x] 1.7 Room to dive checked ahead before the fluke-up; a floor that brings the whale up ends the dive in a surfacing
 
 ## 2. Body and motion
 
@@ -19,9 +21,10 @@
 - [x] 3.1 `tests/whale-cycle.test.ts`: surfacing and dive lengths, glide depth, vertical speed cap and acceleration, shallow water
 - [x] 3.2 `tests/whale-model.test.ts`: the roll keeps the flukes under
 - [x] 3.3 `tests/whale-behavior.test.ts`: bounds updated for the longer cycle (design, "Test changes")
+- [x] 3.4 `tests/whale-cycle.test.ts`: real coasts (seeds 3, 7, 42): never above the glide, vertical cap and acceleration, floor limit nudges only, dive lengths
 
 ## 4. Measure
 
 - [x] 4.1 Load time before and after (Chrome through Playwright, network throttled by the DevTools protocol, cold cache, median of 5, main and branch back to back on the same machine): first contentful paint 396 → 372 ms at 10 Mbps / 40 ms, 572 → 472 ms at 9 Mbps / 170 ms; scene ready 6.0 → 4.7 s and 6.3 → 4.8 s (software GL; noise on a shared machine is larger than the difference). JavaScript 790 → 799 KB (the physical material's shader chunks)
-- [x] 4.2 Mover CPU per 60 Hz step in Node: 0.022 ms on main, 0.029 ms after (noise on a shared machine is about the size of the difference)
+- [x] 4.2 Mover CPU per 60 Hz step in Node: 0.022 ms on main, 0.029 ms after (noise on a shared machine is about the size of the difference); with the floor scan along the fan of arcs, 0.094 ms (0.021 ms without it, same run, real coasts of seeds 3, 7 and 42): about 670 seafloor reads every 0.5 s of sim time, near 1 ms per scan in Node
 - [ ] 4.3 GPU frame cost on a real phone (not measured: software GL only here)

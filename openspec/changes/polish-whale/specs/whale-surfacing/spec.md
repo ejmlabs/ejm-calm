@@ -22,12 +22,19 @@ A dive SHALL last 2 to 6 minutes, seeded per dive. The descent and the climb SHA
 - **WHEN** the floor is 8 m down
 - **THEN** the whale stays above 6 m and blows at least 10 times in 400 s
 
+### Requirement: Floor and coasts
+Over real coasts the whale SHALL keep the capped vertical speed and SHALL never rise above the surface glide depth while swimming free: a rising floor SHALL be met early enough to climb at the capped speed. A fluke-up dive SHALL start only with room to dive along the path ahead, and a floor that brings the whale up near the surface SHALL end the dive in a surfacing.
+
+#### Scenario: Real coasts
+- **WHEN** the real mover runs for 1200 s over the real seafloor and coasts of seeds 3, 7 and 42
+- **THEN** while swimming free it stays below the surface glide depth plus 0.3 m, its depth changes no faster than the capped vertical speed with acceleration under 5 m/s², the floor limit never moves it faster than 2.5 m/s, no dive is shorter than 8 s, and the median dive lasts over 60 s
+
 ### Requirement: Calm camera through dives
-The chase camera SHALL follow the whale under only after it has stayed below the dive line for DIVE_DWELL (2.5 s), and SHALL come back up when the whale rises above the rise line.
+The chase camera SHALL follow the whale under only after it has stayed below the dive line for DIVE_DWELL (3.5 s), and SHALL come back up when the whale rises above the rise line.
 
 #### Scenario: Short dip
 - **WHEN** the whale dips below the dive line for less than DIVE_DWELL
-- **THEN** the camera stays above the water
+- **THEN** the camera stays above the water, including through the run-up to a breach
 
 ### Requirement: Continuous motion
 Every hand-over between pose segments and between a segment and free swimming SHALL be continuous in height, pitch and heading, with no frame held still and vertical acceleration under 5 m/s² outside a breach.

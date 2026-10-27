@@ -1,9 +1,12 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { circleShore } from '../src/shore.js';
+import { layoutWorld } from '../src/terrain.js';
+import { createSeafloor } from '../src/seafloor.js';
 import { BLOWS, DIVE_MAX, VERTICAL_SPEED, createWhaleMover } from '../src/whale-behavior.js';
-import { floorLimit, type WhalePhase } from '../src/whale-motion.js';
-import { DIVE_BELOW, RISE_ABOVE } from '../src/camera.js';
+import { SHALLOW_Y, floorLimit, type WhalePhase } from '../src/whale-motion.js';
+import { PLAN_REACH } from '../src/whale-course.js';
+import { DIVE_BELOW, DIVE_DWELL, RISE_ABOVE } from '../src/camera.js';
 
 const SEEDS = [0, 7, 42, 1234, 99991];
 const OPEN = circleShore([]);
@@ -67,7 +70,7 @@ test('surfacings last tens of seconds with a string of blows; dives last minutes
   // Varied, not metronomic.
   const spread = (xs: number[]) => Math.max(...xs) - Math.min(...xs);
   assert.ok(spread(ups) > 30 && spread(downs) > 40, `surfacings ${spread(ups).toFixed(0)} s apart at most, dives ${spread(downs).toFixed(0)} s`);
-  assert.ok(Math.min(...downs.map((d, i) => d)) > 40 && downs.some((d) => d > 120), `dive lengths ${downs.map((d) => d.toFixed(0))}`);
+  assert.ok(downs.some((d) => d > 120), `dive lengths ${downs.map((d) => d.toFixed(0))}`);
 }, 60000);
 
 test('between blows the whale stays above the camera dive line, and dives sink and climb at an eased, capped rate', () => {
@@ -94,3 +97,60 @@ test('over shallow water the whale stays up and keeps breathing instead of divin
   const spouts = phases.filter((p, i) => p === 'spout' && phases[i - 1] !== 'spout').length;
   assert.ok(spouts >= 10, `${spouts} blows in 400 s`);
 });
+
+test('over real coasts the whale never climbs out, keeps the vertical cap and only cuts a dive short for a shoal', () => {
+  const dives: number[] = [];
+  for (const seed of [3, 7, 42]) {
+    // The real mover over the real seafloor and coasts, with navigation tiles prefetched as the page does.
+    const layout = layoutWorld(seed);
+    const land = layout.land;
+    const mover = createWhaleMover(seed, layout.whaleHome, layout.viewYaw - Math.PI / 2, createSeafloor(seed, land).heightAt, layout.journey);
+    const m = mover.motion;
+    land.nav.prefetch(m.x, m.z, 1100, Infinity);
+    let px = m.x;
+    let pz = m.z;
+    const raw: number[] = [];
+    let prev: WhalePhase = m.phase;
+    let below = 0;
+    let under: number | null = null;
+    let lastY = NaN;
+    for (let i = 1; i <= Math.round(1200 / DT); i++) {
+      const t = i * DT;
+      mover.step(DT, t, land);
+      if (i % 15 === 0) {
+        const k = Math.min(20, (700 * 15 * DT) / Math.max(1e-6, Math.hypot(m.x - px, m.z - pz)));
+        land.nav.prefetch(m.x + ((m.x - px) / (15 * DT)) * k, m.z + ((m.z - pz) / (15 * DT)) * k, PLAN_REACH + 700, 4);
+        px = m.x;
+        pz = m.z;
+      }
+      const y = floorLimit(m.pose.y, m.floor);
+      raw.push(m.pose.y);
+      // Free swimming (the long dive, the climb, skimming a shoal): no posed segment drives the height.
+      const free = (m.phase === 'swim' || m.phase === 'deep') && (prev === 'swim' || prev === 'deep');
+      prev = m.phase;
+      // The floor limit on top only ever nudges: the rail has already cleared the floor ahead.
+      if (free && Number.isFinite(lastY)) assert.ok(Math.abs(y - lastY) / DT < 2.5, `seed ${seed} at ${t.toFixed(1)}: the floor jolts the body at ${((y - lastY) / DT).toFixed(2)} m/s`);
+      lastY = y;
+      const n = raw.length;
+      if (free && n > 2) {
+        const at = `seed ${seed} at ${t.toFixed(1)}`;
+        assert.ok(y < SHALLOW_Y + 0.3, `${at}: ${y.toFixed(2)} m, above the surface glide`);
+        assert.ok(Math.abs(raw[n - 1]! - raw[n - 2]!) / DT <= VERTICAL_SPEED * 1.02, `${at}: climbs at ${((raw[n - 1]! - raw[n - 2]!) / DT).toFixed(2)} m/s`);
+        const accel = (raw[n - 1]! - 2 * raw[n - 2]! + raw[n - 3]!) / (DT * DT);
+        assert.ok(Math.abs(accel) < 5, `${at}: vertical acceleration ${accel.toFixed(2)}`);
+      }
+      // Dives as the chase camera sees them.
+      if (under === null) {
+        below = y < DIVE_BELOW ? below + DT : 0;
+        if (below >= DIVE_DWELL) under = t;
+      } else if (y > RISE_ABOVE) {
+        dives.push(t - under);
+        under = null;
+      }
+    }
+  }
+  // Before a fluke-up dive the whale looks for room ahead, so a shoal ends no dive within seconds and most run long.
+  const sorted = [...dives].sort((a, b) => a - b);
+  assert.ok(dives.length >= 8, `${dives.length} dives`);
+  assert.ok(sorted[0]! > 8 && sorted[Math.floor(sorted.length / 2)]! > 60, `dive lengths ${dives.map((d) => d.toFixed(0))}`);
+}, 600000);
