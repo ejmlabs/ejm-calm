@@ -5,12 +5,16 @@ import { makeNoise2D } from './noise.js';
 import type { Shore } from './shore.js';
 import type { QualityTier } from './quality.js';
 import { createWhaleMover, type WhaleBehavior } from './whale-behavior.js';
+import { WHALE_MAX_TURN_RATE } from './whale-course.js';
 import {
   FLIPPER_DROOP,
   FLIPPER_L,
   FLIPPER_R,
   FLIPPER_SWEEP,
+  FLIPPER_TIP_L,
+  FLIPPER_TIP_R,
   FLUKE_BONE,
+  FLUKE_FLEX,
   ROOT_BONE,
   WHALE_LOD,
   buildWhaleGeometry,
@@ -77,6 +81,14 @@ export type WhaleOptions = {
 
 /** Base stroke frequency (Hz): slow, heavy beats for a 12 m animal. */
 const STROKE_HZ = 0.3;
+/** Spine bend (radians per bone) at the sharpest turn, and its share on each tail bone B1..B5. */
+const TURN_BEND = 0.09;
+const TURN_TAIL = [0.5, 0.8, 1, 0.9, 0.6];
+/** Fluke blade flex: amplitude (radians) and its lag behind the stroke. */
+const FLUKE_FLEX_AMP = 0.16;
+const FLUKE_LAG = 4.2;
+/** Flipper tips lag their own sweep by this much of the stroke. */
+const FLIPPER_LAG = 0.9;
 /** Forced review breach starts just after the exit so the shot lands near the apex. */
 const FORCED_BREACH_T = 0.26;
 
@@ -216,14 +228,28 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   group.add(body);
 
   const skin = createWhaleSkin(seed, tier === 'high' ? 1024 : 512);
-  const material = new THREE.MeshStandardMaterial({
+  // Wet skin: a thin clear coat carries the sky's sheen over the dark back, and a soft sheen
+  // lifts the silhouette at grazing angles so the body still reads at dusk and at night.
+  // Phones keep the cheaper standard material.
+  const surface = {
     map: skin.map,
     normalMap: skin.normalMap,
     normalScale: new THREE.Vector2(0.9, 0.9),
     roughness: 0.42,
     metalness: 0,
     envMapIntensity: 0.6,
-  });
+  };
+  const material =
+    tier === 'low'
+      ? new THREE.MeshStandardMaterial(surface)
+      : new THREE.MeshPhysicalMaterial({
+          ...surface,
+          clearcoat: 0.35,
+          clearcoatRoughness: 0.32,
+          sheen: 0.35,
+          sheenRoughness: 0.6,
+          sheenColor: new THREE.Color(0x7d93a4),
+        });
 
   const bones = createWhaleBones();
   body.add(bones[ROOT_BONE]!);
@@ -255,7 +281,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   spoutGroup.visible = false;
   spoutGroup.layers.set(MIST_LAYER);
   const spoutSprites: THREE.Sprite[] = [];
-  const SPOUT_N = 10;
+  const SPOUT_N = 16;
   for (let i = 0; i < SPOUT_N; i++) {
     const mat = new THREE.SpriteMaterial({
       map: mistTex,
@@ -387,6 +413,8 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
 
   let strokePhase = (hash(seed, 0x57) / 0x100000000) * Math.PI * 2;
   let lastBreachT = -1;
+  /** True once the blow has left the whale and hangs where it was breathed. */
+  let spoutHeld = false;
   const angles = spineAngles(0, 0, 0);
   const tmpQ = new THREE.Quaternion();
   const tmpV = new THREE.Vector3();
@@ -404,24 +432,32 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     whaleOrientation(state.heading, state.pitch, state.roll, body.quaternion);
 
     spineAngles(strokePhase, p.stroke, p.arch, angles);
+    // Into a turn the body curves along its length: head and tail both toward the inside.
+    const turn = clamp(motion.turn / WHALE_MAX_TURN_RATE, -1, 1);
     // Spine order in SPINE: H2, H1, B0, B1..B5.
-    bones[1]!.rotation.set(0, 0, angles.head[0]!);
-    bones[0]!.rotation.set(0, 0, angles.head[1]!);
-    for (let i = 0; i < 5; i++) bones[3 + i]!.rotation.set(0, 0, angles.tail[i]!);
+    bones[1]!.rotation.set(0, TURN_BEND * 0.8 * turn, angles.head[0]!);
+    bones[0]!.rotation.set(0, TURN_BEND * 0.6 * turn, angles.head[1]!);
+    for (let i = 0; i < 5; i++) bones[3 + i]!.rotation.set(0, -TURN_BEND * TURN_TAIL[i]! * turn, angles.tail[i]!);
     // Flukes trail the stroke and tip up through the dive.
     bones[FLUKE_BONE]!.rotation.z += p.arch * 0.1;
+    // The blades flex after the peduncle turns, so each stroke ends with the tips following through.
+    bones[FLUKE_FLEX]!.rotation.set(0, 0, FLUKE_FLEX_AMP * p.stroke * Math.sin(strokePhase - FLUKE_LAG));
 
-    // Flippers sweep with the stroke and spread wide in the air.
+    // Flippers scull with the stroke and spread wide in the air; into a turn the inside one
+    // drops and reaches forward and the outside one lifts, as a humpback steers with them.
     const sweep = Math.sin(strokePhase + 1.1) * p.stroke;
-    for (const [index, side] of [[FLIPPER_L, 1], [FLIPPER_R, -1]] as const) {
+    for (const [index, tip, side] of [[FLIPPER_L, FLIPPER_TIP_L, 1], [FLIPPER_R, FLIPPER_TIP_R, -1]] as const) {
+      const inside = turn * side;
       flipperQuaternion(
         side,
-        FLIPPER_DROOP + p.flipLift + 0.1 * sweep,
-        FLIPPER_SWEEP + p.flipSweep + 0.07 * Math.sin(strokePhase + 0.4) * p.stroke,
+        FLIPPER_DROOP + p.flipLift + 0.1 * sweep + 0.18 * inside,
+        FLIPPER_SWEEP + p.flipSweep + 0.07 * Math.sin(strokePhase + 0.4) * p.stroke - 0.12 * inside,
         0.12 * sweep,
         tmpQ,
       );
       bones[index]!.quaternion.copy(tmpQ);
+      // The outer half bends behind the inner half's sweep.
+      bones[tip]!.rotation.set(side * 0.14 * Math.sin(strokePhase + 1.1 - FLIPPER_LAG) * p.stroke, 0, 0);
     }
   }
 
@@ -521,18 +557,25 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   }
 
   function updateSpout(): void {
-    // Thin mist column rising from the blowholes; vertical in world space.
-    // ~1 m wide at the base, a bushy ~3.4 m crown and ~5.4 m tall. Peak opacity ≤ 0.5.
+    // Bushy mist column blown from the blowholes; vertical in world space.
+    // ~1 m wide at the base, a ~3.4 m crown and ~5.4 m tall. Peak opacity ≤ 0.55.
     const t = state.phase === 'spout' ? state.phaseT : 0;
     state.spout = state.phase === 'spout' ? Math.sin(t * Math.PI) : 0;
-    const rising = t < 0.62;
-    const rise = clamp(t / 0.62, 0, 1);
-    // Hold the full plume ~0.45 s after it tops out before it disperses.
-    const fade = rising ? clamp(rise * 2.5, 0, 1) : clamp(1 - (t - 0.75) / 0.25, 0, 1);
+    const rising = t < 0.45;
+    const rise = clamp(t / 0.45, 0, 1);
+    // The plume hangs in the air after it tops out and thins slowly while the whale glides on.
+    const fade = rising ? clamp(rise * 2.5, 0, 1) : clamp(1 - (t - 0.6) / 0.4, 0, 1);
     spoutGroup.visible = fade > 0.02;
-    if (!spoutGroup.visible) return;
-    tmpV.copy(blowhole).applyMatrix4(body.matrixWorld);
-    spoutGroup.position.set(tmpV.x, Math.max(0.05, tmpV.y), tmpV.z);
+    if (!spoutGroup.visible) {
+      spoutHeld = false;
+      return;
+    }
+    // The blow leaves the whale once it is out: it stays where it was breathed, the whale swims on.
+    if (rising || !spoutHeld) {
+      tmpV.copy(blowhole).applyMatrix4(body.matrixWorld);
+      spoutGroup.position.set(tmpV.x, Math.max(0.05, tmpV.y), tmpV.z);
+    }
+    spoutHeld = !rising;
     const columnH = lerp(0.4, 5.4, rise);
     for (let i = 0; i < spoutSprites.length; i++) {
       const sprite = spoutSprites[i]!;
@@ -544,7 +587,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       const spread = (0.15 + u * u * 1.6) * (rising ? 0.45 : 0.8 + (1 - fade));
       sprite.position.set(jx * spread, u * columnH, jz * spread);
       sprite.scale.set(lerp(0.85, 3.4, u * u), lerp(1.5, 2.6, u), 1);
-      mat.opacity = fade * lerp(0.5, 0.3, u);
+      mat.opacity = fade * lerp(0.55, 0.32, u) * (rising ? 1 : lerp(1, 0.6, u * (1 - fade)));
     }
   }
 
