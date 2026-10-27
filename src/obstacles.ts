@@ -8,7 +8,7 @@ import type { ShipHandle } from './ships.js';
 /**
  * Kinematic obstacles in a spatial hash, beside the analytic ground and sea. Every mover in calm is kinematic and the
  * ground is a height field, so there is no physics engine: the whale and ships are capsules along their bodies, and a
- * rock, landmark or prop is a capsule whose ends meet (a sphere). Coordinates are absolute world metres.
+ * rock or prop is a capsule whose ends meet (a sphere). Coordinates are absolute world metres.
  */
 
 export type ObstacleKind = 'whale' | 'ship' | 'rock' | 'prop';
@@ -18,14 +18,15 @@ export type Obstacle = { kind: ObstacleKind; capsule: Capsule };
 export type FeelerHit = { obstacle: Obstacle; distance: number };
 
 export type Obstacles = {
-  /** Forgets every obstacle; movers are added again each frame, after they move. */
+  /** Forgets every obstacle; movers are added again each frame, after they move. Allocates nothing once warm. */
   clear: () => void;
   add: (obstacle: Obstacle) => void;
-  /** Obstacles that overlap `capsule`, leaving out `ignore` (the asker itself). */
-  overlaps: (capsule: Capsule, ignore?: Obstacle) => Obstacle[];
+  /** Obstacles that overlap `capsule`, leaving out `ignore` (the asker itself), written into `out`. */
+  overlaps: (capsule: Capsule, ignore?: Obstacle, out?: Obstacle[]) => Obstacle[];
   /**
    * First obstacle a sphere of `radius` meets when swept from `origin` along the unit vector `direction` for `length`
-   * metres, with the distance it travels before touching; null when the way is clear.
+   * metres, with the distance it travels before touching; null when the way is clear. The hit is the same object on
+   * every call.
    */
   feeler: (origin: THREE.Vector3, direction: THREE.Vector3, length: number, radius?: number, ignore?: Obstacle) => FeelerHit | null;
   readonly size: number;
@@ -39,18 +40,27 @@ const BIAS = 2 ** 25;
 const key = (i: number, j: number): number => (i + BIAS) * 2 * BIAS + (j + BIAS);
 
 export function createObstacles(cell = OBSTACLE_CELL): Obstacles {
+  // Cell lists are kept and emptied in place on clear; a cell left empty for a whole frame is dropped.
   const cells = new Map<number, Obstacle[]>();
   const all: Obstacle[] = [];
-  // An obstacle that spans several cells is tested once per query.
+  const candidates: Obstacle[] = [];
+  // An obstacle that spans several cells is a candidate once per query.
   const seen = new Set<Obstacle>();
+  let hit: FeelerHit | null = null;
+  const end = new THREE.Vector3();
 
-  /** Calls `visit` for each obstacle in the cells under the XZ box of a segment grown by `pad`. */
-  function near(a: THREE.Vector3, b: THREE.Vector3, pad: number, visit: (obstacle: Obstacle) => void): void {
+  const empty = (list: Obstacle[], k: number): void => {
+    if (list.length === 0) cells.delete(k);
+    else list.length = 0;
+  };
+
+  /** Fills `candidates` with the obstacles in the cells under the XZ box of a segment grown by `pad`. */
+  function near(a: THREE.Vector3, b: THREE.Vector3, pad: number): void {
     const i0 = Math.floor((Math.min(a.x, b.x) - pad) / cell);
     const i1 = Math.floor((Math.max(a.x, b.x) + pad) / cell);
     const j0 = Math.floor((Math.min(a.z, b.z) - pad) / cell);
     const j1 = Math.floor((Math.max(a.z, b.z) + pad) / cell);
-    seen.clear();
+    candidates.length = 0;
     for (let i = i0; i <= i1; i++) {
       for (let j = j0; j <= j1; j++) {
         const list = cells.get(key(i, j));
@@ -58,16 +68,16 @@ export function createObstacles(cell = OBSTACLE_CELL): Obstacles {
         for (const obstacle of list) {
           if (seen.has(obstacle)) continue;
           seen.add(obstacle);
-          visit(obstacle);
+          candidates.push(obstacle);
         }
       }
     }
+    seen.clear();
   }
 
-  const end = new THREE.Vector3();
   return {
     clear() {
-      cells.clear();
+      cells.forEach(empty);
       all.length = 0;
     },
     add(obstacle) {
@@ -86,23 +96,35 @@ export function createObstacles(cell = OBSTACLE_CELL): Obstacles {
       }
       all.push(obstacle);
     },
-    overlaps(capsule, ignore) {
-      const found: Obstacle[] = [];
-      near(capsule.start, capsule.end, capsule.radius, (obstacle) => {
-        if (obstacle !== ignore && capsulesOverlap(capsule, obstacle.capsule)) found.push(obstacle);
-      });
-      return found;
+    overlaps(capsule, ignore, out = []) {
+      out.length = 0;
+      near(capsule.start, capsule.end, capsule.radius);
+      for (const obstacle of candidates) {
+        if (obstacle !== ignore && capsulesOverlap(capsule, obstacle.capsule)) out.push(obstacle);
+      }
+      candidates.length = 0;
+      return out;
     },
     feeler(origin, direction, length, radius = 0, ignore) {
       end.copy(direction).multiplyScalar(length).add(origin);
-      let best: FeelerHit | null = null;
-      near(origin, end, radius, (obstacle) => {
-        if (obstacle === ignore) return;
+      near(origin, end, radius);
+      let nearest: Obstacle | null = null;
+      let best = Infinity;
+      for (const obstacle of candidates) {
+        if (obstacle === ignore) continue;
         const { start, end: tip, radius: r } = obstacle.capsule;
         const t = rayCapsule(origin, direction, start, tip, r + radius);
-        if (t >= 0 && t <= length && (!best || t < best.distance)) best = { obstacle, distance: t };
-      });
-      return best;
+        if (t >= 0 && t <= length && t < best) {
+          best = t;
+          nearest = obstacle;
+        }
+      }
+      candidates.length = 0;
+      if (!nearest) return null;
+      hit ??= { obstacle: nearest, distance: best };
+      hit.obstacle = nearest;
+      hit.distance = best;
+      return hit;
     },
     get size() {
       return all.length;
@@ -110,51 +132,13 @@ export function createObstacles(cell = OBSTACLE_CELL): Obstacles {
   };
 }
 
-const d1 = new THREE.Vector3();
-const d2 = new THREE.Vector3();
-const r0 = new THREE.Vector3();
-const c1 = new THREE.Vector3();
-const c2 = new THREE.Vector3();
+const lineA = new THREE.Line3();
+const lineB = new THREE.Line3();
 
-/** Squared distance between segments p1q1 and p2q2 (Ericson, Real-Time Collision Detection, 2005, §5.1.9). */
-export function segmentDistanceSq(p1: THREE.Vector3, q1: THREE.Vector3, p2: THREE.Vector3, q2: THREE.Vector3): number {
-  d1.subVectors(q1, p1);
-  d2.subVectors(q2, p2);
-  r0.subVectors(p1, p2);
-  const a = d1.dot(d1);
-  const e = d2.dot(d2);
-  const f = d2.dot(r0);
-  let s = 0;
-  let t = 0;
-  if (a <= 1e-12 && e <= 1e-12) return r0.lengthSq();
-  if (a <= 1e-12) {
-    t = THREE.MathUtils.clamp(f / e, 0, 1);
-  } else {
-    const c = d1.dot(r0);
-    if (e <= 1e-12) {
-      s = THREE.MathUtils.clamp(-c / a, 0, 1);
-    } else {
-      const b = d1.dot(d2);
-      const denom = a * e - b * b;
-      s = denom > 1e-12 ? THREE.MathUtils.clamp((b * f - c * e) / denom, 0, 1) : 0;
-      t = (b * s + f) / e;
-      if (t < 0) {
-        t = 0;
-        s = THREE.MathUtils.clamp(-c / a, 0, 1);
-      } else if (t > 1) {
-        t = 1;
-        s = THREE.MathUtils.clamp((b - c) / a, 0, 1);
-      }
-    }
-  }
-  c1.copy(d1).multiplyScalar(s).add(p1);
-  c2.copy(d2).multiplyScalar(t).add(p2);
-  return c1.distanceToSquared(c2);
-}
-
+/** Whether two capsules touch: their axes are within the sum of the radii (three.js `Line3.distanceSqToLine3`). */
 export function capsulesOverlap(a: Capsule, b: Capsule): boolean {
   const reach = a.radius + b.radius;
-  return segmentDistanceSq(a.start, a.end, b.start, b.end) <= reach * reach;
+  return lineA.set(a.start, a.end).distanceSqToLine3(lineB.set(b.start, b.end)) <= reach * reach;
 }
 
 const ba = new THREE.Vector3();
@@ -245,10 +229,12 @@ export function createSurfaces(seafloor: { heightAt: (x: number, z: number) => n
   };
 }
 
+const CLEARANCE_SAMPLES = [0, 0.5, 1] as const;
+
 /** Least height of a capsule's skin above the ground, sampled at its ends and middle: negative when it is inside. */
 export function groundClearance(surfaces: Pick<Surfaces, 'groundAt'>, capsule: Capsule): number {
   let least = Infinity;
-  for (const u of [0, 0.5, 1]) {
+  for (const u of CLEARANCE_SAMPLES) {
     const x = THREE.MathUtils.lerp(capsule.start.x, capsule.end.x, u);
     const y = THREE.MathUtils.lerp(capsule.start.y, capsule.end.y, u);
     const z = THREE.MathUtils.lerp(capsule.start.z, capsule.end.z, u);

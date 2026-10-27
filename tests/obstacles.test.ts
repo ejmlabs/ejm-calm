@@ -11,7 +11,6 @@ import {
   createSurfaces,
   groundClearance,
   rayCapsule,
-  segmentDistanceSq,
   shipCapsule,
   whaleCapsule,
   type Obstacle,
@@ -28,13 +27,61 @@ const land = layoutWorld(42, 140).land;
 const v = (x: number, y: number, z: number): THREE.Vector3 => new THREE.Vector3(x, y, z);
 const capsule = (a: THREE.Vector3, b: THREE.Vector3, r: number): Capsule => new Capsule(a, b, r);
 
-test('segment distance covers crossing, parallel, end-to-end and point cases', () => {
-  assert.equal(segmentDistanceSq(v(-1, 0, 0), v(1, 0, 0), v(0, 2, -1), v(0, 2, 1)), 4);
-  assert.equal(segmentDistanceSq(v(0, 0, 0), v(4, 0, 0), v(1, 0, 3), v(3, 0, 3)), 9);
-  assert.equal(segmentDistanceSq(v(0, 0, 0), v(1, 0, 0), v(3, 0, 0), v(5, 0, 0)), 4);
-  assert.equal(segmentDistanceSq(v(2, 0, 0), v(2, 0, 0), v(0, 1, 0), v(4, 1, 0)), 1);
-  assert.equal(segmentDistanceSq(v(0, 0, 0), v(0, 0, 0), v(3, 4, 0), v(3, 4, 0)), 25);
+test('capsules overlap when their axes are within the sum of the radii: crossing, parallel, end-to-end and points', () => {
+  const touch = (a: Capsule, b: Capsule, gap: number) => {
+    // `gap` is the distance between the axes; just under it they overlap, just over it they do not.
+    const r = gap / 2;
+    assert.equal(capsulesOverlap(new Capsule(a.start, a.end, r + 1e-9), new Capsule(b.start, b.end, r)), true);
+    assert.equal(capsulesOverlap(new Capsule(a.start, a.end, r - 1e-9), new Capsule(b.start, b.end, r)), false);
+  };
+  touch(capsule(v(-1, 0, 0), v(1, 0, 0), 0), capsule(v(0, 2, -1), v(0, 2, 1), 0), 2);
+  touch(capsule(v(0, 0, 0), v(4, 0, 0), 0), capsule(v(1, 0, 3), v(3, 0, 3), 0), 3);
+  touch(capsule(v(0, 0, 0), v(1, 0, 0), 0), capsule(v(3, 0, 0), v(5, 0, 0), 0), 2);
+  touch(capsule(v(2, 0, 0), v(2, 0, 0), 0), capsule(v(0, 1, 0), v(4, 1, 0), 0), 1);
+  touch(capsule(v(0, 0, 0), v(0, 0, 0), 0), capsule(v(3, 4, 0), v(3, 4, 0), 0), 5);
 });
+
+const segment = new THREE.Line3();
+const onSegment = new THREE.Vector3();
+const along = new THREE.Vector3();
+
+/** Distance from `p` to the segment a–b. */
+function pointSegment(p: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3): number {
+  segment.set(a, b);
+  if (a.equals(b)) return p.distanceTo(a);
+  return segment.closestPointToPoint(p, true, onSegment).distanceTo(p);
+}
+
+/** Least of a convex function on [lo, hi] by ternary search, as [argument, value]. */
+function convexMin(f: (u: number) => number, lo: number, hi: number): [number, number] {
+  for (let k = 0; k < 200; k++) {
+    const m1 = lo + (hi - lo) / 3;
+    const m2 = hi - (hi - lo) / 3;
+    if (f(m1) < f(m2)) hi = m2;
+    else lo = m1;
+  }
+  const u = (lo + hi) / 2;
+  return [u, f(u)];
+}
+
+/**
+ * Reference ray–capsule distance within `length`, independent of the closed form: the distance from a point of the ray
+ * to the axis is convex along the ray, so a ternary search finds where it is least and bisection the first touch.
+ */
+function rayCapsuleReference(ro: THREE.Vector3, rd: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3, r: number, length: number): number {
+  const f = (t: number) => pointSegment(along.copy(rd).multiplyScalar(t).add(ro), a, b);
+  if (f(0) <= r) return 0;
+  const [tMin, least] = convexMin(f, 0, length);
+  if (least > r) return -1;
+  let lo = 0;
+  let hi = tMin;
+  for (let k = 0; k < 200; k++) {
+    const mid = (lo + hi) / 2;
+    if (f(mid) <= r) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
 
 test('ray meets a capsule on its body, its caps, as a sphere, from inside, or not at all', () => {
   const a = v(0, 0, -5);
@@ -50,58 +97,112 @@ test('ray meets a capsule on its body, its caps, as a sphere, from inside, or no
   assert.ok(rayCapsule(v(10, 0, 0), v(1, 0, 0), a, b, 1) < 0, 'behind the ray');
 });
 
-test('the registry answers overlap and feeler queries exactly as a brute-force check does', () => {
+test('the ray–capsule closed form agrees with an independent search, including pitched, point and near-axis cases', () => {
+  const rng = random(11);
+  const length = 400;
+  let hits = 0;
+  for (let q = 0; q < 3000; q++) {
+    const a = v((rng() - 0.5) * 200, (rng() - 0.5) * 60, (rng() - 0.5) * 200);
+    const pitch = (rng() - 0.5) * 1.5;
+    const yaw = rng() * Math.PI * 2;
+    const reach = q % 5 === 0 ? 0 : rng() * 80;
+    const axis = v(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch));
+    const b = a.clone().addScaledVector(axis, reach);
+    const r = 0.5 + rng() * 8;
+    let ro: THREE.Vector3;
+    let rd: THREE.Vector3;
+    if (q % 4 === 0 && reach > 0) {
+      // Nearly along the axis, coming from beyond one cap.
+      const tilt = v(rng() - 0.5, rng() - 0.5, rng() - 0.5).multiplyScalar(2e-4);
+      const from = q % 8 === 0 ? a : b;
+      const out = q % 8 === 0 ? -1 : 1;
+      ro = from.clone().addScaledVector(axis, out * (r + 5 + rng() * 50)).add(v(rng() - 0.5, rng() - 0.5, rng() - 0.5).multiplyScalar(r));
+      rd = axis.clone().multiplyScalar(-out).add(tilt).normalize();
+    } else {
+      ro = v((rng() - 0.5) * 400, (rng() - 0.5) * 100, (rng() - 0.5) * 400);
+      rd = a.clone().lerp(b, rng()).add(v(rng() - 0.5, rng() - 0.5, rng() - 0.5).multiplyScalar(30)).sub(ro).normalize();
+    }
+    const got = rayCapsule(ro, rd, a, b, r);
+    const want = rayCapsuleReference(ro, rd, a, b, r, length);
+    const gotHit = got >= 0 && got <= length;
+    if (want < 0) {
+      // A graze within the reference's tolerance may go either way.
+      if (gotHit) assert.ok(Math.abs(pointSegment(along.copy(rd).multiplyScalar(got).add(ro), a, b) - r) < 1e-6, `${q}: false hit`);
+      continue;
+    }
+    assert.ok(gotHit, `${q}: missed at ${want}`);
+    assert.ok(Math.abs(got - want) < 1e-5, `${q}: ${got} vs ${want}`);
+    hits++;
+  }
+  assert.ok(hits > 1000, `${hits} hits`);
+});
+
+test('the registry answers overlap and feeler queries exactly as a brute-force check does, frame after frame', () => {
   const rng = random(7);
   const span = OBSTACLE_CELL * 6;
-  const pick = () => (rng() - 0.5) * span;
   const obstacles = createObstacles();
-  const placed: Obstacle[] = [];
-  for (let i = 0; i < 120; i++) {
-    const at = v(pick(), (rng() - 0.5) * 20, pick());
-    const sphere = i % 3 === 0;
-    const reach = sphere ? 0 : 4 + rng() * 40;
-    const yaw = rng() * Math.PI * 2;
-    const tip = at.clone().add(v(Math.cos(yaw) * reach, 0, Math.sin(yaw) * reach));
-    const obstacle: Obstacle = { kind: sphere ? 'rock' : 'ship', capsule: capsule(at, tip, 1 + rng() * 6) };
-    obstacles.add(obstacle);
-    placed.push(obstacle);
-  }
-  assert.equal(obstacles.size, placed.length);
-
   let overlapping = 0;
   let hits = 0;
-  for (let q = 0; q < 300; q++) {
-    const probe = capsule(v(pick(), 0, pick()), v(pick() * 0.2, 0, pick() * 0.2), 2 + rng() * 6);
-    probe.end.add(probe.start);
-    const ignore = placed[q % placed.length]!;
-    const got = obstacles.overlaps(probe, ignore);
-    const want = placed.filter((o) => o !== ignore && capsulesOverlap(probe, o.capsule));
-    assert.deepEqual(new Set(got), new Set(want));
-    assert.equal(got.length, new Set(got).size, 'an obstacle across cells is reported once');
-    overlapping += got.length;
+  // Far from the origin too, where cell keys are large.
+  for (const base of [0, 1e6, -3.2e7]) {
+    // Some coordinates sit exactly on cell borders, give or take a hair.
+    const pick = () => {
+      const x = base + (rng() - 0.5) * span;
+      return rng() < 0.4 ? Math.round(x / OBSTACLE_CELL) * OBSTACLE_CELL + (rng() - 0.5) * 2e-9 : x;
+    };
+    const placed: Obstacle[] = [];
+    for (let i = 0; i < 120; i++) placed.push({ kind: i % 3 === 0 ? 'rock' : 'ship', capsule: new Capsule() });
+    // The same obstacles move between frames, as movers do, and half leave in the last; nothing earlier may linger.
+    for (let frame = 0; frame < 3; frame++) {
+      obstacles.clear();
+      const live = frame === 2 ? placed.slice(0, placed.length / 2) : placed;
+      for (const [i, obstacle] of live.entries()) {
+        const at = v(pick(), (rng() - 0.5) * 20, pick());
+        const reach = i % 3 === 0 ? 0 : 4 + rng() * 120;
+        const yaw = rng() * Math.PI * 2;
+        const pitch = i % 7 === 0 ? Math.PI / 2 - rng() * 0.01 : (rng() - 0.5) * 1.5;
+        const tip = at.clone().add(v(Math.cos(yaw) * Math.cos(pitch), Math.sin(pitch), Math.sin(yaw) * Math.cos(pitch)).multiplyScalar(reach));
+        obstacle.capsule.set(at, tip, i % 11 === 0 ? 0 : 1 + rng() * 6);
+        obstacles.add(obstacle);
+      }
+      assert.equal(obstacles.size, live.length);
 
-    const origin = v(pick(), (rng() - 0.5) * 10, pick());
-    const direction = v(rng() - 0.5, (rng() - 0.5) * 0.2, rng() - 0.5).normalize();
-    const length = 20 + rng() * 200;
-    const radius = rng() * 3;
-    const hit = obstacles.feeler(origin, direction, length, radius);
-    let nearest = Infinity;
-    for (const o of placed) {
-      const t = rayCapsule(origin, direction, o.capsule.start, o.capsule.end, o.capsule.radius + radius);
-      if (t >= 0 && t <= length) nearest = Math.min(nearest, t);
-    }
-    if (nearest === Infinity) assert.equal(hit, null);
-    else {
-      assert.ok(hit);
-      assert.ok(Math.abs(hit.distance - nearest) < 1e-9);
-      hits++;
+      const found: Obstacle[] = [];
+      for (let q = 0; q < 200; q++) {
+        const probe = capsule(v(pick(), 0, pick()), v((rng() - 0.5) * 60, (rng() - 0.5) * 20, (rng() - 0.5) * 60), 2 + rng() * 6);
+        probe.end.add(probe.start);
+        const ignore = live[q % live.length]!;
+        const got = obstacles.overlaps(probe, ignore, found);
+        assert.equal(got, found);
+        const want = live.filter((o) => o !== ignore && capsulesOverlap(probe, o.capsule));
+        assert.deepEqual(new Set(got), new Set(want));
+        assert.equal(got.length, new Set(got).size, 'an obstacle across cells is reported once');
+        overlapping += got.length;
+
+        const origin = v(pick(), (rng() - 0.5) * 10, pick());
+        const direction = v(rng() - 0.5, (rng() - 0.5) * 0.4, rng() - 0.5).normalize();
+        const length = 20 + rng() * 400;
+        const radius = rng() * 3;
+        const hit = obstacles.feeler(origin, direction, length, radius);
+        let nearest = Infinity;
+        for (const o of live) {
+          const t = rayCapsule(origin, direction, o.capsule.start, o.capsule.end, o.capsule.radius + radius);
+          if (t >= 0 && t <= length) nearest = Math.min(nearest, t);
+        }
+        if (nearest === Infinity) assert.equal(hit, null);
+        else {
+          assert.ok(hit);
+          assert.equal(hit.distance, nearest);
+          hits++;
+        }
+      }
     }
   }
-  assert.ok(overlapping > 20 && hits > 20, `queries exercised: ${overlapping} overlaps, ${hits} hits`);
+  assert.ok(overlapping > 200 && hits > 200, `queries exercised: ${overlapping} overlaps, ${hits} hits`);
 
   obstacles.clear();
   assert.equal(obstacles.size, 0);
-  assert.equal(obstacles.feeler(v(0, 0, 0), v(1, 0, 0), span), null);
+  assert.equal(obstacles.feeler(v(0, 0, 0), v(1, 0, 0), OBSTACLE_CELL * 6), null);
 });
 
 test('the whale capsule spans the whale along its heading and pitch', () => {

@@ -4,7 +4,7 @@ Only land is avoided today: the whale steers off a clearance field, and ships ar
 
 ## What Changes
 
-- An obstacle registry: a spatial hash of kinematic obstacles (whale and ships as capsules along their bodies; rocks, landmarks and props as spheres) with overlap and feeler queries.
+- An obstacle registry: a spatial hash of kinematic obstacles (whale and ships as capsules along their bodies; rocks and props as spheres) with overlap and feeler queries.
 - The analytic ground (land and seafloor) and sea samplers exposed beside it, with a clearance check against the ground.
 - The whale and the ships afloat are registered where they are every frame.
 - Later steps adopt it: shared steering, ship steering, whale avoidance and mesh-level checks.
