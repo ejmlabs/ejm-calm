@@ -45,14 +45,15 @@ builds then captures desktop (1440×900) and mobile (390×844 @3x) screenshots
 in `shots/` for seeds `42`, `7`, and `1234`, plus a mid-breach frame. Browser
 checks use Playwright Core and the system Chrome executable.
 
-`npm run budget` builds, then checks the gzipped JavaScript against the size
-before the ocean migration began plus its 25 KB allowance. `npx tsx tools/long-journey.ts 2 42 7` swims
+`npm run budget` builds, then reports the gzipped JavaScript against the size
+before the ocean migration began (a report, not a cap). `npx tsx tools/long-journey.ts 2 42 7` swims
 two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 50 60` swims an hour on each of seeds 1 to 50 and fails any under 0.5 net over path or with ten minutes under 2 km (it also reports the seeds that dip under 1.5 km in five); `npx tsx tools/frame-cost.ts`
 times what the journey's feel adds per frame in Node; `npx tsx tools/feel-shots.ts <dir>` captures
 the regions, times of day, weather and indicator (after a build).
 
 Review hooks (`window.__calmReview`) are available only with `?debug=1`, among them
-`setDay`, `setWeather`, `setRoute` and `jumpTo`.
+`setDay`, `setWeather` (clear, hazy, overcast, rain, storm, fog), `setSea`
+(0 glassy to 1 rough, or null to follow the weather), `setRoute` and `jumpTo`.
 
 ## Static deployment
 

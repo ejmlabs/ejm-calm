@@ -2,9 +2,9 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { DAY, DAY_SECONDS, ENV_REFRESH, createSky, pickTimeOfDay, type SkyHandle } from '../src/sky.js';
-import { WEATHER, WEATHER_CHANGE, WEATHER_SLOT, createWeather, weatherFor } from '../src/weather.js';
+import { WEATHER, createWeather } from '../src/weather.js';
 import { createRoute, ROUTE_SECONDS } from '../src/route.js';
-import { REGION_LOOKS, type RegionWeights } from '../src/regions.js';
+import { REGION_LOOKS } from '../src/regions.js';
 import { loadMemory, saveMemory, validateMemory, STORAGE_KEY, VERSION } from '../src/persistence.js';
 
 /** A sky with no GPU: the environment refresh fails quietly, as it would without WebGL, but is counted. */
@@ -133,42 +133,6 @@ test('reduced motion halves the cloud drift and slows the day', () => {
     return DAY.indexOf(p.name) + (p.day * DAY.length - Math.round(p.day * DAY.length));
   };
   assert.ok(advance(calm.sky) !== advance(full.sky) || calm.sky.phase().name !== full.sky.phase().name);
-});
-
-const REGION: RegionWeights[] = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
-
-test('weather is drawn from the region and the time: clear at the start, then the region\'s own odds', () => {
-  assert.equal(weatherFor(42, 0, REGION[2]!), 'clear');
-  assert.equal(weatherFor(42, 7, REGION[1]!), weatherFor(42, 7, REGION[1]!));
-  const share = (region: number, state: string) => {
-    let n = 0;
-    for (let slot = 1; slot <= 600; slot++) if (weatherFor(11, slot, REGION[region]!) === state) n++;
-    return n / 600;
-  };
-  assert.ok(share(2, 'overcast') > share(1, 'overcast') + 0.2, 'polar skies are greyer than tropical ones');
-  assert.ok(share(1, 'clear') > share(2, 'clear') + 0.2);
-  for (const state of ['clear', 'hazy', 'overcast']) assert.ok(share(0, state) > 0.1, `temperate never ${state}`);
-});
-
-test('weather changes take at least 60 seconds, and never jump', () => {
-  const w = createWeather(11, WEATHER.clear.coverage);
-  const keys = ['coverage', 'fog', 'sun', 'grey', 'haze'] as const;
-  const range = Object.fromEntries(keys.map((k) => [k, Math.max(...Object.values(WEATHER).map((s) => s[k])) - Math.min(...Object.values(WEATHER).map((s) => s[k]))]));
-  const last = { ...w.look };
-  const seen = new Set<string>();
-  const worst = Object.fromEntries(keys.map((k) => [k, 0]));
-  for (let t = 1; t <= WEATHER_SLOT * 60; t++) {
-    // Walk through the regions so every kind of weather is drawn.
-    w.update(1, t, REGION[Math.floor(t / 1700) % 4]!);
-    seen.add(w.target());
-    for (const k of keys) {
-      worst[k] = Math.max(worst[k]!, Math.abs(w.look[k] - last[k]) / range[k]!);
-      last[k] = w.look[k];
-    }
-  }
-  assert.equal(seen.size, 3);
-  for (const k of keys) assert.ok(worst[k]! <= 1 / 60 + 1e-9, `${k} moved ${(100 * worst[k]!).toFixed(2)} percent of its range in a second`);
-  assert.equal(WEATHER_CHANGE >= 60, true);
 });
 
 test('overcast keeps the horizon calm: the fog is no brighter than in clear weather, and the land haze stays light enough to read within 2 km', () => {

@@ -43,6 +43,10 @@ export type SkyHandle = {
   stars: number;
   /** The seed's own cloud cover under a clear sky. */
   clearCover: number;
+  /** Direction the wind blows toward (radians, as the clouds drift): waves and rain follow it. */
+  windAngle: number;
+  /** Sunset or sunrise glow now, 0 to 1: a low sun under a sky clear enough to colour. */
+  glow: number;
   /** Milliseconds the last environment refresh took on the CPU side, and how many ran. */
   environment: () => { ms: number; count: number };
   envMap: THREE.Texture | null;
@@ -131,6 +135,11 @@ export const HAZE_ANGLES = [0.3, 2, 5, 10, 16];
 export const STARS_FROM = 3;
 export const STARS_FULL = -8;
 const STAR_COUNT = 900;
+/** Sunset and sunrise glow with the sun between these elevations (degrees), strongest just above the horizon. */
+export const GLOW_FROM = 18;
+export const GLOW_UNDER = -10;
+/** A lightning flash lifts the sky's own light by at most this share. */
+export const FLASH_LIFT = 0.35;
 
 export const FOG_DENSITY = 0.00034;
 /** Seconds between environment map refreshes. */
@@ -156,14 +165,28 @@ function horizonFor(preset: Preset, elevation: number): THREE.Color {
   return color.lerp(new THREE.Color(0x163e54), preset.level >= 1 ? 0.42 : 0.2);
 }
 
-/** Moves the sky's clouds along a wind vector instead of a fixed diagonal. */
+/** Moves the sky's clouds along a wind vector instead of a fixed diagonal, and lets weather grey and darken the sky. */
 export const cloudPatches: ShaderPatch[] = [
-  { find: 'uniform float time;', replace: 'uniform float time;\n\t\tuniform vec2 cloudWind;' },
+  { find: 'uniform float time;', replace: 'uniform float time;\n\t\tuniform vec2 cloudWind;\n\t\tuniform float skyDim;\n\t\tuniform float skyGrey;' },
   { find: 'cloudUV += time * cloudSpeed;', replace: 'cloudUV += time * cloudSpeed * cloudWind;' },
+  // Storm cloud is dark underneath.
+  { find: 'cloudColor *= max( dayFactor, 0.03 );', replace: 'cloudColor *= max( dayFactor, 0.03 ) * skyDim;' },
+  {
+    find: 'gl_FragColor = vec4( texColor, 1.0 );',
+    replace: 'gl_FragColor = vec4( mix( texColor, vec3( dot( texColor, vec3( 0.2126, 0.7152, 0.0722 ) ) ), skyGrey ) * skyDim, 1.0 );',
+  },
 ];
 
 /** Cloud speed of the three.js sky (its own default is 0.00002 along a fixed diagonal). */
 const CLOUD_SPEED = 0.00008;
+
+/** Warms a colour toward a sunset: more red, a little less blue. */
+function warm(color: THREE.Color, amount: number): THREE.Color {
+  color.r *= 1 + 0.55 * amount;
+  color.g *= 1 + 0.06 * amount;
+  color.b *= 1 - 0.38 * amount;
+  return color;
+}
 
 /** A grey of the same brightness as the colour: fog and haze pulled toward it lose their tint, not their light. */
 function greyen(color: THREE.Color, amount: number): THREE.Color {
@@ -212,6 +235,8 @@ export function createSky(
   if (patched !== null) {
     sky.material.fragmentShader = patched;
     sky.material.uniforms['cloudWind'] = { value: new THREE.Vector2(Math.cos(windAngle), Math.sin(windAngle)) };
+    sky.material.uniforms['skyDim'] = { value: 1 };
+    sky.material.uniforms['skyGrey'] = { value: 0 };
     sky.material.needsUpdate = true;
   }
   const uniforms = sky.material.uniforms;
@@ -315,7 +340,7 @@ export function createSky(
   /** Position in the day: whole numbers are presets, counted from morning; the seed starts at its own. */
   let cycle = start;
   const regionFog = { tint: new THREE.Color(), mix: 0, density: 1 };
-  const weather: WeatherLook = { coverage: baseCover, density: 0.15, fog: 1, haze: 1, sun: 1, grey: 0 };
+  const weather: WeatherLook = { coverage: baseCover, density: 0.15, fog: 1, haze: 1, sun: 1, grey: 0, rain: 0, wind: 0, dark: 0, sea: 0, flash: 0 };
   const blend: Blend = {
     elevation: 0, azimuth: 0, turbidity: 0, rayleigh: 0, mie: 0, mieG: 0, exposure: 0, hazeDensity: 0,
     daylight: 1, shallow: 1, level: 1, sun: 0, hemi: 0, ambient: 0,
@@ -348,26 +373,34 @@ export function createSky(
     blend.hemi = lerp(a.hemi.intensity, b.hemi.intensity, t);
     blend.ambient = lerp(a.ambient.intensity, b.ambient.intensity, t);
 
-    uniforms['turbidity']!.value = blend.turbidity;
-    uniforms['rayleigh']!.value = blend.rayleigh;
-    uniforms['mieCoefficient']!.value = blend.mie;
+    const wobble = Math.sin(time * 0.02) * 0.4;
+    const elevation = blend.elevation + wobble;
+    // A low sun colours the sky when the cloud lets it: vivid under a broken sky, grey under overcast.
+    const glow = (1 - smoothstep(2, GLOW_FROM, elevation)) * smoothstep(GLOW_UNDER, 0, elevation) * (1 - smoothstep(0.1, 0.6, weather.grey));
+    handle.glow = glow;
+    uniforms['turbidity']!.value = blend.turbidity + 2 * glow;
+    uniforms['rayleigh']!.value = blend.rayleigh + 1 * glow;
+    uniforms['mieCoefficient']!.value = blend.mie + 0.001 * glow;
+    if (uniforms['skyDim']) uniforms['skyDim'].value = (1 - 0.9 * weather.dark) * (1 + FLASH_LIFT * weather.flash);
+    if (uniforms['skyGrey']) uniforms['skyGrey'].value = 0.85 * weather.grey;
     uniforms['mieDirectionalG']!.value = blend.mieG;
     if (uniforms['cloudCoverage']) uniforms['cloudCoverage'].value = weather.coverage;
     if (uniforms['cloudDensity']) uniforms['cloudDensity'].value = weather.density;
-    const wobble = Math.sin(time * 0.02) * 0.4;
-    sunVector(blend.elevation + wobble, blend.azimuth, sunDirection);
+    sunVector(elevation, blend.azimuth, sunDirection);
     uniforms['sunPosition']!.value.copy(sunDirection);
     sun.position.copy(sunDirection).multiplyScalar(200);
-    renderer.toneMappingExposure = blend.exposure * 0.88;
+    // A storm darkens the whole view; lightning lifts it a little, softly.
+    renderer.toneMappingExposure = blend.exposure * 0.88 * (1 - 0.45 * weather.dark) * (1 + 0.12 * weather.flash);
 
     // A veiled sun gives less light; the sky gives a little more of its own.
     const veil = 1 - weather.sun;
     const lightBaseSun = lightBase.sun;
     lightBaseSun.intensity = blend.sun * weather.sun;
-    lightBaseSun.color.copy(ca.sun).lerp(cb.sun, t);
-    lightBase.hemi.intensity = blend.hemi * (1 + 0.25 * veil);
+    warm(lightBaseSun.color.copy(ca.sun).lerp(cb.sun, t), glow * 0.8);
+    const lift = (1 - 0.45 * weather.dark) * (1 + FLASH_LIFT * weather.flash);
+    lightBase.hemi.intensity = blend.hemi * (1 + 0.25 * veil) * lift;
     lightBase.hemi.color.copy(ca.hemiSky).lerp(cb.hemiSky, t);
-    lightBase.ambient.intensity = blend.ambient * (1 + 0.35 * veil);
+    lightBase.ambient.intensity = blend.ambient * (1 + 0.35 * veil) * lift;
     lightBase.ambient.color.copy(ca.ambient).lerp(cb.ambient, t);
     sun.intensity = lightBase.sun.intensity;
     sun.color.copy(lightBase.sun.color);
@@ -378,9 +411,14 @@ export function createSky(
     ambient.color.copy(lightBase.ambient.color);
 
     // Haze: the sky's own colours, greyer under cloud.
-    for (let k = 0; k < hazeGradient.length; k++) greyen(hazeGradient[k]!.copy(ca.haze[k]!).lerp(cb.haze[k]!, t), weather.grey);
+    // Haze: the sky's own colours, greyer under cloud, darker in a storm, warmer low down at sunset.
+    const shade = 1 - 0.5 * weather.dark;
+    for (let k = 0; k < hazeGradient.length; k++) {
+      const color = greyen(hazeGradient[k]!.copy(ca.haze[k]!).lerp(cb.haze[k]!, t), weather.grey).multiplyScalar(shade);
+      warm(color, glow * (1 - k / hazeGradient.length));
+    }
     horizonColor.copy(ca.horizon).lerp(cb.horizon, t);
-    greyen(horizonColor, weather.grey);
+    warm(greyen(horizonColor, weather.grey).multiplyScalar(shade), glow * 0.45);
 
     const fog = scene.fog as THREE.FogExp2 | null;
     if (fog) {
@@ -389,7 +427,7 @@ export function createSky(
       fog.color.copy(horizonColor).lerp(regionFog.tint, regionFog.mix * blend.level);
     }
     // Stars come out as the sun drops below the dusk and go as it rises; thick cloud hides them.
-    const dark = 1 - smoothstep(STARS_FULL, STARS_FROM, blend.elevation + wobble);
+    const dark = 1 - smoothstep(STARS_FULL, STARS_FROM, elevation);
     const cloud = clamp((weather.coverage - 0.25) / 0.55, 0, 1);
     handle.stars = dark * (1 - 0.95 * cloud);
     starMaterial.opacity = handle.stars;
@@ -399,7 +437,8 @@ export function createSky(
     handle.hazeDensity = blend.hazeDensity;
     handle.daylight = blend.daylight;
     handle.shallowLight = blend.shallow;
-    handle.level = blend.level;
+    // Land and water darken under a storm, as the sky does.
+    handle.level = blend.level * (1 - 0.6 * weather.dark) * (1 + FLASH_LIFT * weather.flash);
   }
 
   // Environment: rebuilt from the sky alone; a full scene would reflect the water and land in themselves.
@@ -461,6 +500,8 @@ export function createSky(
     level: 1,
     stars: 0,
     clearCover: baseCover,
+    windAngle,
+    glow: 0,
     environment: () => ({ ms: envMs, count: envCount }),
     envMap: null,
     phase() {
