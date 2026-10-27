@@ -12,11 +12,31 @@ export const FX_COUNTS: Record<QualityTier, { rain: number; spray: number }> = {
 };
 
 /** Size of the box of rain around the camera (m); it wraps, so the rain stays put in the world as the camera moves. */
-const RAIN_BOX = new THREE.Vector3(70, 36, 70);
+export const RAIN_BOX = new THREE.Vector3(70, 36, 70);
 const SPRAY_BOX = 90;
 /** Metres per second: drops fall at 9, and the wind carries them up to 7 sideways. */
 const FALL = 9;
 const DRIFT = 7;
+/** Spray puffs never grow past this many pixels across, however close to the camera. */
+const SPRAY_MAX_PX = 64;
+
+/** The rain's velocity (m/s) in a wind of 0 to 1 blowing toward `windAngle`. */
+export function rainVelocity(wind: number, windAngle: number): [number, number, number] {
+  return [Math.cos(windAngle) * DRIFT * wind, -FALL - 3 * wind, Math.sin(windAngle) * DRIFT * wind];
+}
+
+/**
+ * Moves the rain's drift `offset` on by `velocity` over `dt` seconds, in place, wrapped into the rain box. Integrated
+ * here rather than as velocity times time in the shader, so a change of wind changes how the rain moves, never where it is.
+ */
+export function stepRain(offset: number[], velocity: readonly number[], dt: number): number[] {
+  const box = [RAIN_BOX.x, RAIN_BOX.y, RAIN_BOX.z];
+  for (let i = 0; i < 3; i++) {
+    const at = (offset[i]! + velocity[i]! * dt) % box[i]!;
+    offset[i] = at < 0 ? at + box[i]! : at;
+  }
+  return offset;
+}
 
 export type WeatherFxInput = {
   /** Render coordinates. */
@@ -44,8 +64,8 @@ export type WeatherFx = {
 };
 
 /**
- * Rain and wind-blown spray, each one draw computed on the GPU from time and a per-particle seed: rain as streaks that
- * fall and drift with the wind in a box round the camera, spray as soft puffs torn off the crests of a rough sea.
+ * Rain and wind-blown spray, each one draw computed on the GPU from a per-particle seed: rain as streaks that
+ * fall and drift with the wind (its drift integrated here) in a box round the camera, spray as soft puffs torn off the crests of a rough sea.
  * `waves` is the water's packed swell (shared, so the spray rides the same crests).
  */
 export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32Array): WeatherFx {
@@ -67,7 +87,7 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
   rainGeometry.setAttribute('drop', new THREE.BufferAttribute(rainSeeds, 4));
   rainGeometry.setAttribute('tail', new THREE.BufferAttribute(rainTail, 1));
   const rainUniforms = {
-    uTime: { value: 0 },
+    uOffset: { value: new THREE.Vector3() },
     uCentre: { value: new THREE.Vector3() },
     uBox: { value: RAIN_BOX.clone() },
     uVelocity: { value: new THREE.Vector3(0, -FALL, 0) },
@@ -80,7 +100,7 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
     vertexShader: /* glsl */ `
       attribute vec4 drop;
       attribute float tail;
-      uniform float uTime;
+      uniform vec3 uOffset;
       uniform vec3 uCentre;
       uniform vec3 uBox;
       uniform vec3 uVelocity;
@@ -88,7 +108,7 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
       varying float vAlpha;
       void main() {
         // Fixed in the world, wrapped into the box round the camera.
-        vec3 p = mod( drop.xyz * uBox + uVelocity * uTime - uCentre, uBox ) - uBox * 0.5;
+        vec3 p = mod( drop.xyz * uBox + uOffset - uCentre, uBox ) - uBox * 0.5;
         // A streak: the tail is where the drop was a fortieth of a second ago, longer in a gale.
         vec3 world = uCentre + p - uVelocity * tail * 0.045;
         float fade = 1.0 - smoothstep( 0.25, 0.5, length( p.xz ) / uBox.x );
@@ -148,7 +168,7 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
         vec3 world = vec3( base + uWind * life * 5.0, h + 0.2 + sin( life * 3.1416 ) * ( 0.6 + 1.4 * uSea ) );
         vAlpha = crest * sin( life * 3.1416 );
         vec4 view = viewMatrix * vec4( world, 1.0 );
-        gl_PointSize = vAlpha > 0.0 ? ( 0.5 + puff.w ) * 1.6 * uScale / max( 1.0, -view.z ) : 0.0;
+        gl_PointSize = vAlpha > 0.0 ? min( ( 0.5 + puff.w ) * 1.6 * uScale / max( 1.0, -view.z ), ${SPRAY_MAX_PX.toFixed(1)} ) : 0.0;
         gl_Position = projectionMatrix * view;
       }`,
     fragmentShader: /* glsl */ `
@@ -179,6 +199,8 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
   setTier(tier);
 
   let drawn = 0;
+  const rainOffset = [0, 0, 0];
+  let lastTime: number | null = null;
   return {
     group,
     update(input) {
@@ -188,10 +210,14 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
       spray.visible = above && input.sea > 0.4;
       const dx = Math.cos(input.windAngle);
       const dz = Math.sin(input.windAngle);
+      const dt = lastTime === null ? 0 : Math.max(0, input.time - lastTime);
+      lastTime = input.time;
       if (rain.visible) {
-        rainUniforms.uTime.value = input.time;
+        const velocity = rainVelocity(input.wind, input.windAngle);
+        stepRain(rainOffset, velocity, dt);
+        rainUniforms.uOffset.value.fromArray(rainOffset);
         rainUniforms.uCentre.value.copy(camera.position);
-        rainUniforms.uVelocity.value.set(dx * DRIFT * input.wind, -FALL - 3 * input.wind, dz * DRIFT * input.wind);
+        rainUniforms.uVelocity.value.fromArray(velocity);
         rainUniforms.uAmount.value = input.rain;
         rainUniforms.uLight.value = input.light;
       }

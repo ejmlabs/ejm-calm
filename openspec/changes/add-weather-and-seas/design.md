@@ -18,7 +18,7 @@ The water keeps three.js `Water` (reflections, sun glint, its shader patches). I
 Alternative: three.js `Water2` (flow maps) or an FFT ocean. `Water2` changes the look of the calm end the captain already approved; an FFT ocean needs float render targets and compute passes that cost phones more than eight sines. Postprocessing is not used.
 
 ### Particles
-`weather-fx.ts`: rain is one `LineSegments` of streaks whose fall is computed in the vertex shader from time and a per-drop offset, wrapped in a box around the camera; spray is one `Points` that drifts downwind just above the crests, using the same wave function as the water. Counts by tier (rain 1500 / 4000 / 7000, spray 250 / 600 / 1000). Both sit on layer 1, so the water's mirror does not draw them.
+`weather-fx.ts`: rain is one `LineSegments` of streaks placed in the vertex shader from a per-drop seed and a drift offset, wrapped in a box around the camera; the drift is integrated on the CPU each frame (velocity times the frame's time, reduced into the box), so a change of wind changes how the rain moves, never where it is; spray is one `Points` that drifts downwind just above the crests, using the same wave function as the water, its puffs capped in size near the camera. Counts by tier (rain 1500 / 4000 / 7000, spray 250 / 600 / 1000). Both sit on layer 1, so the water's mirror does not draw them.
 
 ### Lightning
 A flash is a deterministic event: each 6 s cell may hold one flash at a seeded offset, with probability proportional to the storm's share. The envelope rises over 0.15 s and decays over about a second; it lifts the hemisphere and ambient light and the sky's exposure by at most 35 percent. Reduced motion freezes the clock and turns flashes off.
@@ -32,4 +32,5 @@ Load: Lighthouse (maintained, run from a scratch install) mobile and desktop pre
 ## Risks
 
 - The whale is lifted by its group's height in `main.ts` so the whale's own modules are untouched; at depth the lift fades out.
-- The underwater view's surface stays flat; from below, rough seas are only seen in the light.
+- The underwater view's surface stays flat, and the underwater fog switches on the camera's height against y = 0; from below, rough seas are only seen in the light, and a whale lifted on a crest can cross the flat plane. A later step should use the local surface height there.
+- The water shader fades each wave out with distance from the camera and pinches crests sideways, while ships and the wake ride the plain `swellAt` height; in a rough sea, distant ships can heave against flat drawn water, and wake ribbons can be hidden in places on steep crests. A later step should serve the shader and the riders from one faded wave function.

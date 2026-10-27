@@ -18,7 +18,7 @@ import {
 import { FLASH_LIFT, createSky } from '../src/sky.js';
 import { SEA_MAX, SEA_WAVES, SWELL_WAVES, packWaves, setSea, swellAt } from '../src/swell.js';
 import { rainGain, seaGain, weatherWindGain } from '../src/audio-mix.js';
-import { FX_COUNTS } from '../src/weather-fx.js';
+import { FX_COUNTS, RAIN_BOX, rainVelocity, stepRain } from '../src/weather-fx.js';
 import { seaGeometry } from '../src/ocean.js';
 import type { RegionWeights } from '../src/regions.js';
 
@@ -279,4 +279,30 @@ test('sound follows the weather: rain heard only when it rains, wind and sea ris
   assert.ok(weatherWindGain(1) > weatherWindGain(WEATHER.clear.wind));
   assert.ok(seaGain(1) > seaGain(0));
   assert.ok(FX_COUNTS.low.rain < FX_COUNTS.high.rain && FX_COUNTS.low.spray < FX_COUNTS.high.spray);
+});
+
+test('rain never rises and never jumps when the wind changes, hours in', () => {
+  const w = createWeather(42);
+  const box = [RAIN_BOX.x, RAIN_BOX.y, RAIN_BOX.z];
+  const offset = [0, 0, 0];
+  const step = 0.1;
+  let calmest = 1;
+  let windiest = 0;
+  for (let t = 0; t < 4 * 3600; t += step) {
+    const look = w.update(step, t, REGION[0]!);
+    const velocity = rainVelocity(look.wind, t * 0.001);
+    assert.ok(velocity[1] < 0, `rain rises at ${t}`);
+    const before = [...offset];
+    stepRain(offset, velocity, step);
+    for (let i = 0; i < 3; i++) {
+      // The move this frame, wrapped back out of the box: exactly the velocity over the frame, whatever the clock.
+      let moved = offset[i]! - before[i]!;
+      moved -= Math.round(moved / box[i]!) * box[i]!;
+      assert.ok(Math.abs(moved - velocity[i]! * step) < 1e-6, `rain jumps at ${t} on axis ${i}`);
+      assert.ok(offset[i]! >= 0 && offset[i]! < box[i]!);
+    }
+    calmest = Math.min(calmest, look.wind);
+    windiest = Math.max(windiest, look.wind);
+  }
+  assert.ok(windiest - calmest > 0.3, 'the wind changes over the run');
 });
