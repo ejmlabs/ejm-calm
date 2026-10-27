@@ -4,7 +4,7 @@ import { makeNoise2D } from './noise.js';
 import { clamp, damp, lerp, smoothstep } from './math.js';
 import { createSpring, springSet, springStep } from './spring.js';
 import { FEED_CELL, feedSiteInCell, type FeedSite } from './feed-sites.js';
-import { WHALE_ISLAND_MARGIN, createWhalePilot, shortestAngle, whaleForward, type WhaleCourse } from './whale-course.js';
+import { WHALE_ISLAND_MARGIN, WHALE_MAX_TURN_RATE, createWhalePilot, headingToward, shortestAngle, whaleForward, type WhaleCourse } from './whale-course.js';
 import {
   FLOOR_CLEARANCE,
   PHASE_LEN,
@@ -21,14 +21,26 @@ import {
 export type WhaleBehavior = 'travel' | 'feed' | 'breathe';
 
 /** Travel speed range, m/s: noise moves between cruising, speeding up and easing off. */
-export const TRAVEL_MIN = 3;
-export const TRAVEL_MAX = 9;
+export const TRAVEL_MIN = 16;
+export const TRAVEL_MAX = 28;
+/** A breath is a glide at this share of the cruising speed, never a stop. */
+export const BREATH_PACE = 0.6;
 /** Acceleration limits, m/s²: easing off is a little quicker than speeding up. */
-export const MAX_ACCEL = 0.8;
-export const MAX_DECEL = 1.2;
+export const MAX_ACCEL = 1.4;
+export const MAX_DECEL = 2;
 /** Seconds between breaths: a seeded interval in this range (a feed may hold it to FEED_HOLD). */
 export const BREATH_MIN = 70;
 export const BREATH_MAX = 120;
+/** Feeding is rare: at least this many seconds from the end of one feed (or the start) to the next, and none longer than FEED_MAX. */
+const FEED_GAP: readonly [number, number] = [480, 720];
+const FEED_FIRST: readonly [number, number] = [150, 300];
+const FEED_MAX = 25;
+/** Speeds while feeding, m/s: slow enough to turn inside a small swarm (turn radius is speed / turn rate). */
+const APPROACH_SLOW = 4;
+/** Slowest approach while still lining up on a swarm (m/s). */
+const APPROACH_CREEP = 1.2;
+const LUNGE_SPEED = 3.4;
+const CIRCLE_SPEED = 1.6;
 /** A feed starts only this long before a due breath, and holds that breath until at least FEED_HOLD after it starts. */
 const FEED_WINDOW = 60;
 const FEED_HOLD = 100;
@@ -63,9 +75,13 @@ export type WhaleMotion = {
 
 export type WhaleMover = {
   motion: WhaleMotion;
+  /** The pilot's course, for review and tools. */
+  course: WhaleCourse;
   step: (dt: number, time: number, shore: Shore) => void;
   /** Play `phase` from normalised time `t` for review; the whale holds position (surge aside) and snaps to it. */
   force: (phase: WhalePhase, t: number) => void;
+  /** Review only: put the whale at (x, z), keeping its heading. */
+  place: (x: number, z: number) => void;
 };
 
 /**
@@ -79,10 +95,12 @@ export function createWhaleMover(
   home: { x: number; z: number },
   heading: number,
   floorAt?: (x: number, z: number) => number,
+  /** Heading of the long journey; the whale turns to it from `heading`. */
+  journey = heading,
 ): WhaleMover {
   const rng = fork(seed, 'whale-behavior');
   const noise = makeNoise2D(seed, 23);
-  const pilot = createWhalePilot(seed, home, heading);
+  const pilot = createWhalePilot(seed, home, journey);
   const course: WhaleCourse = { x: home.x, z: home.z, heading, leg: heading, speed: 1 };
 
   /** Travel speed: two octaves of slow noise, so surges and lulls never repeat. */
@@ -103,7 +121,7 @@ export function createWhaleMover(
   let breathing = true;
   let forced = false;
   let nextBreath = jitter(BREATH_MIN, BREATH_MAX);
-  let nextFeed = jitter(20, 60);
+  let nextFeed = jitter(FEED_FIRST[0], FEED_FIRST[1]);
   let site: FeedSite | null = null;
   let siteSince = 0;
   let feedStart: number | null = null;
@@ -177,7 +195,7 @@ export function createWhaleMover(
     site = null;
     feedStart = null;
     behavior = 'travel';
-    nextFeed = time + jitter(40, 100);
+    nextFeed = time + jitter(FEED_GAP[0], FEED_GAP[1]);
   }
 
   function decide(time: number, shore: Shore): void {
@@ -199,7 +217,7 @@ export function createWhaleMover(
       const d = Math.hypot(site.x - course.x, site.z - course.z);
       if (feedStart === null && d < site.radius && Math.abs(depth.x - site.y) < site.radius) {
         feedStart = time;
-        feedLen = jitter(16, 30);
+        feedLen = jitter(12, FEED_MAX);
       }
       const done = feedStart !== null ? time - feedStart > feedLen : time - siteSince > APPROACH_SECONDS;
       if (done || time > nextBreath) endFeed(time);
@@ -246,28 +264,31 @@ export function createWhaleMover(
     let goalDepth = cruiseDepth(time);
     course.aim = null;
     if (behavior === 'breathe') {
-      goalSpeed = seg ? (seg.phase === 'dive' ? 1.8 : 1.1) : 1.8;
+      goalSpeed *= BREATH_PACE;
       goalDepth = SWIM_Y;
-      if (!breathing && !seg && depth.x > SWIM_Y - 0.5 && speed < 2.6) startBreath();
+      if (!breathing && !seg && depth.x > SWIM_Y - 0.5 && speed < TRAVEL_MAX * BREATH_PACE + 1) startBreath();
     } else if (behavior === 'feed' && site) {
       const dx = course.x - site.x;
       const dz = course.z - site.z;
       const d = Math.hypot(dx, dz);
       if (feedStart === null) {
         course.aim = site;
-        goalSpeed = lerp(1.8, Math.max(goalSpeed, 6.5), smoothstep(25, 110, d));
+        goalSpeed = lerp(APPROACH_SLOW, goalSpeed, smoothstep(30, 240, d));
+        // Slow enough to turn onto the swarm: the turning circle through it must fit in the distance left.
+        const off = Math.min(Math.PI / 2, Math.max(0.1, Math.abs(shortestAngle(course.heading, headingToward(-dx, -dz)))));
+        goalSpeed = Math.min(goalSpeed, Math.max(APPROACH_CREEP, (0.8 * WHALE_MAX_TURN_RATE * d) / (2 * Math.sin(off))));
         goalDepth = lerp(site.y, goalDepth, smoothstep(40, 160, d));
       } else {
         goalDepth = site.y;
         if (lunge) {
           // Pursue the centre: the turn limit swings the whale back through the swarm in loops.
           course.aim = site;
-          goalSpeed = 3.4;
+          goalSpeed = LUNGE_SPEED;
         } else {
           const a = Math.atan2(dz, dx) + circleDir * 0.7;
           const r = site.radius + 3;
           course.aim = { x: site.x + Math.cos(a) * r, z: site.z + Math.sin(a) * r };
-          goalSpeed = 1.6;
+          goalSpeed = CIRCLE_SPEED;
         }
       }
     }
@@ -306,7 +327,6 @@ export function createWhaleMover(
         if (behavior === 'breathe') {
           behavior = 'travel';
           nextBreath = time + jitter(BREATH_MIN, BREATH_MAX);
-          nextFeed = time + jitter(5, 25);
         }
       }
     } else if (!seg && queue.length) seg = queue.shift()!;
@@ -352,7 +372,12 @@ export function createWhaleMover(
 
   return {
     motion,
+    course,
     step,
+    place(x, z) {
+      course.x = motion.x = x;
+      course.z = motion.z = z;
+    },
     force(phase, t) {
       forced = true;
       queue.length = 0;

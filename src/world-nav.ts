@@ -41,6 +41,8 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
   const P = Math.min(T, options.pad ?? 32);
   const maxTiles = options.maxTiles ?? 160;
   const maxBlocks = maxTiles + 64;
+  /** Lines of the distance transform per slice of a tile build (about a fifth of a millisecond). */
+  const TILE_LINES = 32;
   const now = options.now ?? (() => performance.now());
   const saturation = P * cell;
   const span = T + 1;
@@ -93,7 +95,8 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
   const v = new Int32Array(W);
   const zz = new Float64Array(W + 1);
 
-  function buildTile(tx: number, tz: number): Float32Array {
+  /** buildTile in slices (a few dozen lines of the distance transform each); the scratch grids belong to the one tile being built. */
+  function* buildTileSteps(tx: number, tz: number): Generator<void, Float32Array> {
     const i0 = tx * T - P;
     const j0 = tz * T - P;
     const inf = 1e20;
@@ -114,8 +117,8 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
         }
       }
     }
-    squaredDistance(toLand, W, f, d, v, zz);
-    squaredDistance(toSea, W, f, d, v, zz);
+    yield* squaredDistanceSteps(toLand, W, TILE_LINES, f, d, v, zz);
+    yield* squaredDistanceSteps(toSea, W, TILE_LINES, f, d, v, zz);
     const out = new Float32Array(span * span);
     for (let j = 0; j < span; j++) {
       for (let i = 0; i < span; i++) {
@@ -127,12 +130,41 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
     return out;
   }
 
+  /** The tile being built a slice at a time by `prefetch`. */
+  let building: { key: string; steps: Generator<void, Float32Array> } | null = null;
+
   function tile(tx: number, tz: number): Float32Array {
     const key = `${tx}:${tz}`;
     let t = tiles.get(key);
-    if (!t) t = buildTile(tx, tz);
+    if (!t) {
+      // Reading a missing tile builds it now, over the scratch grids a half-built tile was using.
+      building = null;
+      const steps = buildTileSteps(tx, tz);
+      for (;;) {
+        const next = steps.next();
+        if (next.done) {
+          t = next.value;
+          break;
+        }
+      }
+    }
     touch(tiles, key, t, maxTiles);
     return t;
+  }
+
+  /** Builds the tile a slice at a time until `over`; true once it is built. */
+  function stepTile(tx: number, tz: number, over: () => boolean): boolean {
+    const key = `${tx}:${tz}`;
+    if (!building || building.key !== key) building = { key, steps: buildTileSteps(tx, tz) };
+    for (;;) {
+      const next = building.steps.next();
+      if (next.done) {
+        touch(tiles, key, next.value, maxTiles);
+        building = null;
+        return true;
+      }
+      if (over()) return false;
+    }
   }
 
   function distanceAt(x: number, z: number): number {
@@ -200,6 +232,11 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
         }
       }
       wanted.sort((a, b) => a.d - b.d || a.tz - b.tz || a.tx - b.tx);
+      // A tile half built goes first, however the whale has moved since.
+      if (building && !tiles.has(building.key)) {
+        const [bx, bz] = building.key.split(':').map(Number);
+        if (!stepTile(bx!, bz!, over)) return false;
+      }
       for (const { tx, tz } of wanted) {
         // Fill this tile's blocks a row at a time; the distance transform itself is cheap.
         for (let bz = tz - 1; bz <= tz + 1; bz++) {
@@ -213,7 +250,7 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
             if (over()) return false;
           }
         }
-        tile(tx, tz);
+        if (!tiles.has(`${tx}:${tz}`) && !stepTile(tx, tz, over)) return false;
         if (over()) return false;
       }
       return true;
@@ -233,6 +270,19 @@ export function squaredDistance(
   v = new Int32Array(size),
   z = new Float64Array(size + 1),
 ): void {
+  for (const _ of squaredDistanceSteps(grid, size, Infinity, f, d, v, z));
+}
+
+/** squaredDistance in slices: yields after every `lines` lines of the row and column passes. */
+export function* squaredDistanceSteps(
+  grid: Float64Array,
+  size: number,
+  lines: number,
+  f = new Float64Array(size),
+  d = new Float64Array(size),
+  v = new Int32Array(size),
+  z = new Float64Array(size + 1),
+): Generator<void> {
   const pass = (offset: number, stride: number) => {
     for (let i = 0; i < size; i++) f[i] = grid[offset + i * stride]!;
     let k = 0;
@@ -258,6 +308,12 @@ export function squaredDistance(
     }
     for (let i = 0; i < size; i++) grid[offset + i * stride] = d[i]!;
   };
-  for (let row = 0; row < size; row++) pass(row * size, 1);
-  for (let col = 0; col < size; col++) pass(col, size);
+  for (let row = 0; row < size; row++) {
+    pass(row * size, 1);
+    if (row % lines === lines - 1) yield;
+  }
+  for (let col = 0; col < size; col++) {
+    pass(col, size);
+    if (col % lines === lines - 1) yield;
+  }
 }

@@ -19,6 +19,8 @@ export type WorldLayout = {
   whaleHome: { x: number; z: number };
   /** Camera yaw (radians): subjects in look direction (−sin, −cos). */
   viewYaw: number;
+  /** Whale heading the journey keeps: toward the open water beyond the start's coasts. */
+  journey: number;
 };
 
 /** Camera look direction on XZ for a yaw (matches CalmCamera). */
@@ -180,6 +182,55 @@ export function coastAhead(
 /** Ships keep this much water between hull and coast. */
 export const SHIP_LAND_MARGIN = 40;
 
+/** Lattice the open-water search floods over: cell size and half-extent in cells. */
+const JOURNEY_CELL = 100;
+const JOURNEY_HALF = 70;
+/** Reaching this far from the start counts as out of the opening's sea. */
+const JOURNEY_OUT = 6500;
+
+/**
+ * The whale starts facing the composed coast but travels for the sea beyond the
+ * start: a flood over water at least a cell clear of land finds the nearest way
+ * out of the start's sea and the journey heads that way. A sea with no way out keeps `heading`.
+ */
+export function journeyHeading(land: Pick<Land, 'maskAt'>, home: { x: number; z: number }, heading: number): number {
+  const side = JOURNEY_HALF * 2 + 1;
+  const wet = new Uint8Array(side * side);
+  for (let j = 0; j < side; j++) {
+    for (let i = 0; i < side; i++) wet[j * side + i] = land.maskAt(home.x + (i - JOURNEY_HALF) * JOURNEY_CELL, home.z + (j - JOURNEY_HALF) * JOURNEY_CELL) > 0 ? 0 : 1;
+  }
+  const open = new Uint8Array(side * side);
+  for (let j = 1; j < side - 1; j++) {
+    for (let i = 1; i < side - 1; i++) {
+      let clear = 1;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) clear &= wet[(j + dj) * side + i + di]!;
+      open[j * side + i] = clear;
+    }
+  }
+  const start = JOURNEY_HALF * side + JOURNEY_HALF;
+  const seen = new Uint8Array(side * side);
+  const queue = new Int32Array(side * side);
+  let head = 0;
+  let tail = 0;
+  queue[tail++] = start;
+  seen[start] = 1;
+  while (head < tail) {
+    const k = queue[head++]!;
+    const i = k % side;
+    const j = (k - i) / side;
+    if (Math.hypot(i - JOURNEY_HALF, j - JOURNEY_HALF) * JOURNEY_CELL >= JOURNEY_OUT) return Math.atan2(j - JOURNEY_HALF, -(i - JOURNEY_HALF));
+    for (let dj = -1; dj <= 1; dj++) {
+      for (let di = -1; di <= 1; di++) {
+        const n = (j + dj) * side + i + di;
+        if (i + di < 1 || j + dj < 1 || i + di >= side - 1 || j + dj >= side - 1 || seen[n] || !open[n]) continue;
+        seen[n] = 1;
+        queue[tail++] = n;
+      }
+    }
+  }
+  return heading;
+}
+
 export function layoutWorld(seed: number, sunAzimuthDeg = 185, options: { gridSize?: number } = {}): WorldLayout {
   const rng = fork(seed, 'layout');
   const sunYaw = (sunAzimuthDeg * Math.PI) / 180;
@@ -256,5 +307,6 @@ export function layoutWorld(seed: number, sunAzimuthDeg = 185, options: { gridSi
     ships,
     whaleHome,
     viewYaw,
+    journey: journeyHeading(land, whaleHome, viewYaw - Math.PI / 2),
   };
 }

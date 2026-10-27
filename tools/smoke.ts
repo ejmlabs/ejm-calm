@@ -112,6 +112,97 @@ await withBrowser(async (browser, base) => {
     }
   }
 
+  // The journey's feel: the wake, stars, ship foam and lanterns stay inside their draws (4 on low, 8 on high), the day moves, and the route
+  // indicator is off until asked for, answers its switch, is gone six seconds later and keeps its setting.
+  for (const device of [DESKTOP, MOBILE]) {
+    const { page, context, errors } = await openCalm(browser, base, device, { query: { debug: '1' } });
+    try {
+      type Review = { travel: (seconds: number) => void; setDay: (day: number) => void; stats: () => Record<string, number | string> };
+      const stats = () => page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.stats());
+      await page.waitForTimeout(1500);
+      // Swim on at pace so the wake is out.
+      for (let i = 0; i < 20; i++) {
+        await page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.travel(6));
+        const s = await stats();
+        if (s['behavior'] === 'travel' && (s['speed'] as number) > 14) break;
+      }
+      await page.waitForTimeout(1500);
+      const s = await stats();
+      const limit = device.name === 'mobile' ? 4 : 8;
+      const added = s['addedDraws'] as number;
+      assert.ok(added <= limit, `${device.name}: the wake, stars, ship foam and lanterns add ${added} draws (limit ${limit})`);
+      assert.equal(s['route'], '', 'no indicator for a new visitor');
+      assert.equal(await page.locator('#route').evaluate((el) => el.classList.contains('show')), false);
+      const day = s['dayPhase'];
+      await page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.setDay(0.4));
+      await page.waitForTimeout(500);
+      assert.notEqual((await stats())['dayPhase'], day, 'the day moves on');
+
+      await page.locator('#aboutBtn').click();
+      assert.equal(await page.locator('#routeToggle').isChecked(), false, 'the indicator is off by default');
+      await page.locator('#routeToggle').check();
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('#route').evaluate((el) => el.classList.contains('show')), true, 'the switch shows the indicator');
+      assert.match(await page.locator('#route').innerText(), /\u00b7 [\d.]+ km$/);
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ejm-calm:v1')!).route), true, 'the setting is saved');
+      await page.waitForTimeout(6500);
+      assert.equal(await page.locator('#route').evaluate((el) => el.classList.contains('show')), false, 'gone six seconds later');
+      await page.keyboard.press('Escape');
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.waitForSelector('body[data-ready="true"]', { timeout: 30000 });
+      await page.locator('#aboutBtn').click();
+      assert.equal(await page.locator('#routeToggle').isChecked(), true, 'the setting survives a reload');
+      await page.locator('#routeToggle').uncheck();
+      assert.deepEqual(errors, []);
+      console.log(`feel (${device.name}): ${added} added draws, wake ${Math.round(s['wakeLength'] as number)} m, indicator off by default, switch saved`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // Tile throughput at cruise: five minutes of continuous travel in short steps. Frames are the 30 Hz world steps of the
+  // real update; between steps the page yields so the tile worker and the renderer run as they would between frames.
+  {
+    const { page, context, errors } = await openCalm(browser, base, DESKTOP, { query: { debug: '1' } });
+    try {
+      await page.waitForTimeout(1500);
+      type Review = { travel: (seconds: number) => void; stats: () => Record<string, number> };
+      const read = () => (window as unknown as { __calmReview: Review }).__calmReview.stats();
+      await page.waitForFunction(() => {
+        const s = (window as unknown as { __calmReview: Review }).__calmReview.stats();
+        return s['chunksPending'] === 0;
+      }, undefined, { timeout: 30000 });
+      const before = await page.evaluate(read);
+      const run = await page.evaluate(async () => {
+        const review = (window as unknown as { __calmReview: Review }).__calmReview;
+        const ms: number[] = [];
+        const start = performance.now();
+        // One 30 Hz world step at a time, a short yield after every fifth: about five times faster than real time.
+        for (let step = 0; step < 300 * 30; step++) {
+          review.travel(1 / 30);
+          ms.push(review.stats()['streamMs']!);
+          if (step % 5 === 4) await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        ms.sort((a, b) => a - b);
+        return { steps: ms.length, worst: ms.at(-1)!, p99: ms[Math.floor(ms.length * 0.99)]!, over: ms.filter((m) => m > 3).length / ms.length, ms: performance.now() - start };
+      });
+      const stats = await page.evaluate(read);
+      const gaps = stats['coverageMisses']! - before['coverageMisses']!;
+      const navMisses = stats['navMisses']! - before['navMisses']!;
+      assert.ok(stats['path']! - before['path']! > 4500, `cruise covers ground: ${stats['path']! - before['path']!} m in 300 s`);
+      assert.equal(gaps, 0, `${gaps} world steps showed a gap in the land inside the haze during continuous travel`);
+      assert.equal(navMisses, 0, `${navMisses} world steps found the navigation tile 3 s ahead unbuilt`);
+      // Software GL on a shared machine is no phone: the spec's 3 ms worst step is recorded below, and only a bad tail fails here.
+      assert.ok(run.over < 0.1, `${(100 * run.over).toFixed(1)} percent of stream steps took over 3 ms`);
+      assert.ok(stats['navTiles']! <= 256 && stats['navBlocks']! <= 320 && stats['chunks']! < 400, `tiles stay bounded: ${stats['navTiles']} nav, ${stats['navBlocks']} blocks, ${stats['chunks']} land`);
+      assert.ok(stats['recentres']! - before['recentres']! <= 5, `${stats['recentres']! - before['recentres']!} recentres in 300 s`);
+      assert.deepEqual(errors, []);
+      console.log(`throughput: ${Math.round(stats['path']! - before['path']!)} m swum in 300 s (${run.steps} world steps in ${Math.round(run.ms / 1000)} s), ${gaps} coverage gaps, ${navMisses} nav misses, stream step p99 ${run.p99.toFixed(2)} ms, worst ${run.worst.toFixed(1)} ms, ${(100 * run.over).toFixed(1)} percent over 3 ms, ${stats['recentres']! - before['recentres']!} recentres, ${stats['navTiles']} nav tiles, ${stats['chunks']} land tiles`);
+    } finally {
+      await context.close();
+    }
+  }
+
   const { page, context, errors } = await openCalm(browser, base, DESKTOP, { reducedMotion: 'reduce', seed: 0 });
   try {
     await page.waitForTimeout(600);

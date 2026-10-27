@@ -49,8 +49,6 @@ export type UnderwaterHandle = {
   dispose: () => void;
 };
 
-const DAYLIGHT: Record<SkyHandle['timeOfDay'], number> = { golden: 0.62, morning: 0.92, afternoon: 1, dusk: 0.5 };
-
 const TIER = {
   low: { rays: 9, snow: 140, floorCells: 48, floorStep: 2.6, caustics: 1, budget: 500 },
   medium: { rays: 13, snow: 260, floorCells: 64, floorStep: 2.2, caustics: 2, budget: 900 },
@@ -62,16 +60,21 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   const tier = TIER[options.tier];
   const seed = options.seed ?? 1;
   const signal: WaterSignal = { depth: 0, submersion: 0, underwater: false };
-  const daylight = DAYLIGHT[sky.timeOfDay];
   const exposure = () => renderer.toneMappingExposure;
 
   // Above-water state to blend from and restore to.
   const fog = scene.fog instanceof THREE.FogExp2 ? scene.fog : null;
   const above: FogState = { color: fog ? fog.color.clone() : sky.horizonColor.clone(), density: fog?.density ?? 0.00034 };
   let writtenDensity = NaN;
+  const writtenColor = new THREE.Color(-1, -1, -1);
   const clearBase = renderer.getClearColor(new THREE.Color());
   const clearAlpha = renderer.getClearAlpha();
-  const lights = [sky.sun, sky.hemi, sky.ambient].map((light) => ({ light, intensity: light.intensity, color: light.color.clone() }));
+  // The lights are set from the sky's own values every frame; dim from those, not from what was written last.
+  const lights = [
+    { light: sky.sun, base: sky.lightBase.sun },
+    { light: sky.hemi, base: sky.lightBase.hemi },
+    { light: sky.ambient, base: sky.lightBase.ambient },
+  ];
   const lightTint = new THREE.Color().setHex(0x7fd0dc, THREE.SRGBColorSpace);
 
   // three applies scene fog after tone mapping, so `scene.fog.color` is a display colour (as the
@@ -83,6 +86,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   const lastBlend = new THREE.Color(-1, -1, -1);
   const clearColor = new THREE.Color();
   let tintDepth = NaN;
+  let tintLight = NaN;
 
   // Light that made it through the surface, refracted toward the vertical.
   const sunWater = new THREE.Vector3();
@@ -100,10 +104,20 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   refractSun();
 
   const display = (hex: number) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace);
-  const skyHorizon = radianceFor(sky.hazeGradient[0] ?? sky.hazeColor, exposure(), renderer.toneMapping);
-  const zenithDisplay = (sky.hazeGradient[sky.hazeGradient.length - 1] ?? sky.hazeColor).clone().lerp(display(0x5f97c9), 0.45);
-  const skyZenith = radianceFor(zenithDisplay, exposure(), renderer.toneMapping);
-  const sunGlow = radianceFor(display(0xfff4dc), exposure(), renderer.toneMapping).multiplyScalar(1.4);
+  const zenithBlue = display(0x5f97c9);
+  const sunGlowDisplay = display(0xfff4dc);
+  const zenithDisplay = new THREE.Color();
+  const skyHorizon = new THREE.Color();
+  const skyZenith = new THREE.Color();
+  const sunGlow = new THREE.Color();
+  /** What the window overhead shows, from the sky as it is now. */
+  function lookUp(): void {
+    radianceFor(sky.hazeGradient[0] ?? sky.hazeColor, exposure(), renderer.toneMapping, skyHorizon);
+    zenithDisplay.copy(sky.hazeGradient[sky.hazeGradient.length - 1] ?? sky.hazeColor).lerp(zenithBlue, 0.45);
+    radianceFor(zenithDisplay, exposure(), renderer.toneMapping, skyZenith);
+    radianceFor(sunGlowDisplay, exposure(), renderer.toneMapping, sunGlow).multiplyScalar(1.4 * clamp(sky.sunDirection.y * 4, 0, 1));
+  }
+  lookUp();
 
   /** Uniforms every underwater material reads; updated once per frame. */
   const shared = {
@@ -415,12 +429,13 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       fog.color.copy(above.color);
       fog.density = above.density;
       writtenDensity = fog.density;
+      writtenColor.copy(fog.color);
     }
     sky.sky.visible = true;
     renderer.setClearColor(clearBase, clearAlpha);
     for (const l of lights) {
-      l.light.intensity = l.intensity;
-      l.light.color.copy(l.color);
+      l.light.intensity = l.base.intensity;
+      l.light.color.copy(l.base.color);
     }
     underwaterUniforms.underwaterMix.value = 0;
     group.visible = false;
@@ -432,6 +447,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     waterSignal(camera.position.y, signal);
     // sky.update rewrites the density each frame; anything else is our own write from last frame.
     if (fog && fog.density !== writtenDensity) above.density = fog.density;
+    if (fog && !fog.color.equals(writtenColor)) above.color.copy(fog.color);
 
     const s = signal.submersion;
     const depth = signal.depth;
@@ -459,8 +475,11 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     resting = false;
     group.visible = true;
 
-    if (!(Math.abs(depth - tintDepth) < 0.05)) {
+    const daylight = sky.daylight;
+    lookUp();
+    if (!(Math.abs(depth - tintDepth) < 0.05) || Math.abs(daylight - tintLight) > 0.002) {
       tintDepth = depth;
+      tintLight = daylight;
       waterTint(Math.max(0, depth), daylight, tint);
       radianceFor(tint.color, exposure(), renderer.toneMapping, below.color);
       below.density = tint.density;
@@ -478,12 +497,13 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       fog.color.copy(blended.color);
       fog.density = blended.density;
       writtenDensity = fog.density;
+      writtenColor.copy(fog.color);
     }
 
     const light = lerp(1, surfaceLight(Math.max(0, depth)) * 0.9, s);
     for (const l of lights) {
-      l.light.intensity = l.intensity * light;
-      l.light.color.copy(l.color).lerp(lightTint, s * 0.55);
+      l.light.intensity = l.base.intensity * light;
+      l.light.color.copy(l.base.color).lerp(lightTint, s * 0.55);
     }
 
     // Exponential-fog equivalent of the FogExp2 visibility, for shaders that fade linearly.

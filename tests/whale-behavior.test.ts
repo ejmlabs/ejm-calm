@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { layoutWorld } from '../src/terrain.js';
 import { circleShore, type Shore } from '../src/shore.js';
 import { FEED_CELL, feedSiteInCell, feedSitesNear } from '../src/feed-sites.js';
-import { MAX_ACCEL, MAX_DECEL, TRAVEL_MAX, createWhaleMover, type WhaleBehavior } from '../src/whale-behavior.js';
+import { BREATH_PACE, MAX_ACCEL, MAX_DECEL, TRAVEL_MAX, TRAVEL_MIN, createWhaleMover, type WhaleBehavior } from '../src/whale-behavior.js';
 import { WHALE_ISLAND_MARGIN, WHALE_MAX_TURN_RATE, shortestAngle } from '../src/whale-course.js';
 import { BREACH_SURGE, FLOOR_CLEARANCE, floorLimit, type WhalePhase } from '../src/whale-motion.js';
 
@@ -71,7 +71,7 @@ test('speed varies smoothly within bounds, deterministic per seed and close acro
     const sd = std(samples.map((s) => s.speed));
     assert.ok(sd > 1, `seed ${seed} speed std-dev ${sd.toFixed(2)}`);
     const travel = samples.filter((s) => s.behavior === 'travel').map((s) => s.speed);
-    assert.ok(Math.max(...travel) > 6, `seed ${seed} never speeds up`);
+    assert.ok(Math.max(...travel) > TRAVEL_MAX - 3 && Math.min(...travel.slice(300)) < TRAVEL_MIN + 4, `seed ${seed} stays at one speed`);
   }
   const a = run(42, OPEN, ROLLING, 120).samples;
   assert.deepEqual(a, run(42, OPEN, ROLLING, 120).samples);
@@ -84,9 +84,9 @@ test('speed varies smoothly within bounds, deterministic per seed and close acro
   assert.ok(gap < 10, `30 vs 60 fps gap ${gap.toFixed(2)} m`);
 });
 
-test('the whale breathes regularly, feeds at a site within five minutes and resumes travel', () => {
+test('the whale breathes regularly at a glide, feeds at a site within ten minutes and resumes travel', () => {
   for (const seed of SEEDS) {
-    const { samples } = run(seed, OPEN, ROLLING, 600);
+    const { samples } = run(seed, OPEN, ROLLING, 900);
     // Breathing: every surfacing starts within the bound after the previous one.
     const starts = samples.filter((s, i) => i > 0 && s.phase === 'spout' && samples[i - 1]!.phase !== 'spout').map((s) => s.t);
     const breaths = starts.filter((t, i) => i === 0 || t - starts[i - 1]! > 30);
@@ -95,18 +95,31 @@ test('the whale breathes regularly, feeds at a site within five minutes and resu
     const gaps = breaths.slice(1).map((t, i) => t - breaths[i]!);
     assert.ok(Math.max(...gaps) - Math.min(...gaps) > 5, `seed ${seed}: breaths are metronomic ${gaps}`);
 
-    // Feeding: starts within 5 minutes, gets inside the swarm, and the whale travels on afterwards.
+    // A breath is a glide: the spout comes at well over half the cruising floor, never at a stop.
+    for (const s of samples) if (s.phase === 'spout' && s.t > 30) assert.ok(s.speed > BREATH_PACE * TRAVEL_MIN * 0.8, `seed ${seed}: spout at ${s.speed.toFixed(1)} m/s`);
+
+    // Feeding: starts within 10 minutes, gets inside the swarm, and the whale travels on afterwards.
     const first = samples.findIndex((s) => s.behavior === 'feed');
-    assert.ok(first >= 0 && samples[first]!.t < 300, `seed ${seed}: no feed in 5 min`);
+    assert.ok(first >= 0 && samples[first]!.t < 600, `seed ${seed}: no feed in 10 min`);
     const site = samples[first]!.site!;
     const during = samples.filter((s) => s.site?.id === site.id);
     const closest = Math.min(...during.map((s) => Math.hypot(s.x - site.x, s.y - site.y, s.z - site.z)));
     assert.ok(closest < site.radius, `seed ${seed}: closest ${closest.toFixed(1)} m to a ${site.radius.toFixed(1)} m swarm`);
     const end = samples.findIndex((s, i) => i > first && s.behavior !== 'feed');
     assert.ok(end > 0 && samples[end]!.behavior !== 'feed', `seed ${seed}: feed never ended`);
-    assert.ok(samples.slice(end).some((s) => s.behavior === 'travel' && s.speed > 4), `seed ${seed}: did not resume travel`);
+    assert.ok(samples.slice(end).some((s) => s.behavior === 'travel' && s.speed > TRAVEL_MIN), `seed ${seed}: did not resume travel`);
   }
 });
+
+test('feeding is rare and brief over an hour', () => {
+  for (const seed of SEEDS) {
+    const { samples } = run(seed, OPEN, ROLLING, 3600, 1 / 15);
+    const starts = samples.filter((s, i) => s.behavior === 'feed' && samples[i - 1]?.behavior !== 'feed').map((s) => s.t);
+    for (let i = 1; i < starts.length; i++) assert.ok(starts[i]! - starts[i - 1]! >= 480, `seed ${seed}: feeds ${starts[i]! - starts[i - 1]!} s apart`);
+    const share = samples.filter((s) => s.behavior === 'feed').length / samples.length;
+    assert.ok(share < 0.1, `seed ${seed}: feeding ${(100 * share).toFixed(0)} percent of the hour`);
+  }
+}, 60000);
 
 test('every transition is continuous in height, pitch and heading, including a forced review', () => {
   for (const seed of SEEDS) {
@@ -139,10 +152,9 @@ test('the journey covers ground fast, never beaches and keeps clear of the floor
     const world = layoutWorld(seed);
     const land = world.land;
     const { samples } = run(seed, land, (x, z) => land.heightAt(x, z), 600, 1 / 30, world.whaleHome);
-    const end = samples.at(-1)!;
-    const travelled = Math.hypot(end.x - world.whaleHome.x, end.z - world.whaleHome.z);
-    // The old cruise managed at most ~1.1 km in ten minutes.
-    assert.ok(travelled > 600, `seed ${seed} displacement ${travelled.toFixed(0)} m`);
+    const reach = Math.max(...samples.map((s) => Math.hypot(s.x - world.whaleHome.x, s.z - world.whaleHome.z)));
+    // The old cruise managed at most ~1.1 km in ten minutes; the start seas are enclosed, so range is what counts.
+    assert.ok(reach > 1000, `seed ${seed} got ${reach.toFixed(0)} m from the start`);
     for (const s of samples) {
       assert.ok(land.clearance(s.x, s.z) >= WHALE_ISLAND_MARGIN - 1e-3 && land.heightAt(s.x, s.z) < 0, `seed ${seed} on land at ${s.t}`);
       assert.ok(s.floor === undefined || s.y >= s.floor + FLOOR_CLEARANCE - 1e-6 || s.y >= -2.81, `seed ${seed} floor at ${s.t}`);
@@ -154,7 +166,7 @@ test('the journey covers ground fast, never beaches and keeps clear of the floor
     const path = samples.reduce((sum, s, i) => (i ? sum + Math.hypot(s.x - samples[i - 1]!.x, s.z - samples[i - 1]!.z) : 0), 0);
     assert.ok(path > 1500, `seed ${seed} swam only ${path.toFixed(0)} m in 400 s`);
   }
-});
+}, 60000);
 
 test('feed sites are pure, stable and clear of floor and surface', () => {
   const floors = [ROLLING, () => -200, () => -12, (x: number) => -5 - x / 100];

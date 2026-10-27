@@ -12,28 +12,39 @@ const LOD_BOUNDS = [40, 120] as const;
 const MIN_HEIGHT = 5;
 const MAX_HEIGHT = 70;
 const MAX_BIRDS = 24;
-/** Share of the flock that is a gull, a tern, an albatross (rest). */
-const MIX = [0.5, 0.85] as const;
+/** Species of a bird by its fixed roll, for a share of gulls, terns, albatrosses (the rest). */
+const speciesFor = (roll: number, mix: readonly [number, number, number]): number => (roll < mix[0] ? 0 : roll < mix[0] + mix[1] ? 1 : 2);
 
-/** Seconds a bird takes to appear or vanish when the tier changes. */
+/** Seconds a bird takes to appear or vanish when the tier changes or its flock comes and goes. */
 const FADE_SECONDS = 1;
+/** A flock appears this far ahead of the whale along its course (m), and off to one side by this much. */
+const AHEAD: readonly [number, number] = [420, 760];
+const ABEAM: readonly [number, number] = [50, 210];
+/** It has passed once it is this far behind, and is gone then; the next one comes after a pause (s). */
+const GONE_BEHIND = 380;
+const PAUSE: readonly [number, number] = [4, 24];
 
-type Bird = Boid & { phase: number; heading: number; bank: number; lod: number; tint: THREE.Color; fade: number };
+type Bird = Boid & { roll: number; phase: number; heading: number; bank: number; lod: number; tint: THREE.Color; fade: number };
 
 export type Birds = {
   group: THREE.Group;
   update: (time: number, centerX?: number, centerZ?: number, dt?: number, camera?: { x: number; y: number; z: number }, calm?: boolean) => void;
   setTier: (tier: QualityTier) => void;
+  /** Share of gulls, terns and albatrosses (a region's mix); birds change species out of sight. */
+  setMix: (mix: readonly [number, number, number]) => void;
   stats: () => { birds: number; draws: number; triangles: number };
   dispose: () => void;
 };
 
 /**
- * Gulls, terns and albatrosses flying as small flocks that circle the whale. Each species is an instanced
- * mesh at three levels of detail; wing flap runs in the vertex shader. Same seed, same birds.
+ * Gulls, terns and albatrosses flying as small flocks that circle a spot of sea. At cruise speed the whale
+ * outruns them, so a flock appears ahead, passes the whale and is gone behind, and the next one comes after
+ * a pause. Each species is an instanced mesh at three levels of detail; wing flap runs in the vertex shader.
+ * Same seed, same birds.
  */
 export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
   const rng = fork(seed, 'birds');
+  let mix: readonly [number, number, number] = [0.5, 0.35, 0.15];
   const group = new THREE.Group();
   const time = { value: 0 };
   const flap = { value: 1 };
@@ -63,12 +74,13 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
   const birds: Bird[] = [];
   for (let i = 0; i < MAX_BIRDS; i++) {
     const roll = rng();
-    const species = roll < MIX[0] ? 0 : roll < MIX[1] ? 1 : 2;
+    const species = speciesFor(roll, mix);
     const size = 0.9 + rng() * 0.3;
     const heading = rng() * Math.PI * 2;
     const speed = SPECIES[species]!.speed;
     const tint = new THREE.Color().setScalar(0.92 + rng() * 0.08);
     birds.push({
+      roll,
       x: 0, y: 0, z: 0,
       vx: Math.sin(heading) * speed, vy: 0, vz: Math.cos(heading) * speed,
       group: species,
@@ -89,10 +101,14 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
     phase: rng() * Math.PI * 2,
   }));
   const leaders: Leader[] = orbits.map(() => ({ x: 0, y: 0, z: 0 }));
+  // Where each species' flock circles, and whether it is in the sky now.
+  const flocks = SPECIES.map(() => ({ x: 0, z: 0, present: false, wait: 0 }));
+  const flockRng = fork(seed, 7001);
+  const span = (range: readonly [number, number]): number => range[0] + (range[1] - range[0]) * flockRng();
+  const whale = { x: 0, z: 0, dx: 0, dz: -1, set: false };
   const speeds = SPECIES.map((species) => species.speed);
 
   let active = detailFor(tier).birds;
-  const center = { x: 0, z: 0, set: false };
   const live: Bird[] = [];
   const dummy = new THREE.Object3D();
   dummy.rotation.order = 'YXZ';
@@ -106,24 +122,52 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
     update(t, centerX = 0, centerZ = 0, dt = 0, camera, calm = false) {
       time.value = t;
       flap.value = calm ? 0 : 1;
-      const first = !center.set;
+      const first = !whale.set;
+      const step = Math.min(dt, 0.1);
       if (first) {
-        center.x = centerX;
-        center.z = centerZ;
-        center.set = true;
-      } else {
-        // The flock drifts after the whale over half a minute or so; it never snaps.
-        center.x = damp(center.x, centerX, 0.04, dt);
-        center.z = damp(center.z, centerZ, 0.04, dt);
+        whale.x = centerX;
+        whale.z = centerZ;
+        whale.set = true;
+      } else if (step > 0) {
+        // The course is read from the whale's motion; a standstill keeps the last one, a jump starts the flocks afresh.
+        const mx = centerX - whale.x;
+        const mz = centerZ - whale.z;
+        const moved = Math.hypot(mx, mz);
+        if (moved / step > 1) {
+          whale.dx = mx / moved;
+          whale.dz = mz / moved;
+        }
+        if (moved > 250) flocks.forEach((flock) => (flock.present = false));
+        whale.x = centerX;
+        whale.z = centerZ;
       }
+      flocks.forEach((flock, i) => {
+        const behind = (whale.x - flock.x) * whale.dx + (whale.z - flock.z) * whale.dz;
+        if (flock.present && (behind > GONE_BEHIND || Math.hypot(whale.x - flock.x, whale.z - flock.z) > AHEAD[1] * 1.6)) {
+          flock.present = false;
+          flock.wait = span(PAUSE);
+        }
+        // Away: once its birds have faded and the pause is over, it comes in ahead, on alternate sides.
+        let gone = true;
+        for (const bird of birds) if (bird.group === i && bird.fade > 0) gone = false;
+        if (!flock.present) {
+          flock.wait -= step;
+          if (flock.wait <= 0 && gone) {
+            const ahead = first ? 140 : span(AHEAD);
+            const side = (flockRng() < 0.5 ? -1 : 1) * span(ABEAM);
+            flock.x = whale.x + whale.dx * ahead - whale.dz * side;
+            flock.z = whale.z + whale.dz * ahead + whale.dx * side;
+            flock.present = true;
+          }
+        }
+      });
       orbits.forEach((orbit, i) => {
         const a = t * orbit.omega + orbit.phase;
         const leader = leaders[i]!;
-        leader.x = center.x + Math.cos(a) * orbit.radius;
-        leader.z = center.z + Math.sin(a) * orbit.radius;
+        leader.x = flocks[i]!.x + Math.cos(a) * orbit.radius;
+        leader.z = flocks[i]!.z + Math.sin(a) * orbit.radius;
         leader.y = orbit.height + Math.sin(a * 2.3) * 3;
       });
-      const step = Math.min(dt, 0.1);
       const place = (bird: Bird, index: number) => {
         const leader = leaders[bird.group]!;
         const around = (index / MAX_BIRDS) * Math.PI * 2;
@@ -133,7 +177,10 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
       };
       live.length = 0;
       birds.forEach((bird, i) => {
-        const target = i < active ? 1 : 0;
+        // A bird whose species the region no longer wants fades out, changes unseen and returns.
+        const wanted = speciesFor(bird.roll, mix);
+        if (bird.fade === 0) bird.group = wanted;
+        const target = i < active && bird.group === wanted && flocks[bird.group]!.present ? 1 : 0;
         if (first) {
           // Spread a fresh flock around its leader on first sight.
           place(bird, i);
@@ -194,6 +241,9 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
     },
     setTier(next) {
       active = detailFor(next).birds;
+    },
+    setMix(next) {
+      mix = next;
     },
     stats() {
       return { birds: active, draws, triangles };

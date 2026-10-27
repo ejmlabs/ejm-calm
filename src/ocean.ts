@@ -9,6 +9,10 @@ export type OceanHandle = {
   mesh: THREE.Mesh;
   /** With a camera, the plane follows it (render space) while ripples stay fixed to the world. */
   update: (dt: number, sunDirection: THREE.Vector3, camera?: THREE.Camera) => void;
+  /** The water's base colour (a region's look). */
+  setWaterColor: (color: THREE.Color) => void;
+  /** The light of the day: haze colour that lifts dark reflections, and brightness (0 dark to 1 day) of the water, the shallows and the sun's glint. */
+  setSky: (haze: THREE.Color, light: number, shallowLight: number) => void;
   /** World X/Z of render (0, 0); keeps ripples and shelf maps on the world after a recentre. */
   setOrigin: (x: number, z: number) => void;
   /** Swaps in shelf maps baked elsewhere in the world (maps are in world coordinates). */
@@ -128,6 +132,7 @@ export function createOcean(
   const shelfTextures = applyWaterLook(material, options.shelves, options.reflectionHaze, options.reflectionGain ?? 1);
   const maps = { near: options.shelves?.near, far: options.shelves?.far };
   const origin = { x: 0, z: 0 };
+  let light = 1;
 
   function place(): void {
     const uniforms = material.uniforms;
@@ -159,6 +164,16 @@ export function createOcean(
     },
     setWhale(x: number, y: number, z: number, heading: number) {
       material.uniforms.whaleBody?.value.set(x, z, heading, y);
+    },
+    setWaterColor(color: THREE.Color) {
+      material.uniforms.waterColor?.value.copy(color).multiplyScalar(light);
+    },
+    setSky(haze: THREE.Color, level: number, shallowLight: number) {
+      const uniforms = material.uniforms;
+      light = level;
+      uniforms.reflectionHaze?.value.copy(haze);
+      if (uniforms.shallowLight) uniforms.shallowLight.value = (options.shelves?.light ?? 1) * shallowLight;
+      if (uniforms.sunColor) uniforms.sunColor.value.set(0xe8dcc0).multiplyScalar(level);
     },
     setOrigin(x: number, z: number) {
       origin.x = x;

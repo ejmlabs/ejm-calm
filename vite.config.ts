@@ -22,5 +22,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // Several tests swim an hour of simulated time or build the site; a loaded machine needs more than five seconds.
+    testTimeout: 30000,
   },
 });
