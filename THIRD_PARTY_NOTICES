@@ -60,6 +60,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
+Ray-capsule intersection
+File: src/obstacles.ts (rayCapsule)
+Origin: ported from Inigo Quilez, "Intersectors"
+(https://iquilezles.org/articles/intersectors/), released under the MIT
+license with the same terms as the three.js license above.
+Copyright © 2016 Inigo Quilez
+
 Sound recordings
 Files: assets/audio (per-file sources, authors and edits in assets/audio/SOURCES.md)
 

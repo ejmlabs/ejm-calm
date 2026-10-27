@@ -22,6 +22,7 @@ import { createWeather, type WeatherState } from './weather.js';
 import { createRoute } from './route.js';
 import { createWake } from './wake.js';
 import { createShipFx } from './ship-fx.js';
+import { createMoverSync, createObstacles } from './obstacles.js';
 
 type CalmReview = {
   time: number;
@@ -176,6 +177,9 @@ let regionLook: ReturnType<typeof createRegionLook>;
 let wake: ReturnType<typeof createWake>;
 let weather: ReturnType<typeof createWeather>;
 let shipFx: ReturnType<typeof createShipFx>;
+/** Whale and ships as obstacles, registered where they are each frame. */
+const obstacles = createObstacles();
+const syncMovers = createMoverSync(obstacles);
 
 try {
   const buildStart = performance.now();
@@ -378,6 +382,7 @@ function tick(now: number): void {
   world.update(whale.state.x, whale.state.z, camera, dt, swellClock);
   world.ocean.update(dt * swell, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
+  syncMovers(whale.state, world.ships.active());
   wake.update(whale.state, dt);
   shipFx.update(world.ships.active(), sky.level);
   markJourney();
@@ -533,6 +538,7 @@ if (debug) {
         camMode: rig.mode,
         buildMs: Math.round(buildMs),
         ships: world.ships.active().length,
+        obstacles: obstacles.size,
         birds: flock.birds,
         birdDraws: flock.draws,
         birdTriangles: flock.triangles,
