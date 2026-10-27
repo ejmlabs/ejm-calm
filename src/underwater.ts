@@ -6,7 +6,7 @@ import { hash } from './rng.js';
 import { WATER_LEVEL, underwaterUniforms, waterSignal, type FloatingOrigin, type WaterSignal } from './seams.js';
 import { WATER_IOR, blendFog, radianceFor, surfaceLight, waterTint, type FogState } from './underwater-optics.js';
 import { createFloorPatch } from './underwater-floor.js';
-import { createSeafloor, type Seafloor } from './seafloor.js';
+import { createSeafloor, type DepthAt, type Seafloor } from './seafloor.js';
 import { createUnderwaterLife } from './underwater-life.js';
 import { createSwarms } from './underwater-swarm.js';
 import type { FeedSite } from './feed-sites.js';
@@ -32,6 +32,8 @@ export type UnderwaterOptions = {
   sky: SkyHandle;
   /** Ground height at world X/Z (negative under the sea). */
   heightAt: (x: number, z: number, lod?: number) => number;
+  /** Bathymetric depth for the seafloor; it must match the one main's own seafloor uses. */
+  depthAt?: DepthAt;
   origin: FloatingOrigin;
   tier: QualityTier;
   seed?: number;
@@ -336,7 +338,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
 
   /* -------------------------------------------------------------- seafloor */
 
-  const seafloor = createSeafloor(seed, { heightAt: options.heightAt });
+  const seafloor = createSeafloor(seed, { heightAt: options.heightAt }, options.depthAt);
   const floor = createFloorPatch({
     heightAt: seafloor.heightAt,
     cells: tier.floorCells,
