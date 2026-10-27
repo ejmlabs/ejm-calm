@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import type { Page } from 'playwright-core';
 import { withBrowser, openCalm, DESKTOP, MOBILE } from './browser.js';
+import { detailFor } from '../src/quality.js';
 
 type DrawWindow = Window & { __draws: number; __frameDraws: number[] };
 
@@ -107,6 +108,39 @@ await withBrowser(async (browser, base) => {
       assert.ok(stats['birdDraws']! <= 9 && stats['birdTriangles']! <= 5000, `bird draws ${stats['birdDraws']}, triangles ${stats['birdTriangles']}`);
       assert.deepEqual(errors, []);
       console.log(`budget: ${stats['birds']} birds, ${stats['birdDraws']} draws, ${stats['birdTriangles']} triangles`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // Land detail: trees, rocks and houses within their triangles (25,000 on low, 40,000 on medium, 60,000 on high), people and
+  // animals within the tier's cap in at most two draws, on a close coast with a town; still under reduced motion.
+  for (const [device, reducedMotion] of [[DESKTOP, 'no-preference'], [MOBILE, 'no-preference'], [DESKTOP, 'reduce']] as const) {
+    const { page, context, errors } = await openCalm(browser, base, device, { query: { debug: '1' }, reducedMotion });
+    try {
+      type Life = { kind: string; x: number; y: number; z: number; vantage: number[] | null };
+      type Review = { life: (radius: number) => Life[]; view: (from: number[] | null, to?: number[]) => void; stats: () => Record<string, number | string> };
+      const review = (script: string) => page.evaluate(`window.__calmReview.${script}`);
+      const town = ((await review('life(8000)')) as Life[]).find((l) => l.kind === 'town' && l.vantage);
+      assert.ok(town, 'a town in sight of the water within 8 km of the start of seed 42');
+      await review(`view(${JSON.stringify(town.vantage)}, ${JSON.stringify([town.x, town.y + 3, town.z])})`);
+      await page.waitForFunction(() => (window as unknown as { __calmReview: Review }).__calmReview.stats()['chunksPending'] === 0, undefined, { timeout: 60000 });
+      await page.waitForTimeout(1500);
+      const s = (await review('stats()')) as Record<string, number | string>;
+      const tier = s['tier'] as 'low' | 'medium' | 'high';
+      const triangles = { low: 25000, medium: 40000, high: 60000 }[tier];
+      const walkers = detailFor(tier).walkers;
+      assert.ok((s['landObjects'] as number) > 0, 'trees, rocks and houses on the land');
+      assert.ok((s['objectTriangles'] as number) <= triangles, `${device.name} ${tier}: ${s['objectTriangles']} object triangles (limit ${triangles})`);
+      assert.ok((s['walkers'] as number) > 0 && (s['walkers'] as number) <= walkers, `${device.name} ${tier}: ${s['walkers']} walkers (cap ${walkers})`);
+      assert.ok((s['walkerDraws'] as number) <= 2, `${s['walkerDraws']} walker draws`);
+      if (reducedMotion === 'reduce') {
+        await page.waitForTimeout(800);
+        assert.equal(((await review('stats()')) as Record<string, number>)['walkerClock'], s['walkerClock'], 'people and animals stand still under reduced motion');
+      }
+      await review('view(null)');
+      assert.deepEqual(errors, []);
+      console.log(`land (${device.name}, ${tier}, motion ${reducedMotion}): ${s['landTriangles']} land triangles, ${s['landObjects']} objects, ${s['objectTriangles']} object triangles, ${s['walkers']} walkers in ${s['walkerDraws']} draws`);
     } finally {
       await context.close();
     }

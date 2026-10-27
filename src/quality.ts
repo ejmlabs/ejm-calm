@@ -34,13 +34,16 @@ export function selectQualityTier({ mobile = false, software = false, cores = 8,
   return cores <= 4 || memory <= 4 ? 'medium' : 'high';
 }
 
-/** What the added world detail may spend per tier: birds updated, ships at full detail, instanced scatter, micro normal. */
-export type DetailBudget = { birds: number; ships: number; scatter: number; microNormal: 'off' | 'near' | 'full' };
+/**
+ * What the added world detail may spend per tier: birds updated, ships at full detail, trees, rocks and houses per
+ * land tile, people and animals drawn, and the land's bump detail.
+ */
+export type DetailBudget = { birds: number; ships: number; objects: number; walkers: number; microNormal: 'off' | 'near' | 'full' };
 
 const detailTable: Record<QualityTier, DetailBudget> = {
-  low: { birds: 10, ships: 4, scatter: 250, microNormal: 'off' },
-  medium: { birds: 16, ships: 6, scatter: 400, microNormal: 'near' },
-  high: { birds: 24, ships: 8, scatter: 600, microNormal: 'full' },
+  low: { birds: 10, ships: 4, objects: 36, walkers: 64, microNormal: 'off' },
+  medium: { birds: 16, ships: 6, objects: 70, walkers: 128, microNormal: 'near' },
+  high: { birds: 24, ships: 8, objects: 110, walkers: 192, microNormal: 'full' },
 };
 
 export function detailFor(tier: QualityTier): DetailBudget {

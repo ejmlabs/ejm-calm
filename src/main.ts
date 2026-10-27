@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { resolveSeed, seedURL, nextSeed } from './seed.js';
-import { createQuality, updateQuality } from './quality.js';
+import { createQuality, detailFor, updateQuality } from './quality.js';
 import { layoutWorld } from './terrain.js';
 import { createSky, HAZE_ANGLES } from './sky.js';
 import { createWhale } from './whale.js';
@@ -22,6 +22,7 @@ import { createWeather, type WeatherState } from './weather.js';
 import { createRoute } from './route.js';
 import { createWake } from './wake.js';
 import { createShipFx } from './ship-fx.js';
+import { createLandLife, HERD_CELL, TOWN_CELL } from './land-life.js';
 
 type CalmReview = {
   time: number;
@@ -50,6 +51,13 @@ type CalmReview = {
   setRoute: (on: boolean) => void;
   /** Puts the whale in open water near world (x, z) and loads the sea around it. */
   jumpTo: (x: number, z: number) => void;
+  /**
+   * Towns and herds within `radius` of the whale, nearest first: where, ground height, how many, and a vantage on
+   * open water with a clear sightline to them (null when there is none within 400 m).
+   */
+  life: (radius: number) => Array<{ kind: 'town' | 'herd'; x: number; y: number; z: number; count: number; vantage: [number, number, number] | null }>;
+  /** Review camera at world `from` looking at `to`, the whale and the land streamed around it; null returns to the chase. */
+  view: (from: [number, number, number] | null, to?: [number, number, number]) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
 };
 
@@ -200,6 +208,7 @@ try {
     reflectionGain: 0.8 / renderer.toneMappingExposure,
     waterSize: quality.waterSize,
     landSegments: quality.landSegments,
+    detail: detailFor(quality.tier),
     mobile,
     worker: true,
   });
@@ -328,6 +337,8 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
 
 /** Debug-only camera override for reviewing the underwater view without the follow camera. */
 let peekDepth: number | null = null;
+/** Debug-only review camera in world coordinates. */
+let viewPose: { from: [number, number, number]; to: [number, number, number] } | null = null;
 let peekSite: { x: number; y: number; z: number; radius: number } | null = null;
 
 function peekCamera(depth: number): void {
@@ -357,6 +368,7 @@ function tick(now: number): void {
 
   if (updateQuality(quality, raw * 1000)) {
     birds.setTier(quality.tier);
+    world.setWalkerCap(detailFor(quality.tier).walkers);
     sky.setEnvironmentRefresh(quality.tier !== 'low');
     renderer.setPixelRatio(quality.ratio);
     resize();
@@ -393,6 +405,10 @@ function tick(now: number): void {
   followWhale();
   rig.update(dt, time, motion.matches);
   if (peekDepth !== null) peekCamera(peekDepth);
+  if (viewPose) {
+    camera.position.set(viewPose.from[0] - world.origin.x, viewPose.from[1], viewPose.from[2] - world.origin.z);
+    camera.lookAt(viewPose.to[0] - world.origin.x, viewPose.to[1], viewPose.to[2] - world.origin.z);
+  }
 
   const signal = underwater.update(dt, time, camera, whale.state);
   audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin });
@@ -506,6 +522,64 @@ if (debug) {
       journey.x = journey.z = NaN;
       markJourney();
       rig.snap();
+    },
+    life(radius: number) {
+      const life = createLandLife(world.land);
+      const { x, z } = whale.state;
+      radius = clamp(radius, 0, 12000);
+      const out: ReturnType<CalmReview['life']> = [];
+      const { heightAt, maskAt } = world.land;
+      const EYE = 9;
+      // Open water nearest 150 m out, from where nothing stands between the eye and the subject.
+      const vantage = (px: number, pz: number, py: number): [number, number, number] | null => {
+        let best: [number, number, number] | null = null;
+        let score = Infinity;
+        for (let k = 0; k < 32; k++) {
+          const a = (k / 32) * Math.PI * 2;
+          for (let d = 60; d <= 400; d += 20) {
+            const cx = px + Math.cos(a) * d;
+            const cz = pz + Math.sin(a) * d;
+            if (Math.abs(d - 150) >= score || maskAt(cx, cz) > -0.02 || heightAt(cx, cz) > -1) continue;
+            let clear = true;
+            for (let t = 0.05; t < 0.97 && clear; t += 0.02) clear = heightAt(cx + (px - cx) * t, cz + (pz - cz) * t) < EYE + (py + 3 - EYE) * t - 1;
+            if (clear) {
+              best = [cx, EYE, cz];
+              score = Math.abs(d - 150);
+            }
+          }
+        }
+        return best;
+      };
+      const add = (kind: 'town' | 'herd', px: number, pz: number, count: number) => {
+        if (Math.hypot(px - x, pz - z) > radius) return;
+        const py = heightAt(px, pz);
+        out.push({ kind, x: px, y: py, z: pz, count, vantage: vantage(px, pz, py) });
+      };
+      for (let j = Math.floor((z - radius) / TOWN_CELL); j <= Math.floor((z + radius) / TOWN_CELL); j++) {
+        for (let i = Math.floor((x - radius) / TOWN_CELL); i <= Math.floor((x + radius) / TOWN_CELL); i++) {
+          const town = life.town(i, j);
+          if (town) add('town', town.x, town.z, town.houses.length);
+        }
+      }
+      for (let j = Math.floor((z - radius) / HERD_CELL); j <= Math.floor((z + radius) / HERD_CELL); j++) {
+        for (let i = Math.floor((x - radius) / HERD_CELL); i <= Math.floor((x + radius) / HERD_CELL); i++) {
+          const herd = life.herd(i, j);
+          if (herd.length) add('herd', herd[0]!.x, herd[0]!.z, herd.length);
+        }
+      }
+      return out.sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z));
+    },
+    view(from, to) {
+      const finite = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
+      if (!finite(from) || !finite(to)) {
+        viewPose = null;
+        return;
+      }
+      viewPose = { from, to };
+      whale.place(from[0], from[2]);
+      world.landStream.prime(from[0], from[2]);
+      journey.x = journey.z = NaN;
+      markJourney();
     },
     setRoute(on: boolean) {
       routeOn = Boolean(on);

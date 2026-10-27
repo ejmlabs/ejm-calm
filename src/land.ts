@@ -105,6 +105,7 @@ type Channels = {
   hill: NoiseFunction2D;
   ridge: NoiseFunction2D;
   range: NoiseFunction2D;
+  gully: NoiseFunction2D;
 };
 
 function channels(seed: number): Channels {
@@ -121,6 +122,7 @@ function channels(seed: number): Channels {
     range: makeNoise2D(s, 9),
     bay: makeNoise2D(s, 10),
     shoal: makeNoise2D(s, 11),
+    gully: makeNoise2D(s, 12),
   };
 }
 
@@ -344,6 +346,10 @@ export function createLand(seed: number, options: LandOptions): Land {
     const far = smoothstep(1200, 2800, r);
     const scale = 800 + 900 * smoothstep(1800, 4800, r);
     h += peaks * scale * smoothstep(0.04, 0.55, natural) * (0.12 + 0.88 * ranges) * far;
+    // Cliff faces (land only, so the coast mask and the sea are untouched): gullies and buttresses
+    // break the top edge.
+    const face = steep * smoothstep(0.0, 0.03, m) * (1 - smoothstep(0.12, 0.2, m));
+    if (face > 0) h *= 1 - face * 0.35 * ridged2(n.gully, wx / 90, wz / 90, 2);
     return h;
   }
 
