@@ -36,8 +36,8 @@ const COLOR = new THREE.Color(0xeaf3f6);
 /** Foam rides just above the flat water plane. */
 const LIFT = 0.04;
 /** Seconds of age at which the trail has faded out. */
-const LIFE = 6.4;
-const PEAK = 0.4;
+const LIFE = 4.5;
+const PEAK = 0.24;
 /** Columns across the trail and how strong each is: a soft ridge down the middle that melts into the sea at both edges. */
 const ACROSS = [-1, -0.5, 0, 0.5, 1] as const;
 const ACROSS_ALPHA = [0, 0.4, 1, 0.4, 0] as const;
@@ -57,8 +57,8 @@ export function createWake(options: WakeOptions = {}): Wake {
   const interval = options.interval ?? 0.1;
   const stern = options.stern ?? 5;
   const bow = options.bow ?? 6;
-  const width = options.width ?? 0.9;
-  const spread = options.spread ?? 0.55;
+  const width = options.width ?? 0.8;
+  const spread = options.spread ?? 0.45;
   const speeds = options.speeds ?? [3, 14];
 
   // Trail points, newest first in ring order: world x, z, heading, strength, age.
@@ -135,7 +135,8 @@ export function createWake(options: WakeOptions = {}): Wake {
       const i = (head - 1 - k + count * 2) % count;
       const age = pa[i]!;
       // Churned water is patchy: each point is a little stronger or weaker than its neighbours.
-      const a = fade(age, ps[i]!) * (0.72 + 0.28 * Math.sin(pn[i]!));
+      // Broken foam: patches along the trail, and ragged across it.
+      const a = fade(age, ps[i]!) * (0.3 + 0.7 * Math.abs(Math.sin(pn[i]! * 0.8) * Math.cos(pn[i]! * 0.31 + 1)));
       const half = width + spread * age;
       // Across the heading: the whale's right is (−fz, fx) with forward (−cos h, sin h).
       const fx = -Math.cos(ph[i]!);
@@ -152,7 +153,7 @@ export function createWake(options: WakeOptions = {}): Wake {
         trailColors[q] = 1;
         trailColors[q + 1] = 1;
         trailColors[q + 2] = 1;
-        trailColors[q + 3] = a * ACROSS_ALPHA[c]!;
+        trailColors[q + 3] = a * ACROSS_ALPHA[c]! * (0.55 + 0.45 * Math.sin(pn[i]! * 2.3 + c * 1.7));
       }
       written++;
     }
@@ -200,6 +201,8 @@ export function createWake(options: WakeOptions = {}): Wake {
     group,
     update(source, dt) {
       strength = wakeStrength(source.speed, source.y, speeds);
+      // Everything drawn is an offset from here, trail and bow wave alike.
+      mesh.position.set(source.x, LIFT, source.z);
       const fx = -Math.cos(source.heading);
       const fz = Math.sin(source.heading);
       for (let k = 0; k < filled; k++) pa[(head - 1 - k + count * 2) % count]! += dt;
@@ -253,7 +256,9 @@ export function createWake(options: WakeOptions = {}): Wake {
       return metres;
     },
     setLight(level) {
-      material.color.setScalar(0.1 + 0.9 * level);
+      // Foam is never brighter than the sea it lies on: it dims with the light, and fades with it too.
+      material.color.setScalar(0.06 + 0.7 * level);
+      material.opacity = 0.35 + 0.65 * level;
     },
     draws: () => drawn,
     dispose() {

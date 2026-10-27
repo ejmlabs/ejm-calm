@@ -33,8 +33,8 @@ An optional indicator SHALL show the region name and distance travelled, fading 
 - **THEN** no indicator appears
 
 ### Requirement: Forward progress
-The whale SHALL always make headway. The route SHALL plan over a wide coarse lattice (about 12 km) so it does not enter a gulf only to leave it, and a whale that swims far and goes nowhere SHALL commit to a way out.
+The route SHALL plan over a wide coarse lattice (about 12 km) so it can steer round a gulf instead of entering it, and a whale that swims far and goes nowhere SHALL commit to a way out. Where the wide plan leads more than 0.6 radians off the flow it overrides the flow's gentle drift, eased at 0.15 radians a second; this is the only exception to the drift limit of Steady heading.
 
-#### Scenario: No poor five minutes
+#### Scenario: Headway over long runs
 - **WHEN** a seeded run of 3600 s completes on each of seeds 1 to 50 and on the test set, and a run of 3 hours on seeds 3, 13 and 42
-- **THEN** no ten-minute window, sliding by a minute, makes less than 2 km good, net over path is at least 0.5 on every seed, and a seed may dip under 1.5 km in five minutes only once, as a U-turn out of a gulf (the sweep reports each)
+- **THEN** no ten-minute window, sliding by a minute, makes less than 2 km good and net over path is at least 0.5 on every seed

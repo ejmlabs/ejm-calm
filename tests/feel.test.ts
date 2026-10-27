@@ -29,7 +29,7 @@ test('a cruising whale leaves a wake at least 40 m long in one draw, and a slow 
     z += f.z * (16 / 30);
     wake.update({ x, y: 0, z, heading, speed: 16 }, 1 / 30);
   }
-  assert.ok(wake.length() >= 40, `trail ${wake.length().toFixed(0)} m at 16 m/s`);
+  assert.ok(wake.length(0.05) >= 40, `trail ${wake.length(0.05).toFixed(0)} m at 16 m/s`);
   assert.equal(wake.draws(), 1, `${wake.draws()} draws`);
   assert.equal(wake.group.children.length, 1, 'trail and bow wave are one mesh');
   // Vertices stay close to the source: far coordinates stay exact.

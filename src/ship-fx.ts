@@ -93,13 +93,13 @@ export function createShipFx(): ShipFx {
         dummy.scale.set(length * 1.5, 1, beam * 2.6);
         dummy.updateMatrix();
         foam.setMatrixAt(i * 2, dummy.matrix);
-        dummy.position.set(p.x - fwd.x * length * 1.5, LIFT, p.z - fwd.z * length * 1.5);
-        dummy.scale.set(length * 3.2, 1, beam * 1.3);
+        dummy.position.set(p.x - fwd.x * length * 1.1, LIFT, p.z - fwd.z * length * 1.1);
+        dummy.scale.set(length * 2.2, 1, beam * 1.1);
         dummy.updateMatrix();
         foam.setMatrixAt(i * 2 + 1, dummy.matrix);
       }
       foam.instanceMatrix.needsUpdate = true;
-      foamMaterial.color.setScalar(0.12 + 0.88 * level);
+      foamMaterial.color.setScalar(0.06 + 0.7 * level);
 
       // Lanterns come on as the light goes.
       const glow = 1 - smoothstep(0.15, 0.55, level);

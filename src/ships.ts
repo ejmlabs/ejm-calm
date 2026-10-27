@@ -56,8 +56,8 @@ function bake(parts: readonly Part[]): THREE.BufferGeometry {
   return out;
 }
 
-const at = (x: number, y: number, z: number, ry = 0, rz = 0): THREE.Matrix4 =>
-  new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry, rz)), new THREE.Vector3(1, 1, 1));
+const at = (x: number, y: number, z: number, ry = 0, rz = 0, rx = 0): THREE.Matrix4 =>
+  new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(1, 1, 1));
 
 /** A hull with a pointed bow, a sheer that lifts both ends and a tucked stern. */
 function hullGeometry(kind: ShipSpec['kind']): THREE.BufferGeometry {
@@ -86,7 +86,7 @@ function hullGeometry(kind: ShipSpec['kind']): THREE.BufferGeometry {
 }
 
 /** A sail: a sloop's main is a triangle along its mast, a tall ship's a trapezoid with a rounded foot; cloth is belly-curved and seamed. */
-function makeSail(width: number, height: number, triangle: boolean): THREE.PlaneGeometry {
+function makeSail(width: number, height: number, triangle: boolean, belly = 0.55): THREE.PlaneGeometry {
   const geo = new THREE.PlaneGeometry(width, height, 12, 14);
   const pos = geo.attributes.position!;
   const color = new Float32Array(pos.count * 3);
@@ -101,7 +101,7 @@ function makeSail(width: number, height: number, triangle: boolean): THREE.Plane
     const px = triangle ? width / 2 - (width / 2 - x) * taper : x * taper;
     // The foot curves up between the corners.
     const py = y + (triangle ? 0 : 0.16 * (1 - nx * nx) * (1 - up) * height * 0.2);
-    const billow = (1 - ny * ny) * (1 - nx * nx * 0.55) * 0.55;
+    const billow = (1 - ny * ny) * (1 - nx * nx * 0.55) * belly;
     pos.setXYZ(i, px, py, billow);
     // Panels: a darker seam every few rows, a little shade deeper in the belly.
     const seam = Math.abs(((up * 6) % 1) - 0.5) < 0.04 ? 0.82 : 1;
@@ -134,32 +134,52 @@ function buildRig(spec: ShipSpec): Rig {
   parts.push({ geometry: hullGeo, matrix: at(0, 0, 0), color: hullColor });
   const length = tall ? 4.4 : 3.4;
   const beam = tall ? 1.2 : 1.05;
-  // Trim band and deck.
-  parts.push({ geometry: new THREE.BoxGeometry(length * (tall ? 0.82 : 0.82), 0.08, beam * 0.98), matrix: at(0.1, 0.42, 0), color: TRIM });
+  const GALLERY = new THREE.Color(0xd8c690);
+  // Trim band, deck and rails along the gunwale, so the hull has a deck line from every side.
+  parts.push({ geometry: new THREE.BoxGeometry(length * 0.82, 0.08, beam * 0.98), matrix: at(0.1, 0.42, 0), color: TRIM });
   parts.push({ geometry: new THREE.BoxGeometry(length * 0.72, 0.05, beam * 0.72), matrix: at(0.05, 1.0, 0), color: DECK });
-  // Masts: a tall ship has three, a sloop one; a bowsprit leans out over the bow.
+  for (const side of [-1, 1]) parts.push({ geometry: new THREE.BoxGeometry(length * 0.66, 0.09, 0.05), matrix: at(0.05, 1.17, side * beam * 0.43), color: TRIM });
+  // A stern you can read: a transom with a lit gallery of windows, a rail across it and a rudder.
+  parts.push({ geometry: new THREE.BoxGeometry(0.1, 0.5, beam * 0.9), matrix: at(-length / 2 + 0.2, 0.82, 0), color: hullColor });
+  parts.push({ geometry: new THREE.BoxGeometry(0.06, 0.2, beam * 0.62), matrix: at(-length / 2 + 0.13, 0.95, 0), color: GALLERY });
+  parts.push({ geometry: new THREE.BoxGeometry(0.06, 0.08, beam * 0.92), matrix: at(-length / 2 + 0.2, 1.19, 0), color: TRIM });
+  parts.push({ geometry: new THREE.BoxGeometry(0.06, 0.7, 0.14), matrix: at(-length / 2 + 0.02, 0.4, 0), color: WOOD });
+  // Masts and yards. A tall ship has three masts, each a course and a narrower topsail on yards, set a little off each other's angle so the sails stagger; a sloop has one.
   const mastXs = tall ? [-1.2, 0.15, 1.35] : [0.15];
   const sailParts: Array<{ geometry: THREE.BufferGeometry; matrix: THREE.Matrix4 }> = [];
   mastXs.forEach((x, m) => {
     const mastH = tall ? 5.2 - Math.abs(m - 1) * 0.45 : 3.9;
     parts.push({ geometry: new THREE.CylinderGeometry(0.05, 0.08, mastH, 6), matrix: at(x, mastH / 2 + 0.9, 0), color: WOOD });
-    const sail = makeSail(tall ? 2.5 : 2.0, mastH * 0.78, !tall);
-    // A tall ship's square sails hang across the hull; a sloop's mainsail runs fore and aft, its luff against the mast.
-    sailParts.push({ geometry: sail, matrix: tall ? at(x, mastH * 0.52 + 0.95, 0, Math.PI / 2) : at(x - 1.0, mastH * 0.52 + 0.95, 0) });
+    if (tall) {
+      const yaw = Math.PI / 2 + (m - 1) * 0.14;
+      const width = 2.5 - 0.15 * Math.abs(m - 1);
+      const courseH = mastH * 0.4;
+      const topH = mastH * 0.3;
+      const courseY = 0.95 + mastH * 0.3;
+      const topY = 0.95 + mastH * 0.7;
+      sailParts.push({ geometry: makeSail(width, courseH, false, 0.9), matrix: at(x, courseY, 0, yaw) });
+      sailParts.push({ geometry: makeSail(width * 0.74, topH, false, 0.8), matrix: at(x, topY, 0, yaw - 0.06) });
+      for (const [y, w] of [[courseY + courseH / 2, width], [courseY - courseH / 2, width * 0.96], [topY + topH / 2, width * 0.74]] as const) {
+        parts.push({ geometry: new THREE.CylinderGeometry(0.03, 0.03, w * 1.06, 5), matrix: at(x, y, 0, yaw, 0, Math.PI / 2), color: WOOD });
+      }
+    } else {
+      // A fore-and-aft mainsail with its luff against the mast.
+      sailParts.push({ geometry: makeSail(2.0, mastH * 0.78, true), matrix: at(x - 1.0, mastH * 0.52 + 0.95, 0) });
+    }
   });
   if (tall) {
-    const jib = makeSail(1.7, 2.7, true);
-    sailParts.push({ geometry: jib, matrix: at(1.75, 2.55, 0, 0, -0.1) });
+    // Jib and bowsprit.
+    sailParts.push({ geometry: makeSail(1.7, 2.7, true), matrix: at(1.75, 2.55, 0, 0, -0.1) });
     parts.push({ geometry: new THREE.CylinderGeometry(0.04, 0.05, 1.3, 5), matrix: at(2.45, 1.35, 0, 0, -1.2), color: WOOD });
+    // A raised quarterdeck aft.
+    parts.push({ geometry: new THREE.BoxGeometry(length * 0.26, 0.14, beam * 0.86), matrix: at(-length * 0.33, 1.22, 0), color: DECK });
   } else {
-    // Boom and a small jib for the sloop.
     parts.push({ geometry: new THREE.CylinderGeometry(0.035, 0.035, 2.0, 5), matrix: at(-0.85, 1.5, 0, 0, Math.PI / 2), color: WOOD });
-    const jib = makeSail(1.1, 2.2, true);
-    sailParts.push({ geometry: jib, matrix: at(1.15, 2.2, 0, 0, -0.12) });
+    sailParts.push({ geometry: makeSail(1.1, 2.2, true), matrix: at(1.15, 2.2, 0, 0, -0.12) });
   }
-  // Cabin and its roof, a lantern post at the stern.
-  parts.push({ geometry: new THREE.BoxGeometry(0.85, 0.42, 0.7), matrix: at(-1.15, 1.2, 0), color: CABIN });
-  parts.push({ geometry: new THREE.BoxGeometry(0.95, 0.06, 0.8), matrix: at(-1.15, 1.45, 0), color: WOOD });
+  // Cabin and its roof.
+  parts.push({ geometry: new THREE.BoxGeometry(0.85, 0.42, 0.7), matrix: at(-1.15, tall ? 1.45 : 1.2, 0), color: CABIN });
+  parts.push({ geometry: new THREE.BoxGeometry(0.95, 0.06, 0.8), matrix: at(-1.15, tall ? 1.7 : 1.45, 0), color: WOOD });
   const hull = bake(parts);
   for (const part of parts) part.geometry.dispose();
 

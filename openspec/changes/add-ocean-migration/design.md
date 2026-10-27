@@ -156,4 +156,4 @@ Confirmed by the captain on 2026-10-25: option B on all ten (1B to 10B).
 
 ## Amended after review
 
-The surface flecks of decision 9 were built and then removed: on the water they read as white streaks. Night gains stars, ships are redrawn as proper vessels, and the route plans over a wide coarse lattice and commits to a way out, so it makes headway on every seed.
+The surface flecks of decision 9 were built and then removed: on the water they read as white streaks. Night gains stars, ships are redrawn as proper vessels, and the route plans over a wide coarse lattice and commits to a way out, so it keeps moving on almost every seed (a few U-turns out of gulfs remain, and `tools/seed-sweep.ts` reports them).
