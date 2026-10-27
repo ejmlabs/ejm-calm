@@ -296,6 +296,7 @@ let swellClock = 0;
 let routeClock = performance.now();
 let time = 0;
 let last = performance.now();
+let firstFrame = false;
 let frame: number | null = null;
 let disposed = false;
 let lastSave = 0;
@@ -415,6 +416,11 @@ function tick(now: number): void {
   const signal = underwater.update(dt, time, camera, whale.state);
   audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin });
   renderer.render(scene, camera);
+  if (!firstFrame) {
+    // The first frame of the sea, for load-time checks.
+    firstFrame = true;
+    performance.mark('calm-first-frame');
+  }
 
   if (now - lastSave > 4000) {
     lastSave = now;

@@ -265,6 +265,7 @@ void main() {
   }
   float d = length( vWorld.xz - cameraPosition.xz );
   float near = 1.0 - smoothstep( 900.0, 3800.0, d );
+  ${bump ? `float reach = 1.0 - smoothstep( ${(bump * 0.3).toFixed(1)}, ${bump.toFixed(1)}, d );` : ''}
   // Derivatives before any branch, where they are defined for every pixel.
   footprint = length( fwidth( vWorld ) );
   // World position fixed to the ground, whatever the floating origin.
@@ -273,6 +274,8 @@ void main() {
   float rock = smoothstep( 0.35, 0.9, vDetail.x );
   vec3 w = pow( abs( n ), vec3( 4.0 ) );
   w /= w.x + w.y + w.z;
+  // Detail height for the bump (metres), zero wherever no bump reaches, so its derivatives below are defined.
+  float height = 0.0;
   float macro = 1.0 - smoothstep( 5000.0, 8000.0, d );
   if ( vDetail.w < 0.5 && macro > 0.0 ) {
     // Broad variation that carries to the far ranges: warm and cool drifts in the grass and the rock, and
@@ -309,20 +312,25 @@ void main() {
     albedo *= 1.0 + ( 0.1 * grit + 0.05 * ripple ) * sand * near;
     ${
       bump
-        ? `float reach = 1.0 - smoothstep( ${(bump * 0.3).toFixed(1)}, ${bump.toFixed(1)}, d );
-    if ( reach > 0.0 ) {
-      // Bump from screen-space derivatives of a detail height (metres).
-      float height = ( rock * ( strata * 0.9 + bedding * 0.6 + grit * 0.7 + blocks * 1.2 ) + forest * crowns * 1.4 + open * ( 1.0 - forest ) * tuft * 0.3 ) * reach;
-      vec3 dx = dFdx( vWorld );
-      vec3 dy = dFdy( vWorld );
-      vec3 r1 = cross( dy, n );
-      vec3 r2 = cross( n, dx );
-      float det = dot( dx, r1 );
-      vec3 grad = sign( det ) * ( dFdx( height ) * r1 + dFdy( height ) * r2 );
-      n = normalize( abs( det ) * n - grad );
-    }`
+        ? `height = ( rock * ( strata * 0.9 + bedding * 0.6 + grit * 0.7 + blocks * 1.2 ) + forest * crowns * 1.4 + open * ( 1.0 - forest ) * tuft * 0.3 ) * reach;`
         : ''
     }
+  }
+  ${
+    bump
+      ? `// Bump from screen-space derivatives of the detail height, taken outside every branch.
+  vec3 dx = dFdx( vWorld );
+  vec3 dy = dFdy( vWorld );
+  float hx = dFdx( height );
+  float hy = dFdy( height );
+  if ( reach > 0.0 ) {
+    vec3 r1 = cross( dy, n );
+    vec3 r2 = cross( n, dx );
+    float det = dot( dx, r1 );
+    vec3 grad = sign( det ) * ( hx * r1 + hy * r2 );
+    n = normalize( abs( det ) * n - grad );
+  }`
+      : ''
   }
   gl_FragColor = vec4( landShade( albedo, n, vWorld ), 1.0 );
   #include <colorspace_fragment>

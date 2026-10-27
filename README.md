@@ -51,9 +51,9 @@ the regions, times of day, weather and indicator, and `npx tsx tools/land-shots.
 dusk and night, the highest range in sight, and a close coast with a town and a herd (after a build).
 
 There is no byte cap: load time is the size bar. `npx tsx tools/load-time.ts <base dist> <new dist>` times
-first paint, first contentful paint and the first frame of the sea over cold loads on a throttled normal
-connection (9 Mbps, 170 ms; phones also at a 4x slower CPU), each in a fresh browser and alternating between
-the builds, and fails if the new build adds a second or more.
+first paint, first contentful paint and the first frame of the sea (the page's `calm-first-frame` mark) over
+cold loads, gzipped, on a throttled normal connection (9 Mbps, 170 ms; phones also at a 4x slower CPU), each
+in a fresh browser and alternating between the builds, and fails if the new build adds a second or more.
 
 Review hooks (`window.__calmReview`) are available only with `?debug=1`, among them
 `setDay`, `setWeather`, `setRoute`, `jumpTo`, `life` (towns and herds nearby), `peak` (the highest land in a ring)

@@ -4,8 +4,8 @@ import { DESKTOP, MOBILE, launchBrowser, type DeviceProfile } from './browser.js
 
 /**
  * Load time on a normal connection: cold loads of a built site through a throttled network (9 Mbps down,
- * 1.5 Mbps up, 170 ms round trip), timing first paint, first contentful paint and the first frame of the sea
- * (`body[data-ready]`) by the browser's own clocks. With two builds, loads alternate between them and the second is
+ * 1.5 Mbps up, 170 ms round trip) from a server that gzips text as production hosts do, timing first paint, first
+ * contentful paint and the first frame of the sea (the page's `calm-first-frame` mark) by the browser's own clocks. With two builds, loads alternate between them and the second is
  * compared to the first; the run fails if any median grows by a second or more. Bytes are reported, never capped.
  *
  * usage: npx tsx tools/load-time.ts [build directory] [build directory to compare] [runs]    (defaults: dist, none, 5)
@@ -27,8 +27,17 @@ async function sample(url: string, device: DeviceProfile): Promise<Sample> {
   const { name: _name, ...options } = device;
   // A fresh browser per load, as on a first visit: an empty cache, and no GPU process still busy with a closed page.
   const browser = await launchBrowser();
-  const context = await browser.newContext(options);
   try {
+    const context = await browser.newContext(options);
+    // Builds from before the page marked its first frame: the same mark, at the end of the first frame after ready.
+    await context.addInitScript(() => {
+      const request = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (callback) =>
+        request((time) => {
+          callback(time);
+          if (document.body?.dataset.ready === 'true' && !performance.getEntriesByName('calm-first-frame').length) performance.mark('calm-first-frame');
+        });
+    });
     const page = await context.newPage();
     const cdp = await context.newCDPSession(page);
     await cdp.send('Network.enable');
@@ -39,17 +48,20 @@ async function sample(url: string, device: DeviceProfile): Promise<Sample> {
       bytes += event.encodedDataLength;
     });
     await page.goto(`${url}?seed=42`, { waitUntil: 'commit' });
-    await page.waitForSelector('body[data-ready="true"]', { timeout: 120000 }).catch(async () => {
-      const state = await page.evaluate('document.body?.dataset.ready ?? "none"').catch(() => 'unknown');
-      throw new Error(`${url} (${device.name}): no first frame of the sea within 120 s (ready: ${String(state)})`);
+    // Paint entries are reported asynchronously and can land after the first frame.
+    const entries = ['first-paint', 'first-contentful-paint', 'calm-first-frame'];
+    await page.waitForFunction((names) => names.every((name) => performance.getEntriesByName(name).length > 0), entries, { timeout: 120000 }).catch(async () => {
+      const seen = await page.evaluate((names) => names.filter((name) => performance.getEntriesByName(name).length > 0), entries).catch(() => []);
+      throw new Error(`${url} (${device.name}): not every load-time entry within 120 s (seen: ${seen.join(', ') || 'none'})`);
     });
     // No helper functions inside: the page cannot see the names the TypeScript loader adds to them.
     const [firstPaint, firstContentfulPaint, ready] = await page.evaluate(() => [
-      performance.getEntriesByName('first-paint')[0]?.startTime ?? NaN,
-      performance.getEntriesByName('first-contentful-paint')[0]?.startTime ?? NaN,
-      performance.now(),
+      performance.getEntriesByName('first-paint')[0]?.startTime,
+      performance.getEntriesByName('first-contentful-paint')[0]?.startTime,
+      performance.getEntriesByName('calm-first-frame')[0]?.startTime,
     ]);
-    return { firstPaint: firstPaint!, firstContentfulPaint: firstContentfulPaint!, ready: ready!, kilobytes: bytes / 1024 };
+    if (firstPaint === undefined || firstContentfulPaint === undefined || ready === undefined) throw new Error(`${url} (${device.name}): a paint or first-frame entry is missing`);
+    return { firstPaint, firstContentfulPaint, ready, kilobytes: bytes / 1024 };
   } finally {
     await browser.close();
   }
