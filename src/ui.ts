@@ -1,3 +1,5 @@
+import { isPace, type Pace } from './pace.js';
+
 const find = (...ids: string[]): HTMLElement | null =>
   ids.map((id) => document.getElementById(id)).find(Boolean) ?? null;
 
@@ -7,12 +9,18 @@ export type UIActions = {
   sound: () => void;
   /** The route indicator switch in the info panel. */
   route: (on: boolean) => void;
+  /** The travel speed choice in the info panel. */
+  pace: (pace: Pace) => void;
+  /** Back to the default follow camera. */
+  resetView: () => void;
 };
 
 export type UIController = {
   ready: () => void;
   error: (message: string) => void;
-  sync: (state: { seed: number; sound: boolean; route: boolean }) => void;
+  sync: (state: { seed: number; sound: boolean; route: boolean; pace: Pace }) => void;
+  /** Shows the reset view control while the user's own view is on. */
+  showReset: (visible: boolean) => void;
   /** Shows or hides the route indicator and sets its text. */
   showRoute: (visible: boolean, text: string) => void;
   announce: (message: string) => void;
@@ -35,6 +43,8 @@ export function createUI(actions: UIActions): UIController {
   const title = find('title');
   const route = find('route');
   const routeToggle = find('routeToggle') as HTMLInputElement | null;
+  const paceChoice = find('pace');
+  const resetBtn = find('resetBtn');
 
   const controller = new AbortController();
   const { signal } = controller;
@@ -99,6 +109,11 @@ export function createUI(actions: UIActions): UIController {
   listen(seedBtn, 'click', () => actions.newSeed());
   listen(soundBtn, 'click', () => actions.sound());
   listen(routeToggle, 'change', () => actions.route(Boolean(routeToggle?.checked)));
+  listen(paceChoice, 'change', (event) => {
+    const value = (event.target as HTMLInputElement).value;
+    if (isPace(value)) actions.pace(value);
+  });
+  listen(resetBtn, 'click', () => actions.resetView());
   listen(document, 'keydown', (event) => {
     const e = event as KeyboardEvent;
     if (e.key === 'Escape' && aboutOpen) setAbout(false);
@@ -120,13 +135,18 @@ export function createUI(actions: UIActions): UIController {
       veil?.removeAttribute('hidden');
       document.body.dataset.ready = 'error';
     },
-    sync({ seed, sound, route: routeOn }) {
+    sync({ seed, sound, route: routeOn, pace }) {
       if (seedLabel) seedLabel.textContent = String(seed >>> 0);
       if (routeToggle) routeToggle.checked = routeOn;
+      const paceInput = paceChoice?.querySelector<HTMLInputElement>(`input[value="${pace}"]`);
+      if (paceInput) paceInput.checked = true;
       if (soundBtn) {
         soundBtn.setAttribute('aria-pressed', String(sound));
         soundBtn.title = sound ? 'Sound on' : 'Sound off';
       }
+    },
+    showReset(visible) {
+      if (resetBtn) resetBtn.hidden = !visible;
     },
     showRoute(visible, text) {
       if (!route) return;

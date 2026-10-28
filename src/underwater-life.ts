@@ -215,7 +215,7 @@ function mergeGeometries(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
  * patch), so lit instances settle into the dark absorption fog instead of
  * glowing through it.
  */
-function absorb(shader: THREE.WebGLProgramParametersWithUniforms): void {
+export function absorb(shader: THREE.WebGLProgramParametersWithUniforms): void {
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nvarying float vLifeDepth;')
     .replace('#include <fog_vertex>', '#include <fog_vertex>\nvLifeDepth = max( 0.0, -( transpose( mat3( viewMatrix ) ) * ( mvPosition.xyz - viewMatrix[3].xyz ) ).y );');
