@@ -328,7 +328,14 @@ void main() {
     vec3 r2 = cross( n, dx );
     float det = dot( dx, r1 );
     vec3 grad = sign( det ) * ( hx * r1 + hy * r2 );
-    n = normalize( abs( det ) * n - grad );
+    // Seen near edge-on (or where the derivatives lose precision) det goes to zero: the gradient would swamp the
+    // normal or both would vanish, a NaN or back-facing normal that shades black. Tilt at most about 60 degrees,
+    // and keep the plain normal where the bumped one collapses.
+    float scale = abs( det );
+    float steep = length( grad );
+    if ( steep > scale * 1.7 ) grad *= scale * 1.7 / steep;
+    vec3 bumped = scale * n - grad;
+    if ( dot( bumped, bumped ) > 1e-12 ) n = normalize( bumped );
   }`
       : ''
   }
