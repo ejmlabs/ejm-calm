@@ -51,10 +51,12 @@ export type UnderwaterHandle = {
   dispose: () => void;
 };
 
+// The seafloor patch reaches past the underwater visibility on every tier (about 175 m across), so a coast's
+// underwater flanks carry on into the haze instead of stopping where the patch ends.
 const TIER = {
-  low: { rays: 9, snow: 140, floorCells: 48, floorStep: 2.6, caustics: 1, budget: 500 },
-  medium: { rays: 13, snow: 260, floorCells: 64, floorStep: 2.2, caustics: 2, budget: 900 },
-  high: { rays: 16, snow: 380, floorCells: 72, floorStep: 2, caustics: 2, budget: 1400 },
+  low: { rays: 9, snow: 140, floorCells: 64, floorStep: 2.8, caustics: 1, budget: 500 },
+  medium: { rays: 13, snow: 260, floorCells: 80, floorStep: 2.2, caustics: 2, budget: 900 },
+  high: { rays: 16, snow: 380, floorCells: 96, floorStep: 1.8, caustics: 2, budget: 1400 },
 } as const;
 
 export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRenderer, options: UnderwaterOptions): UnderwaterHandle {
