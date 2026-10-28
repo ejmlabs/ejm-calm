@@ -114,13 +114,11 @@ export function createPlanet(seed: number, heading: number): Planet {
     const vz = Math.sin(h);
     return (vx * nx + vz * nz) / Math.max(0.5, vx * fx + vz * fz);
   };
-  function chunk(k: number): Float64Array {
-    let out = chunks.get(k);
-    if (out) return out;
-    // Integrate out from the origin (midpoint rule), forward for k ≥ 0 and backward below.
+  /** Integrates chunk k (midpoint rule) from the end of its neighbour nearer the origin, or from 0 at the origin. */
+  function integrate(k: number): Float64Array {
     const dir = k >= 0 ? 1 : -1;
-    const prev = k === 0 || k === -1 ? null : chunk(k - dir);
-    out = new Float64Array(LANE_CHUNK + 1);
+    const prev = k === 0 || k === -1 ? null : chunks.get(k - dir)!;
+    const out = new Float64Array(LANE_CHUNK + 1);
     let c = prev ? prev[dir > 0 ? LANE_CHUNK : 0]! : 0;
     const start = k >= 0 ? k * LANE_CHUNK : (k + 1) * LANE_CHUNK;
     for (let i = 0; i <= LANE_CHUNK; i++) {
@@ -134,7 +132,19 @@ export function createPlanet(seed: number, heading: number): Planet {
     chunks.set(k, out);
     return out;
   }
+  function chunk(k: number): Float64Array {
+    const out = chunks.get(k);
+    if (out) return out;
+    // Out from the origin, forward for k ≥ 0 and backward below: build the missing chunks in order, in a loop so a
+    // far chunk cannot overflow the stack.
+    const dir = k >= 0 ? 1 : -1;
+    let from = k;
+    while (from !== (dir > 0 ? 0 : -1) && !chunks.has(from - dir)) from -= dir;
+    for (let j = from; j !== k; j += dir) integrate(j);
+    return integrate(k);
+  }
   function centre(s: number): number {
+    if (!Number.isFinite(s)) return NaN;
     const f = s / LANE_STEP;
     const k = Math.floor(f / LANE_CHUNK);
     const data = chunk(k);
@@ -247,10 +257,13 @@ export function createPlanet(seed: number, heading: number): Planet {
   return {
     heading,
     macroAt(x, z) {
+      // A point that is not a number is open sea, so it cannot reach the terrain as a NaN height.
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return MACRO_FLOOR;
       const m = clamp(macro(x, z, false), MACRO_FLOOR, MACRO_CEIL);
       return m >= 0 ? m : Math.min(MACRO_CEIL, Math.max(m, islands(x, z)));
     },
     openAt(x, z) {
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return Infinity;
       return -macro(x, z, true) / COAST_SLOPE;
     },
     laneAt,
