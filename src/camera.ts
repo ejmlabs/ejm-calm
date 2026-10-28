@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { clamp, smoothstep } from './math.js';
 import { SURFACE_BAND, WATER_LEVEL, type FollowTarget } from './seams.js';
 import { createSpring, nearestAngle, springSet, springStep, springStepAngle, type Spring } from './spring.js';
+import { DEPTH_SCALE, LENGTH_SCALE, WHALE_LENGTH } from './whale-size.js';
 
 /** Persisted framing. `yaw` is always 0: the chase camera is locked to the whale's heading. */
 export type CameraFraming = { yaw: number; pitch: number; distance: number };
@@ -30,21 +31,22 @@ export const PULL_BACK = 0.25;
 export const LEAN_MAX = 0.05;
 const LEAN_GAIN = 0.5;
 
-export const DEFAULT_FRAMING: CameraFraming = { yaw: 0, pitch: 0.3, distance: 16 };
-export const FRAMING_DISTANCE: readonly [number, number] = [14, 40];
+// Distances and heights here follow the whale's size (see whale-size.ts).
+export const DEFAULT_FRAMING: CameraFraming = { yaw: 0, pitch: 0.3, distance: 16 * LENGTH_SCALE };
+export const FRAMING_DISTANCE: readonly [number, number] = [14 * LENGTH_SCALE, 40 * LENGTH_SCALE];
 const FRAMING_PITCH: readonly [number, number] = [0.1, 0.4];
 
 /** The eye never rests closer than this to the waterline. */
 export const EYE_CLEARANCE = SURFACE_BAND + 0.15;
 /** Hysteresis on the whale's depth for following it under (and back up). */
-export const DIVE_BELOW = -3;
-export const RISE_ABOVE = -2;
+export const DIVE_BELOW = -3 * DEPTH_SCALE;
+export const RISE_ABOVE = -2 * DEPTH_SCALE;
 /** Seconds below DIVE_BELOW before the camera follows, so short dips (the run-up to a breach, its re-entry) do not flip it. */
 export const DIVE_DWELL = 3.5;
-const UNDER_EYE = 1.5;
+const UNDER_EYE = 1.5 * DEPTH_SCALE;
 const UNDER_DISTANCE = 0.7;
 /** Under water the haze is thick: never trail further than this. */
-const UNDER_MAX_DISTANCE = 18;
+const UNDER_MAX_DISTANCE = 18 * LENGTH_SCALE;
 /** Distance and look-ahead grow with speed up to this many m/s. */
 const SPEED_CAP = 28;
 const SPEED_DISTANCE = PULL_BACK / SPEED_CAP;
@@ -55,15 +57,15 @@ const SPEED_LOOK_AHEAD = 0.6;
 /** Below about this speed the camera holds its bearing instead of following the heading. */
 const COUPLING_SPEED: readonly [number, number] = [0.6, 3];
 /** Never closer to the whale's body than this. */
-export const MIN_DISTANCE = 6;
+export const MIN_DISTANCE = 6 * LENGTH_SCALE;
 /** Half the whale's length: the framed points are the centre and ± this along the heading. */
-export const WHALE_HALF = 6;
+export const WHALE_HALF = WHALE_LENGTH / 2;
 /** Framing safe area in NDC: corrections start at SOFT, HARD is never exceeded. */
 const SAFE_SOFT = 0.7;
 export const SAFE_HARD = 0.88;
 const SIGHT_CLEARANCE = 0.5;
-const SHOULDER = 2;
-const LOOK_AHEAD = 7;
+const SHOULDER = 2 * LENGTH_SCALE;
+const LOOK_AHEAD = 7 * LENGTH_SCALE;
 const LAND_CLEARANCE = 2;
 const FLOOR_CLEARANCE = 1.5;
 

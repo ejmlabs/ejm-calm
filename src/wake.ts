@@ -17,6 +17,8 @@ export type WakeOptions = {
   spread?: number;
   /** Wake strength follows speed over this range (m/s). */
   speeds?: readonly [number, number];
+  /** Body heights (m): no wake below the first, full wake above the second. */
+  depths?: readonly [number, number];
   /** Height of the sea at world (x, z); the foam lies on it. Flat water when not given. */
   surface?: (x: number, z: number) => number;
 };
@@ -46,8 +48,8 @@ const ACROSS_ALPHA = [0, 0.4, 1, 0.4, 0] as const;
 const COLUMNS = ACROSS.length;
 
 /** Strength of the wake of a body: none when slow or under water, full when fast and at the surface. */
-export function wakeStrength(speed: number, y: number, speeds: readonly [number, number] = [3, 14]): number {
-  return smoothstep(speeds[0], speeds[1], speed) * smoothstep(-2.6, -0.9, y);
+export function wakeStrength(speed: number, y: number, speeds: readonly [number, number] = [3, 14], depths: readonly [number, number] = [-2.6, -0.9]): number {
+  return smoothstep(speeds[0], speeds[1], speed) * smoothstep(depths[0], depths[1], y);
 }
 
 /**
@@ -62,6 +64,7 @@ export function createWake(options: WakeOptions = {}): Wake {
   const width = options.width ?? 0.8;
   const spread = options.spread ?? 0.45;
   const speeds = options.speeds ?? [3, 14];
+  const depths = options.depths ?? [-2.6, -0.9];
   const surface = options.surface ?? (() => 0);
 
   // Trail points, newest first in ring order: world x, z, heading, strength, age.
@@ -203,7 +206,7 @@ export function createWake(options: WakeOptions = {}): Wake {
   return {
     group,
     update(source, dt) {
-      strength = wakeStrength(source.speed, source.y, speeds);
+      strength = wakeStrength(source.speed, source.y, speeds, depths);
       // Everything drawn is an offset from here, trail and bow wave alike.
       mesh.position.set(source.x, LIFT, source.z);
       const fx = -Math.cos(source.heading);

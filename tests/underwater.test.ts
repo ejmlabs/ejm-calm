@@ -66,7 +66,7 @@ test("Snell's window: critical angle ≈ 48.6° for sea water; light passes insi
   assert.ok(edge !== null && edge > (85 * Math.PI) / 180);
 });
 
-test('underwater tint darkens with depth and visibility stays in the 40–70 m range', () => {
+test('underwater tint darkens with depth and visibility stays in the 55–90 m range of clear open ocean', () => {
   const a: FogState = { color: new THREE.Color(), density: 0 };
   const b: FogState = { color: new THREE.Color(), density: 0 };
   waterTint(0, 1, a);
@@ -75,7 +75,7 @@ test('underwater tint darkens with depth and visibility stays in the 40–70 m r
   assert.ok(b.density >= a.density);
   for (const f of [a, b]) {
     const visibility = Math.sqrt(-Math.log(0.05)) / f.density;
-    assert.ok(visibility > 40 && visibility < 70, `${visibility}`);
+    assert.ok(visibility > 55 && visibility < 90, `${visibility}`);
     assert.ok(f.color.b > f.color.r, 'blue-green, not red');
   }
   assert.ok(surfaceLight(0) === 1 && surfaceLight(10) < surfaceLight(5));

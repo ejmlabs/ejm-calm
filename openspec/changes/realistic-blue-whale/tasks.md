@@ -1,10 +1,12 @@
 ## 1. Blue whale body (B1)
 
-- [ ] 1.1 Derive every size-dependent constant (framing, sprites, wake, rails, minimum camera distance) from `WHALE_LENGTH`; tests assert the derivations
-- [ ] 1.2 Blue whale cross-section profile, U-shaped rostrum with splashguard, small dorsal fin about three quarters back, short pointed flippers (no tubercles), broad triangular flukes; `WHALE_LENGTH` 25 m; re-fit the rig, skin weights and flex bones
-- [ ] 1.3 Skin: mottled blue-grey with pale spots and a faint yellowish belly; 55 to 90 throat grooves to the navel; build-time normal and detail maps; tiered detail (high, medium, low)
-- [ ] 1.4 Blow up to about 9 m, tall and slender; splashes, wash and wake at the new scale; breaching rare
-- [ ] 1.5 Update shots, smoke and frame-cost; record load time and frame cost before and after
+- [x] 1.1 Derive every size-dependent constant (framing, sprites, wake, rails, minimum camera distance) from `WHALE_LENGTH`; tests assert the derivations
+- [x] 1.2 Blue whale cross-section profile, U-shaped rostrum with splashguard, small dorsal fin about three quarters back, short pointed flippers (no tubercles), broad triangular flukes; `WHALE_LENGTH` 25 m; re-fit the rig, skin weights and flex bones
+- [x] 1.3 Skin: mottled blue-grey with pale spots and a faint yellowish belly; 55 to 90 throat grooves to the navel; runtime-generated colour and normal atlas; tiered detail (high, medium, low)
+- [x] 1.4 Blow up to about 9 m, tall and slender; splashes, wash and wake at the new scale; breaching rare
+- [x] 1.5 Update shots, smoke and frame-cost; record load time and frame cost before and after
+  - Load time, five cold loads each (9 Mbps, 170 ms; phone CPU 4× slower), main → this phase: desktop first paint 600 → 600 ms, first sea frame 1642 → 1480 ms; phone first paint 628 → 632 ms, first sea frame 2939 → 2843 ms; transfer 257.5 → 257.7 KB. A first try that generated the 2048² skin before the first frame cost +625 ms on desktop; a 512² skin now goes on first and the full one is generated in idle time and swapped in (about 0.9 to 1 s of work on a desktop, after the sea is up).
+  - Frame cost: the high-tier whale is about 62,000 triangles (was about 14,000) in the same single draw; the smoke test's peak draws are unchanged (88 desktop, 64 phone).
 
 ## 2. Deep dives and the underwater camera (B2)
 

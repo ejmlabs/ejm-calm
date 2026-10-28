@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { createSpring, springStep, springStepAngle } from '../src/spring.js';
 import { DIVE_BELOW, DIVE_DWELL, EYE_CLEARANCE, FollowCamera, MIN_DISTANCE, PEEK_IDLE, RISE_ABOVE, WHALE_HALF } from '../src/camera.js';
 import { WATER_LEVEL, type FollowTarget } from '../src/seams.js';
+import { DEPTH_SCALE } from '../src/whale-size.js';
 
 const fwd = (h: number) => ({ x: -Math.cos(h), z: Math.sin(h) });
 
@@ -162,7 +163,7 @@ test('follows the whale under water and never rests in the surface band', () => 
   assert.equal(r.mode, 'under');
   assert.ok(camera.position.y < WATER_LEVEL - EYE_CLEARANCE);
   // A target whose natural eye height is inside the band is held outside it.
-  settle(-2.4);
+  settle(RISE_ABOVE - 0.4 * DEPTH_SCALE);
   r.look(0, 200); // a peek upward would lift the eye into the band
   for (let i = 0; i < 150; i++) {
     r.update(1 / 60, 0);
@@ -307,7 +308,8 @@ for (const screen of SCREENS) {
 test('the camera follows a dive under and comes back up', () => {
   const { frames } = journey(dive, 14);
   const deepest = Math.min(...frames.map((f) => f.eye.y));
-  assert.ok(deepest < -8, `eye only reached ${deepest}`);
+  // The trailing eye sits above a big whale's back, so it goes well under but not as deep as the whale.
+  assert.ok(deepest < -5, `eye only reached ${deepest}`);
   assert.ok(frames.at(-1)!.eye.y > WATER_LEVEL + EYE_CLEARANCE, 'did not resurface');
 });
 
