@@ -119,6 +119,7 @@ try {
 
 const memory = loadMemory(storage);
 let routeOn = memory?.route ?? false;
+let followDives = memory?.dives ?? true;
 let pace: Pace = memory?.pace ?? 'normal';
 const indicator = createRoute(REGION_LOOKS.map((look) => look.name));
 const resolved = resolveSeed(location.search, memory?.seed, () => {
@@ -156,6 +157,11 @@ const ui = createUI({
     indicator.setEnabled(on, world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
     ui.showRoute(indicator.visible, indicator.text);
     persist();
+  },
+  dives(on) {
+    followDives = on;
+    persist();
+    ui.announce(on ? 'following dives' : 'staying at the surface');
   },
   pace(choice) {
     pace = choice;
@@ -242,7 +248,8 @@ try {
     mobile,
     worker: true,
   });
-  seafloor = createSeafloor(seed, world.land);
+  // Real ocean depth: the shelf, slope and abyssal plain by distance from the coast.
+  seafloor = createSeafloor(seed, world.land, world.land.depthAt);
   regionLook = createRegionLook(world.land.regions);
   // Head along the composed opening view (forward = look direction), so the chase opens on the coast.
   whale = createWhale(seed, layout.whaleHome, {
@@ -268,7 +275,7 @@ try {
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
   world.origin.onRecenter((dx, dz) => rig.shift(dx, dz));
-  underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, origin: world.origin, tier: quality.tier, seed });
+  underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, depthAt: world.land.depthAt, origin: world.origin, tier: quality.tier, seed });
   // Review only (`?debug=1&fish=1`): every fish species in a small school ahead of the camera.
   if (debug && params.get('fish') === '1') fishShowcase = createFishShowcase(fishTime, UNDERWATER_LAYER);
   if (fishShowcase) scene.add(fishShowcase.group);
@@ -307,7 +314,7 @@ let disposed = false;
 let lastSave = 0;
 
 function sync(): void {
-  ui.sync({ seed, sound: audio.enabled, route: routeOn, pace });
+  ui.sync({ seed, sound: audio.enabled, route: routeOn, dives: followDives, pace });
   audio.sync(!document.hidden).catch(() => {});
 }
 
@@ -318,6 +325,7 @@ function persist(): void {
     sound: audio.settings(),
     framing: { ...rig.framing },
     route: routeOn,
+    dives: followDives,
     pace,
   });
 }
@@ -402,8 +410,10 @@ function tick(now: number): void {
   world.update(whale.state.x, whale.state.z, camera, dt, swellClock);
   world.ocean.update(dt * swell, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
+  // Build the ocean's depth ahead of the whale a slice at a time (a couple of milliseconds a frame at most).
+  world.land.prefetchDepth(whale.state.x, whale.state.z, 2);
   // The whale rides the swell while near the surface; deeper down it is free of it.
-  whale.group.position.y = surface(whale.state.x, whale.state.z) * smoothstep(-7, -1.5, whale.state.y);
+  whale.group.position.y = surface(whale.state.x, whale.state.z) * smoothstep(-7 * DEPTH_SCALE, -1.5 * DEPTH_SCALE, whale.state.y);
   wake.update(whale.state, dt);
   shipFx.update(world.ships.active(), sky.level);
   markJourney();
@@ -417,6 +427,8 @@ function tick(now: number): void {
   birds.update(time, whale.state.x, whale.state.z, dt, { x: camera.position.x + world.origin.x, y: camera.position.y, z: camera.position.z + world.origin.z }, motion.matches);
 
   followWhale();
+  // Reduced motion keeps the eye at the surface, as does the viewer's choice.
+  rig.setStayAtSurface(!followDives || motion.matches);
   view.update(motion.matches);
   rig.update(dt, time, motion.matches);
   if (peekDepth !== null) peekCamera(peekDepth);

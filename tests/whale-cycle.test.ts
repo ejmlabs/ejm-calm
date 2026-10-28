@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { circleShore } from '../src/shore.js';
 import { layoutWorld } from '../src/terrain.js';
 import { createSeafloor } from '../src/seafloor.js';
-import { BLOWS, DIVE_MAX, VERTICAL_SPEED, createWhaleMover } from '../src/whale-behavior.js';
+import { BLOWS, DEEPEST_DIVE, DIVE_MAX, VERTICAL_SPEED, createWhaleMover } from '../src/whale-behavior.js';
 import { SHALLOW_Y, floorLimit, type WhalePhase } from '../src/whale-motion.js';
 import { PLAN_REACH } from '../src/whale-course.js';
 import { DIVE_BELOW, DIVE_DWELL, RISE_ABOVE } from '../src/camera.js';
@@ -63,8 +63,10 @@ test('surfacings last tens of seconds with a string of blows; dives last minutes
     for (const d of dives) {
       const len = d.end - d.start;
       downs.push(len);
-      assert.ok(len > 100 && len < DIVE_MAX + 90, `seed ${seed}: dive of ${len.toFixed(0)} s at ${d.start.toFixed(0)}`);
-      assert.ok(d.deepest < -12, `seed ${seed}: dive at ${d.start.toFixed(0)} only reached ${d.deepest.toFixed(1)} m`);
+      // Up to DIVE_MAX before the climb starts, then the climb from as deep as the deepest dive.
+      assert.ok(len > 100 && len < DIVE_MAX + -DEEPEST_DIVE / VERTICAL_SPEED + 60, `seed ${seed}: dive of ${len.toFixed(0)} s at ${d.start.toFixed(0)}`);
+      // Feeding dives: 100 to 200 m, now and then deeper toward 300 m (the eased descent may stop a little short).
+      assert.ok(d.deepest < -90 && d.deepest > DEEPEST_DIVE - 20, `seed ${seed}: dive at ${d.start.toFixed(0)} reached ${d.deepest.toFixed(1)} m`);
     }
   }
   // Varied, not metronomic.

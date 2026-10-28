@@ -31,10 +31,11 @@ export function feedSiteInCell(seed: number, cx: number, cz: number, floorAt: (x
   const x = (cx + 0.15 + 0.7 * unit(seed, cx, cz, 1)) * FEED_CELL;
   const z = (cz + 0.15 + 0.7 * unit(seed, cx, cz, 2)) * FEED_CELL;
   const kind = unit(seed, cx, cz, 3) < 0.5 ? 'krill' : 'baitball';
-  const radius = kind === 'krill' ? 6 + 4 * unit(seed, cx, cz, 4) : 3 + 3 * unit(seed, cx, cz, 4);
+  // Krill gather in big swarms deep by day; fish bait balls are smaller and shallower.
+  const radius = kind === 'krill' ? 14 + 12 * unit(seed, cx, cz, 4) : 3 + 3 * unit(seed, cx, cz, 4);
   const floor = floorAt(x, z);
   if (!(floor < -(2 * radius + 8))) return null;
-  const preferred = -6 - 10 * unit(seed, cx, cz, 5);
+  const preferred = kind === 'krill' ? -80 - 120 * unit(seed, cx, cz, 5) : -6 - 10 * unit(seed, cx, cz, 5);
   const y = Math.min(-radius - 2, Math.max(floor + radius + 3, preferred));
   return { id: hash(seed, SALT, cx, cz), kind, x, y, z, radius };
 }

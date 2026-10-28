@@ -9,7 +9,7 @@ The whale is a 12 m humpback that dives to 26 m in an ocean whose floor is eased
 - **Deep dives.** Blue whale behaviour: a surfacing series of 2 to 6 blows, then feeding dives typically 100 to 200 m deep, occasionally deeper (up to about 300 m here), with the flukes sometimes lifting on the way down.
 - **Following under the water.** The camera follows the whale down through a whole dive, with orbit and zoom working underwater. It never passes through the seafloor or the surface, and it returns with the whale. A control keeps the camera at the surface for viewers who prefer that.
 - **Light by depth.** Sunlight fades with depth, as through the photic zone (bright near the surface, dim blue by 100 to 200 m), with gentle exposure adaptation so a deep dive reads as deep without becoming a black screen.
-- **Real ocean depth.** Finish `add-deep-ocean` task 1.3: wire the planet's coast distance into both seafloors, so the ocean has its shelf to about 140 m, its 3 to 4° slope and abyssal plains at 3,000 to 4,000 m.
+- **Real ocean depth.** Finish `add-deep-ocean` task 1.3: wire the planet's coast distance into both seafloors, so the ocean has its shelf to about 140 m, its slope and abyssal plains at 3,000 to 4,000 m. The steep coasts here get active margins (a 10 to 20 km shelf and a slope of about 5°), and the distance to islets and rocks is measured on the land, so every island stands on its own flank.
 - **Land into the sea.** The land mesh carries on below the waterline down the shelf and slope, and joins the seafloor without a seam. A coast seen from below the water shows its underwater flanks.
 
 ## Capabilities

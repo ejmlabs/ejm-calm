@@ -16,8 +16,11 @@ export type ShelfProfile = {
   slope: number;
 };
 
-/** Continental margins: the shelf is compressed from the real 65–80 km average to fit the journey's pace. */
-export const CONTINENT: ShelfProfile = { width: 40000, breakDepth: 140, slope: 3.5 };
+/**
+ * Continental margins: the steep coasts of this world have active margins, like western South America or Japan,
+ * with a shelf of 10 to 20 km and an upper slope of 5 degrees or more, rather than the 65–80 km passive-margin average.
+ */
+export const CONTINENT: ShelfProfile = { width: 12000, breakDepth: 140, slope: 5 };
 /** Island and islet flanks: a fringe of shallows, then a steep volcanic-style drop. */
 export const ISLAND: ShelfProfile = { width: 1500, breakDepth: 60, slope: 15 };
 /** Abyssal plain depth (metres); the seafloor adds low hills on top. */

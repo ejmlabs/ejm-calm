@@ -352,3 +352,32 @@ test('a stopped whale turning in place does not swing the camera round', () => {
   const swing = Math.abs(frames.at(-1)!.yaw - frames[0]!.yaw);
   assert.ok(swing < 0.8, `swung ${swing.toFixed(2)} rad while the whale turned ${6.4} rad`);
 });
+
+test('the eye follows a 200 m dive down and back, clear of the seabed, unless asked to stay at the surface', () => {
+  const floor = -230;
+  const camera = new THREE.PerspectiveCamera(48, 1, 0.5, 12000);
+  const r = new FollowCamera(camera, { groundAt: () => floor });
+  const t: FollowTarget = { x: 0, y: -1.2, z: 0, heading: 0 };
+  let deepest = 0;
+  for (let i = 0; i < 300 * 60; i++) {
+    // Down to 200 m over two minutes, a minute there, then back up.
+    const s = i / 60;
+    t.y = s < 120 ? -1.2 - 198.8 * (s / 120) : s < 180 ? -200 : Math.min(-1.2, -200 + 198.8 * ((s - 180) / 100));
+    t.x += 0.2;
+    r.setTarget(t);
+    r.update(1 / 60, s);
+    deepest = Math.min(deepest, camera.position.y);
+    assert.ok(camera.position.y >= floor + 2 - 1e-6, `eye ${camera.position.y} m at ${s.toFixed(1)} s`);
+  }
+  assert.ok(deepest < -150, `eye only reached ${deepest} m`);
+  assert.ok(camera.position.y > WATER_LEVEL + EYE_CLEARANCE, 'came back up with the whale');
+
+  r.setStayAtSurface(true);
+  t.y = -150;
+  for (let i = 0; i < 20 * 60; i++) {
+    r.setTarget(t);
+    r.update(1 / 60, 400 + i / 60);
+  }
+  assert.equal(r.mode, 'chase');
+  assert.ok(camera.position.y > WATER_LEVEL + EYE_CLEARANCE, 'stayed above the water');
+});

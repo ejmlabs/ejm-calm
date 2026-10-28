@@ -12,10 +12,11 @@ test('the profile runs from the coast over a shelf and a slope onto the abyssal 
   assert.equal(depthForCoastDistance(-500), 0);
   assert.ok(Math.abs(depthForCoastDistance(CONTINENT.width) - 140) < 1e-6);
   assert.ok(depthForCoastDistance(CONTINENT.width) <= 160);
-  // Mid-slope runs at 3 to 4 degrees, the shelf at well under one.
-  const slope = slopeDeg(CONTINENT.width + 10000, CONTINENT.width + 20000);
-  assert.ok(slope >= 3 && slope <= 4, `${slope}`);
-  assert.ok(slopeDeg(5000, 15000) < 0.5);
+  // An active margin: a shelf of 10 to 20 km at well under a degree, then an upper slope of about 5 degrees.
+  assert.ok(CONTINENT.width >= 10000 && CONTINENT.width <= 20000);
+  const slope = slopeDeg(CONTINENT.width + 5000, CONTINENT.width + 15000);
+  assert.ok(slope >= 4.5 && slope <= 6, `${slope}`);
+  assert.ok(slopeDeg(1000, CONTINENT.width - 1000) < 1);
   for (const d of [150000, 300000, 1e6]) {
     const depth = depthForCoastDistance(d);
     assert.ok(depth >= 3000 && depth <= 4000 && depth <= PLAIN, `${d} → ${depth}`);
@@ -39,8 +40,8 @@ test('island flanks drop steeply but the shallower profile always wins', () => {
   // Five kilometres off an islet far out at sea is already deep water.
   assert.ok(seabedDepth(400000, 5000) > 900);
   assert.ok(seabedDepth(400000, 0) === 0);
-  // Near a continent the shelf stays shallow even far from any islet.
-  assert.ok(seabedDepth(10000, 400000) < 40);
+  // On the continental shelf the water stays shallow even far from any islet.
+  assert.ok(seabedDepth(CONTINENT.width / 2, 400000) < 80);
   for (const [c, i] of [[0, 0], [20000, 3000], [90000, 90000], [500000, 12000]] as const) {
     assert.equal(seabedDepth(c, i), Math.min(depthForCoastDistance(c), depthForCoastDistance(i, ISLAND)));
   }

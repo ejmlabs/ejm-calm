@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { clamp } from './math.js';
-import type { FollowCamera, ReviewView } from './camera.js';
+import { UNDER_MAX_DISTANCE, UNDER_ORBIT_PITCH, type FollowCamera, type ReviewView } from './camera.js';
 import { LENGTH_SCALE } from './whale-size.js';
 
 /** Orbit distance from the whale, metres: clear of its body, never so far it is a speck. */
@@ -89,6 +89,10 @@ export function createViewControls(canvas: HTMLCanvasElement, rig: FollowCamera,
     },
     update(reducedMotion) {
       controls.enableDamping = !reducedMotion;
+      // Under water the haze closes in and the whale can be seen from below: nearer, and down past the horizon.
+      const under = rig.mode === 'under';
+      controls.maxDistance = under ? Math.max(ORBIT_DISTANCE[0], UNDER_MAX_DISTANCE) : ORBIT_DISTANCE[1];
+      controls.maxPolarAngle = Math.PI / 2 - (under ? UNDER_ORBIT_PITCH : ORBIT_PITCH[0]);
       controls.update();
       if (orbiting) rig.setOrbit(view());
     },

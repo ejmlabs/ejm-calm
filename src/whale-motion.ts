@@ -136,7 +136,8 @@ export function breachAirborne(t: number): boolean {
  * Pose for a phase at normalised time t. Each phase ends exactly where the next
  * one in PHASE_ORDER begins, so the cycle needs no smoothing to stay continuous.
  */
-export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPose()): WhalePose {
+/** `lift` scales how high a fluke-up dive raises the flukes (1 full, toward 0 a dive that keeps them under). */
+export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPose(), lift = 1): WhalePose {
   const x = clamp(t, 0, 1);
   out.roll = 0;
   out.arch = 0;
@@ -191,8 +192,8 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
       // then the whale slides under and keeps sinking into the long dive.
       const sink = x < 0.45 ? 0 : hermite(0, 0, DEEP_Y - SURFACE_Y + 1.2 * DEPTH_SCALE, -DIVE_SINK, 0.55 * PHASE_LEN.dive, (x - 0.45) / 0.55);
       out.y = SURFACE_Y - 1.2 * DEPTH_SCALE * smoothstep(0.08, 0.5, x) + sink;
-      out.pitch = SURFACE_PITCH * (1 - smoothstep(0, 0.15, x)) - 0.62 * bump(x, 0.05, 0.4, 0.6, 0.97);
-      out.arch = REST_ARCH * (1 - smoothstep(0, 0.15, x)) + 0.8 * bump(x, 0.04, 0.38, 0.55, 0.95);
+      out.pitch = SURFACE_PITCH * (1 - smoothstep(0, 0.15, x)) - 0.62 * lift * bump(x, 0.05, 0.4, 0.6, 0.97);
+      out.arch = REST_ARCH * (1 - smoothstep(0, 0.15, x)) + 0.8 * lift * bump(x, 0.04, 0.38, 0.55, 0.95);
       // The flukes hang still while they are out of the water, then drive the body down.
       out.stroke = lerp(0.6, 1, smoothstep(0.6, 1, x)) * (1 - 0.7 * bump(x, 0.2, 0.35, 0.55, 0.7));
       out.rate = 1 - 0.4 * bump(x, 0.2, 0.35, 0.55, 0.75);
