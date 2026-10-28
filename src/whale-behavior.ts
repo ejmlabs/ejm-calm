@@ -6,12 +6,13 @@ import { createSpring, springSet, springStep } from './spring.js';
 import { FEED_CELL, feedSiteInCell, type FeedSite } from './feed-sites.js';
 import { WHALE_ISLAND_MARGIN, WHALE_MAX_TURN_RATE, createWhalePilot, headingToward, shortestAngle, whaleForward, type WhaleCourse } from './whale-course.js';
 import {
+  DIVE_SINK,
   FLOOR_CLEARANCE,
   PHASE_LEN,
   POSE_KEYS,
   REST_ARCH,
+  SHALLOW_Y,
   SWIM_PITCH,
-  SWIM_Y,
   emptyPose,
   whalePose,
   type WhalePhase,
@@ -23,14 +24,38 @@ export type WhaleBehavior = 'travel' | 'feed' | 'breathe';
 /** Travel speed range, m/s: noise moves between cruising, speeding up and easing off. */
 export const TRAVEL_MIN = 16;
 export const TRAVEL_MAX = 28;
-/** A breath is a glide at this share of the cruising speed, never a stop. */
-export const BREATH_PACE = 0.6;
+/** A surfacing is a glide at this share of the cruising speed, never a stop. */
+export const BREATH_PACE = 0.75;
 /** Acceleration limits, m/s²: easing off is a little quicker than speeding up. */
 export const MAX_ACCEL = 1.4;
 export const MAX_DECEL = 2;
-/** Seconds between breaths: a seeded interval in this range (a feed may hold it to FEED_HOLD). */
-export const BREATH_MIN = 70;
-export const BREATH_MAX = 120;
+/** Seconds at depth between the fluke-up dive and the climb back: seeded in this range (a feed may hold it to FEED_HOLD). */
+export const DIVE_MIN = 100;
+export const DIVE_MAX = 300;
+/** Blows in one surfacing: seeded in this range, each a rise, a spout and (between blows) a roll back under. */
+export const BLOWS: readonly [number, number] = [2, 5];
+/** Seconds per stretch of a surfacing: the rise into a blow and the glide just under between blows. */
+const RISE_LEN: readonly [number, number] = [3.5, 5];
+const ROLL_LEN: readonly [number, number] = [5, 9];
+/** Cruising depth of the long dive (m): slow noise between these, kept clear of the floor. */
+export const DIVE_DEPTH: readonly [number, number] = [-14, -26];
+/** Fastest the whale sinks or climbs on a long dive, m/s: the descent and the climb are slow and steady. */
+export const VERTICAL_SPEED = 1.2;
+/** Where the floor keeps the whale shallower than this, it stays up and breathes instead of diving. */
+export const SHALLOWEST_DIVE = -5;
+/** A fluke-up dive starts only with room to dive along this many seconds of path ahead. */
+export const DIVE_ROOM = 45;
+/** Vertical spring rate (1/s): the body follows the depth rail with eased starts and stops. */
+const DEPTH_OMEGA = 0.55;
+/** Spring rate (1/s) of the eased floor the body keeps clear of. */
+const FLOOR_OMEGA = 1.5;
+/** Gap kept over the floor by the rail: clear of the floor limit's soft band, so the floor never jolts the body. */
+const RAIL_CLEARANCE = FLOOR_CLEARANCE + 2;
+/** Seconds of path ahead the floor is read over: long enough to climb out of the deepest dive at VERTICAL_SPEED. */
+const FLOOR_AHEAD = 30;
+/** The floor is read along a fan of arcs either side of the course, since the pilot may turn into a rise: turn rates (rad/s), each held until the heading is that far off (rad). */
+const FLOOR_TURNS = [-0.2, -0.15, -0.1, -0.05, -0.025, 0, 0.025, 0.05, 0.1, 0.15, 0.2];
+const FLOOR_FAN = 0.7;
 /** Feeding is rare: at least this many seconds from the end of one feed (or the start) to the next, and none longer than FEED_MAX. */
 const FEED_GAP: readonly [number, number] = [480, 720];
 const FEED_FIRST: readonly [number, number] = [150, 300];
@@ -50,8 +75,6 @@ const FEED_RANGE = 600;
 const APPROACH_SECONDS = 100;
 /** Seconds between decisions; fixed in sim time so 30 and 60 fps decide alike. */
 const DECIDE_EVERY = 0.5;
-/** Travel dives fade in over a seafloor deeper than this, so the clamp never holds one above the camera's dive threshold. */
-const DIVE_FLOOR = -11;
 
 /** A posed stretch (surface, spout, dive, breach, splash) played from whalePose. */
 type Segment = { phase: WhalePhase; len: number; t: number };
@@ -67,10 +90,12 @@ export type WhaleMotion = {
   phaseT: number;
   /** Eased target pose; the caller adds the surface bob and the floor limit. */
   pose: WhalePose;
-  /** Seafloor height under the whale (undefined without floorAt). */
+  /** Floor the body keeps clear of: the seafloor under and just ahead, eased so a bump or a reef edge never jolts it (undefined without floorAt). */
   floor: number | undefined;
   /** The bait ball or krill swarm being fed on or approached. */
   site: FeedSite | null;
+  /** Smoothed turn rate, rad/s (positive turns left): the body bends into it. */
+  turn: number;
 };
 
 export type WhaleMover = {
@@ -87,10 +112,11 @@ export type WhaleMover = {
 };
 
 /**
- * Pure, seeded whale behaviour: a small state machine (travel → feed → travel,
- * travel → breathe → travel) on top of the journey planner. Speed and travel
- * depth follow slow noise; every change of pose eases through a decaying offset,
- * so no transition jumps in height, pitch or heading.
+ * Pure, seeded whale behaviour: a small state machine on top of the journey planner.
+ * `travel` is the long dive at depth (a feed may interrupt it); `breathe` is the climb
+ * back and a surfacing of a few blows that ends in a fluke-up dive. Speed and dive depth
+ * follow slow noise; every change of pose eases through a decaying offset, so no
+ * transition jumps in height, pitch or heading.
  */
 export function createWhaleMover(
   seed: number,
@@ -108,21 +134,28 @@ export function createWhaleMover(
   /** Travel speed: two octaves of slow noise, so surges and lulls never repeat. */
   const travelSpeed = (t: number) =>
     lerp(TRAVEL_MIN, TRAVEL_MAX, smoothstep(-0.65, 0.45, 0.7 * noise(t / 34, 0.5) + 0.3 * noise(t / 11, 3.7)));
-  /** Travel depth: the back and dorsal fin break the surface, so the chase camera always sees the whale. */
-  const cruiseDepth = (t: number) => SWIM_Y - 0.25 * smoothstep(-0.6, 0.6, noise(t / 47, 8.1));
-  /** Now and then a shallow dive the camera follows under; only over water deep enough for it to show. */
-  const diveDepth = (t: number) => -7.5 * smoothstep(0.3, 0.75, noise(t / 130, 12.9));
+  /** Depth of the long dive: slow noise, so one dive runs deeper than the next. */
+  const diveDepth = (t: number) => lerp(DIVE_DEPTH[0], DIVE_DEPTH[1], smoothstep(-0.6, 0.6, noise(t / 40, 12.9)));
   const jitter = (a: number, b: number) => a + (b - a) * rng();
 
-  // The opening is a breath already under way: mid-surface, so the first blow comes within seconds.
-  let behavior: WhaleBehavior = 'breathe';
-  let seg: Segment | null = { phase: 'surface', len: PHASE_LEN.surface, t: PHASE_LEN.surface * 0.45 };
   const queue: Segment[] = [];
   const posed = (phase: WhalePhase, len = PHASE_LEN[phase]): Segment => ({ phase, len, t: 0 });
-  queue.push(posed('spout'), posed('surface', jitter(3, 6)), posed('spout'), posed('dive'));
+  /** One more blow: roll back under from the last one, glide, rise and spout. */
+  const blowCount = () => BLOWS[0] + Math.floor(rng() * (BLOWS[1] - BLOWS[0] + 1));
+  const blow = (): Segment[] => [posed('roll', jitter(ROLL_LEN[0], ROLL_LEN[1])), posed('surface', jitter(RISE_LEN[0], RISE_LEN[1])), posed('spout')];
+
+  // The opening is a surfacing already under way: mid-rise, so the first blow comes within seconds.
+  let behavior: WhaleBehavior = 'breathe';
+  let seg: Segment | null = { phase: 'surface', len: PHASE_LEN.surface, t: PHASE_LEN.surface * 0.45 };
+  queue.push(posed('spout'));
+  const openingBlows = blowCount();
+  for (let i = 1; i < openingBlows; i++) queue.push(...blow());
+  queue.push(posed('dive'));
   let breathing = true;
+  /** Held up for want of room to dive: the whale travels at the surface at full pace until it has room. */
+  let held = false;
   let forced = false;
-  let nextBreath = jitter(BREATH_MIN, BREATH_MAX);
+  let nextBreath = Infinity;
   let nextFeed = jitter(FEED_FIRST[0], FEED_FIRST[1]);
   let site: FeedSite | null = null;
   let siteSince = 0;
@@ -136,16 +169,25 @@ export function createWhaleMover(
 
   let speed = 1;
   let speedGoal = 1;
-  const depth = createSpring(SWIM_Y);
+  const depth = createSpring(SHALLOW_Y);
+  /** Depth the spring follows: walks toward the goal at no more than VERTICAL_SPEED. */
+  let rail = SHALLOW_Y;
+  /** Floor limit on the rail from the path ahead, read with each decision. */
+  let floorNeed = -Infinity;
+  const floorEase = createSpring(floorAt?.(home.x, home.z));
   let label: WhalePhase = 'surface';
   /** The segment the pose came from last step (null while cruising). */
   let source: Segment | null = seg;
   let labelT = 0;
   let bank = 0;
+  let turn = 0;
 
   const target = emptyPose();
   const offset = emptyPose();
   for (const key of POSE_KEYS) offset[key] = 0;
+  /** Where the old pose source leaves off and the new one picks up, at a change of source. */
+  const leave = emptyPose();
+  const pick = emptyPose();
   const motion: WhaleMotion = {
     x: course.x,
     z: course.z,
@@ -155,8 +197,9 @@ export function createWhaleMover(
     phase: 'surface',
     phaseT: 0.45,
     pose: whalePose('surface', 0.45),
-    floor: floorAt?.(home.x, home.z),
+    floor: floorAt && floorEase.x,
     site: null,
+    turn: 0,
   };
 
   function siteIn(cx: number, cz: number): FeedSite | null {
@@ -202,6 +245,8 @@ export function createWhaleMover(
 
   function decide(time: number, shore: Shore): void {
     if (behavior === 'travel') {
+      // A floor that has brought the whale up near the surface ends the dive: the climb becomes a surfacing.
+      if (floorNeed > SHALLOWEST_DIVE && depth.x > SHALLOWEST_DIVE) nextBreath = Math.min(nextBreath, time);
       if (time >= nextBreath) {
         behavior = 'breathe';
         breathing = false;
@@ -226,15 +271,48 @@ export function createWhaleMover(
     }
   }
 
-  /** Queue the breath: surface and blow two or three times, looking around between, then dive (now and then breach). */
+  /** Queue the surfacing: a few blows with a roll back under between them, then the fluke-up dive (now and then a breach and one more blow first). */
   function startBreath(): void {
     breathing = true;
-    queue.push(posed('surface', jitter(3.5, 6)), posed('spout'));
-    const blows = 1 + Math.floor(rng() * 2);
-    for (let i = 0; i < blows; i++) queue.push(posed('surface', jitter(2.5, 4.5)), posed('spout'));
+    queue.push(posed('surface', jitter(RISE_LEN[0], RISE_LEN[1])), posed('spout'));
+    const blows = blowCount();
+    for (let i = 1; i < blows; i++) queue.push(...blow());
+    if (rng() < 0.2) {
+      queue.push(posed('dive'), posed('breach'), posed('splash'), posed('roll', jitter(ROLL_LEN[0], ROLL_LEN[1])));
+      queue.push(posed('surface', jitter(RISE_LEN[0], RISE_LEN[1])), posed('spout'));
+    }
     queue.push(posed('dive'));
-    if (rng() < 0.2) queue.push(posed('breach'), posed('splash'));
   }
+
+  /**
+   * Highest of `rise(floor, ahead)` over the floor along a fan of paths ahead, out to `seconds` at `pace` m/s, read
+   * `every` seconds apart: the pilot may turn into a rise, so not only the straight course counts.
+   */
+  function scanAhead(seconds: number, every: number, pace: number, rise: (floor: number, ahead: number) => number): number {
+    let top = -Infinity;
+    if (!floorAt) return top;
+    for (const rate of FLOOR_TURNS) {
+      let x = course.x;
+      let z = course.z;
+      for (let ahead = 0; ahead <= seconds; ahead += every) {
+        top = Math.max(top, rise(floorAt(x, z), ahead));
+        const fwd = whaleForward(course.heading + clamp(rate * (ahead + every / 2), -FLOOR_FAN, FLOOR_FAN));
+        x += fwd.x * pace * every;
+        z += fwd.z * pace * every;
+      }
+    }
+    return top;
+  }
+
+  /**
+   * Lowest the rail may run for the floor along the path ahead: high enough to clear every rise there at the capped
+   * climb, allowing for the spring's lag, so a rising floor never forces a faster climb.
+   */
+  const readFloor = () =>
+    scanAhead(FLOOR_AHEAD, 0.5, speed, (floor, ahead) => floor + RAIL_CLEARANCE - VERTICAL_SPEED * Math.max(0, ahead - 4 / DEPTH_OMEGA));
+
+  /** Room for a real dive (the rail clear of the floor below SHALLOWEST_DIVE) all along the next DIVE_ROOM seconds at travel pace. */
+  const roomToDive = () => scanAhead(DIVE_ROOM, 0.5, Math.max(speed, TRAVEL_MIN), (floor) => floor + RAIL_CLEARANCE) <= SHALLOWEST_DIVE;
 
   /** Cruise pose: depth from the spring, nose along the climb or descent, banking into turns. */
   function cruisePose(out: WhalePose): void {
@@ -258,17 +336,20 @@ export function createWhaleMover(
     const s = Math.floor(time / DECIDE_EVERY);
     if (!forced && s !== slot) {
       slot = s;
+      floorNeed = readFloor();
       decide(time, shore);
     }
 
     // Goals for speed and depth from the behaviour.
     let goalSpeed = travelSpeed(time) * mover.pace;
-    let goalDepth = cruiseDepth(time);
+    let goalDepth = diveDepth(time);
     course.aim = null;
     if (behavior === 'breathe') {
-      goalSpeed *= BREATH_PACE;
-      goalDepth = SWIM_Y;
-      if (!breathing && !seg && depth.x > SWIM_Y - 0.5 && speed < TRAVEL_MAX * BREATH_PACE * mover.pace + 1) startBreath();
+      // The climb keeps the travel pace; the glide starts once the whale is near the top.
+      if (!held) goalSpeed *= lerp(BREATH_PACE, 1, smoothstep(-3, -12, depth.x) * (seg ? 0 : 1));
+      goalDepth = SHALLOW_Y;
+      // The first rise starts once the climb has all but settled, so the body does not lurch into it.
+      if (!breathing && !seg && depth.x > SHALLOW_Y - 0.2 && depth.v < 0.12) startBreath();
     } else if (behavior === 'feed' && site) {
       const dx = course.x - site.x;
       const dz = course.z - site.z;
@@ -294,17 +375,16 @@ export function createWhaleMover(
         }
       }
     }
-    motion.floor = floorAt?.(course.x, course.z);
-    let floor = -Infinity;
     if (floorAt) {
-      // Read the floor a few seconds ahead too, so a fast whale rises over a slope in time.
+      // The floor under the whale and a second ahead, eased.
       const fwd = whaleForward(course.heading);
-      floor = motion.floor ?? -Infinity;
-      for (const ahead of [2, 4, 8]) floor = Math.max(floor, floorAt(course.x + fwd.x * speed * ahead, course.z + fwd.z * speed * ahead));
+      let floor = floorAt(course.x, course.z);
+      for (const ahead of [0.5, 1]) floor = Math.max(floor, floorAt(course.x + fwd.x * speed * ahead, course.z + fwd.z * speed * ahead));
+      motion.floor = springStep(floorEase, floor, FLOOR_OMEGA, dt);
     }
-    if (behavior === 'travel') goalDepth += diveDepth(time) * (1 - smoothstep(DIVE_FLOOR - 6, DIVE_FLOOR, floor));
-    if (Number.isFinite(floor)) goalDepth = Math.max(goalDepth, floor + FLOOR_CLEARANCE + 1);
-    goalDepth = Math.min(goalDepth, SWIM_Y);
+    goalDepth = Math.max(goalDepth, floorNeed);
+    // Never above the glide just under the surface: over a shoal the whale skims it, it does not climb out.
+    goalDepth = Math.min(goalDepth, SHALLOW_Y);
 
     // Speed eases toward a smoothed goal with bounded acceleration.
     speedGoal = damp(speedGoal, goalSpeed, 0.6, dt);
@@ -316,29 +396,55 @@ export function createWhaleMover(
       course.speed = speed;
       pilot.step(course, dt, time, shore);
     }
-    bank = damp(bank, clamp((shortestAngle(before, course.heading) / dt) * speed * 0.12, -0.45, 0.45), 1.5, dt);
+    const rate = shortestAngle(before, course.heading) / dt;
+    bank = damp(bank, clamp(rate * speed * 0.12, -0.45, 0.45), 1.5, dt);
+    turn = damp(turn, rate, 1.5, dt);
 
     // Posed segments play in order; between them the whale cruises.
     let phase: WhalePhase;
     let phaseT: number;
-    if (seg && seg.t >= seg.len) {
+    /** Cruise time this step: only what is left after a segment that ended part way through it. */
+    let cruiseDt = dt;
+    if (!seg && queue.length) {
+      cruisePose(leave);
+      seg = queue.shift()!;
+      whalePose(seg.phase, 0, pick);
+    }
+    if (seg) seg.t += dt;
+    if (seg && seg.t > seg.len) {
+      // Past the end: the time left over runs on in the next segment, so no frame holds still.
+      const ended = seg.phase;
+      const over = seg.t - seg.len;
+      // No room to dive along the path ahead: take another blow instead and look again after it.
+      if (!forced && queue[0]?.phase === 'dive') {
+        held = !roomToDive();
+        if (held) queue.unshift(...blow());
+      }
       seg = queue.shift() ?? null;
-      if (!seg) {
+      whalePose(ended, 1, leave);
+      if (seg) {
+        seg.t = over;
+        whalePose(seg.phase, 0, pick);
+      } else {
         forced = false;
-        springSet(depth, motion.pose.y);
+        cruiseDt = over;
+        rail = springSet(depth, leave.y);
+        // The fluke-up dive hands its sink on to the long dive.
+        if (ended === 'dive') depth.v = -DIVE_SINK;
+        cruisePose(pick);
         if (behavior === 'breathe') {
           behavior = 'travel';
-          nextBreath = time + jitter(BREATH_MIN, BREATH_MAX);
+          nextBreath = time + jitter(DIVE_MIN, DIVE_MAX);
         }
       }
-    } else if (!seg && queue.length) seg = queue.shift()!;
+    }
     if (seg) {
-      seg.t += dt;
       phase = seg.phase;
       phaseT = clamp(seg.t / seg.len, 0, 1);
       whalePose(phase, phaseT, target);
     } else {
-      springStep(depth, goalDepth, 0.35, dt);
+      rail += clamp(goalDepth - rail, -VERTICAL_SPEED * cruiseDt, VERTICAL_SPEED * cruiseDt);
+      springStep(depth, rail, DEPTH_OMEGA, cruiseDt);
       const next: WhalePhase = depth.x < -3.5 ? 'deep' : depth.x > -2.8 ? 'swim' : label === 'deep' ? 'deep' : 'swim';
       if (next !== label) labelT = 0;
       labelT += dt;
@@ -346,8 +452,8 @@ export function createWhaleMover(
       phaseT = clamp(labelT / PHASE_LEN[phase], 0, 1);
       cruisePose(target);
     }
-    // A change of pose source eases out through the offset instead of jumping.
-    if (seg !== source) for (const key of POSE_KEYS) offset[key] = motion.pose[key] - target[key];
+    // A change of pose source eases out its mismatch through the offset instead of jumping.
+    if (seg !== source) for (const key of POSE_KEYS) offset[key] += leave[key] - pick[key];
     source = seg;
     label = phase;
     const fade = Math.exp(-1.1 * dt);
@@ -370,6 +476,7 @@ export function createWhaleMover(
     motion.phase = phase;
     motion.phaseT = phaseT;
     motion.site = site;
+    motion.turn = turn;
   }
 
   const mover: WhaleMover = {

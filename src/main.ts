@@ -3,7 +3,8 @@ import { resolveSeed, seedURL, nextSeed } from './seed.js';
 import { createQuality, detailFor, updateQuality } from './quality.js';
 import { layoutWorld } from './terrain.js';
 import { createSky, HAZE_ANGLES } from './sky.js';
-import { createWhale } from './whale.js';
+import { createWhale, type WhalePhase } from './whale.js';
+import { PHASE_LEN } from './whale-motion.js';
 import { createWorld } from './world.js';
 import { createBirds } from './birds.js';
 import { FOV, FollowCamera } from './camera.js';
@@ -46,6 +47,8 @@ type CalmReview = {
   setShipsVisible: (visible: boolean) => void;
   /** Start the long deep dive now (whale holds position while forced). */
   forceDeepDive: (at?: number) => void;
+  /** Play any phase of the whale from normalised time `at` (whale holds position while forced). */
+  forceWhale: (phase: WhalePhase, at?: number) => void;
   /** Debug camera `depth` metres under the surface (negative is above), looking at the whale; null releases it. */
   peekUnderwater: (depth: number | null, site?: boolean) => void;
   /** Where in the day (0 is the preset the seed began in, 1 a full day on), and the weather to hold. */
@@ -498,6 +501,10 @@ if (debug) {
     },
     forceDeepDive(at?: number) {
       whale.forcePhase('deep', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
+    },
+    forceWhale(phase: WhalePhase, at?: number) {
+      if (!Object.hasOwn(PHASE_LEN, phase)) return;
+      whale.forcePhase(phase, typeof at === 'number' && Number.isFinite(at) ? at : undefined);
     },
     peekUnderwater(depth: number | null, site?: boolean) {
       peekDepth = typeof depth === 'number' && Number.isFinite(depth) ? clamp(depth, -20, 40) : null;

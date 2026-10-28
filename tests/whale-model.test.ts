@@ -153,13 +153,14 @@ test('breach follows a ballistic arc with nose-up exit and a rolled re-entry', (
   assert.ok(whalePose('breach', (BREACH_EXIT + BREACH_LAND) / 2).flipLift < -0.8, 'flippers spread in the air');
 });
 
-test('dive lifts the flukes clear of the water', () => {
+/** Highest the fluke root rises over a phase (stroke left out: the arch and pitch do the lifting). */
+function flukePeak(phase: 'dive' | 'roll'): number {
   const holder = new THREE.Object3D();
   const bones = createWhaleBones();
   holder.add(bones[ROOT_BONE]!);
   let peak = -Infinity;
   for (let t = 0; t <= 1; t += 0.02) {
-    const pose = whalePose('dive', t);
+    const pose = whalePose(phase, t);
     holder.position.set(0, pose.y, 0);
     whaleOrientation(0.7, pose.pitch, 0, holder.quaternion);
     const angles = spineAngles(0, 0, pose.arch);
@@ -169,7 +170,12 @@ test('dive lifts the flukes clear of the water', () => {
     holder.updateMatrixWorld(true);
     peak = Math.max(peak, bones[FLUKE_BONE]!.getWorldPosition(new THREE.Vector3()).y);
   }
-  assert.ok(peak > 0.6, `fluke root rises above the surface (${peak})`);
+  return peak;
+}
+
+test('the fluke-up dive lifts the flukes clear of the water; a roll between blows keeps them under', () => {
+  assert.ok(flukePeak('dive') > 0.6, `fluke root rises above the surface (${flukePeak('dive')})`);
+  assert.ok(flukePeak('roll') < -0.4, `fluke root stays under in a roll (${flukePeak('roll')})`);
 });
 
 test('whale faces its direction of travel and the stroke wave runs head to tail', () => {
