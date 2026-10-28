@@ -29,11 +29,11 @@ function seaChecksum(land: Land): { mask: number; sea: number; seaPoints: number
 }
 
 test('land detail leaves the coast mask and every sea height exactly as before', () => {
-  // Measured on the code before the land detail (f8b9a73).
+  // Measured on the Earth-like world before the land detail was merged in (d7d04d5).
   const before: Record<number, ReturnType<typeof seaChecksum>> = {
-    1: { mask: 3217798710, sea: 1292728660, seaPoints: 12959 },
-    7: { mask: 2548913708, sea: 2286873495, seaPoints: 11543 },
-    42: { mask: 686078672, sea: 405427453, seaPoints: 11377 },
+    1: { mask: 1645216769, sea: 2984753518, seaPoints: 13867 },
+    7: { mask: 1049708305, sea: 3848367018, seaPoints: 13110 },
+    42: { mask: 2732917278, sea: 1349036100, seaPoints: 13281 },
   };
   for (const [seed, expected] of Object.entries(before)) assert.deepEqual(seaChecksum(layoutWorld(Number(seed)).land), expected, `seed ${seed}`);
 });
