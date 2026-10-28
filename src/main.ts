@@ -23,6 +23,8 @@ import { createWeather, type WeatherState } from './weather.js';
 import { createRoute } from './route.js';
 import { createWake } from './wake.js';
 import { createShipFx } from './ship-fx.js';
+import { PACES, type Pace } from './pace.js';
+import { createViewControls } from './view-controls.js';
 
 type CalmReview = {
   time: number;
@@ -100,6 +102,7 @@ try {
 
 const memory = loadMemory(storage);
 let routeOn = memory?.route ?? false;
+let pace: Pace = memory?.pace ?? 'normal';
 const indicator = createRoute(REGION_LOOKS.map((look) => look.name));
 const resolved = resolveSeed(location.search, memory?.seed, () => {
   const word = new Uint32Array(1);
@@ -136,6 +139,15 @@ const ui = createUI({
     indicator.setEnabled(on, world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
     ui.showRoute(indicator.visible, indicator.text);
     persist();
+  },
+  pace(choice) {
+    pace = choice;
+    whale.setPace(PACES[pace]);
+    persist();
+    ui.announce(`${pace} speed`);
+  },
+  resetView() {
+    view.reset();
   },
 });
 
@@ -215,6 +227,7 @@ try {
     journey: layout.journey,
     floorAt: seafloor.heightAt,
   });
+  whale.setPace(PACES[pace]);
   world.root.add(whale.group);
   weather = createWeather(seed, sky.clearCover);
   // A visitor who asked for the indicator sees it on the first change of region, not at once.
@@ -255,35 +268,7 @@ function resize(): void {
 resize();
 window.addEventListener('resize', resize);
 
-// Pointer look-around.
-let dragging = false;
-let lastX = 0;
-let lastY = 0;
-canvas.addEventListener('pointerdown', (event) => {
-  dragging = true;
-  lastX = event.clientX;
-  lastY = event.clientY;
-  canvas.setPointerCapture(event.pointerId);
-});
-canvas.addEventListener('pointermove', (event) => {
-  if (!dragging) return;
-  const dx = event.clientX - lastX;
-  const dy = event.clientY - lastY;
-  lastX = event.clientX;
-  lastY = event.clientY;
-  rig.look(dx, dy);
-});
-canvas.addEventListener('wheel', (event) => rig.zoom(event.deltaY), { passive: true });
-const endDrag = (event: PointerEvent) => {
-  dragging = false;
-  try {
-    canvas.releasePointerCapture(event.pointerId);
-  } catch {
-    /* already released */
-  }
-};
-canvas.addEventListener('pointerup', endDrag);
-canvas.addEventListener('pointercancel', endDrag);
+const view = createViewControls(canvas, rig, (orbiting) => ui.showReset(orbiting));
 
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
 /** The swell's own clock: it runs faster as the whale swims faster. */
@@ -296,7 +281,7 @@ let disposed = false;
 let lastSave = 0;
 
 function sync(): void {
-  ui.sync({ seed, sound: audio.enabled, route: routeOn });
+  ui.sync({ seed, sound: audio.enabled, route: routeOn, pace });
   audio.sync(!document.hidden).catch(() => {});
 }
 
@@ -307,6 +292,7 @@ function persist(): void {
     sound: audio.settings(),
     framing: { ...rig.framing },
     route: routeOn,
+    pace,
   });
 }
 
@@ -397,6 +383,7 @@ function tick(now: number): void {
   birds.update(time, whale.state.x, whale.state.z, dt, { x: camera.position.x + world.origin.x, y: camera.position.y, z: camera.position.z + world.origin.z }, motion.matches);
 
   followWhale();
+  view.update(motion.matches);
   rig.update(dt, time, motion.matches);
   if (peekDepth !== null) peekCamera(peekDepth);
 
@@ -606,6 +593,7 @@ window.addEventListener('pagehide', () => {
   persist();
   audio.dispose();
   ui.dispose();
+  view.dispose();
   sky.dispose();
   whale.dispose();
   wake.dispose();
