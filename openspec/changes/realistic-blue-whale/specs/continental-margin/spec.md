@@ -21,7 +21,11 @@ Land below the waterline SHALL be drawn only when the camera is under water or l
 ## MODIFIED Requirements
 
 ### Requirement: Real bathymetry
-The bathymetry SHALL deepen with distance from the continental coast through a shelf no deeper than about 160 m, a slope of 3 to 4 degrees, and an abyssal plain between 3000 and 4000 m, and island flanks SHALL drop steeply from their own coast. Both seafloors SHALL always be given this depth from the planet's coast distance and follow it wherever it is deeper than the land's own floor.
+The bathymetry SHALL deepen with distance from the coast through an active continental margin (a shelf of 10 to 20 km to no deeper than about 160 m, then an upper slope of about 5 degrees) and island flanks that drop steeply from every coast, islets and rocks included, onto an abyssal plain between 3000 and 4000 m. The distance to the nearest land SHALL be measured on the land itself, so the depth never steps into a cliff at a shore. Both seafloors SHALL always be given this depth and follow it wherever it is deeper than the land's own floor.
+
+#### Scenario: No cliffs
+- **WHEN** the seafloor is sampled every 50 m along a long line through the open water of the journey
+- **THEN** it never changes by more than about 40 m between neighbouring samples
 
 #### Scenario: Open ocean
 - **WHEN** a point lies more than 150 km from any continental coast and away from islands

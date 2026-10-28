@@ -2,7 +2,21 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { SURFACE_BAND, waterSignal } from '../src/seams.js';
-import { WATER_IOR, WATER_LOOK, acesFilmic, airAngle, blendFog, criticalAngle, radianceFor, surfaceLight, waterTint, type FogState } from '../src/underwater-optics.js';
+import {
+  VISIBLE_LIGHT,
+  WATER_IOR,
+  WATER_LOOK,
+  acesFilmic,
+  airAngle,
+  blendFog,
+  criticalAngle,
+  depthLight,
+  radianceFor,
+  seenLight,
+  surfaceLight,
+  waterTint,
+  type FogState,
+} from '../src/underwater-optics.js';
 import { floorCentre, visualFloor } from '../src/underwater-floor.js';
 
 test('water signal is 0 above the band, 1 below, and smooth and monotonic across it', () => {
@@ -123,4 +137,18 @@ test('view fog weight: none well above, full well below, never decreasing on the
   }
   assert.equal(fogMix(-1, 0), 0);
   assert.equal(fogMix(1, 1), 1);
+});
+
+test('light fails with depth, red first and blue last, and the deep stays dim but visible', () => {
+  const c = depthLight(30, new THREE.Color());
+  assert.ok(c.r < 0.001 && c.g < c.b && c.b > 0.4, `30 m: ${c.r} ${c.g} ${c.b}`);
+  assert.equal(seenLight(0), 1);
+  let prev = 1;
+  for (let d = 5; d <= 300; d += 5) {
+    assert.ok(seenLight(d) <= prev + 1e-12, `brighter at ${d} m`);
+    prev = seenLight(d);
+  }
+  assert.ok(seenLight(60) < 0.5, 'dim by 60 m');
+  assert.equal(seenLight(200), VISIBLE_LIGHT);
+  assert.equal(seenLight(300), VISIBLE_LIGHT);
 });

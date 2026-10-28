@@ -9,6 +9,8 @@ export type UIActions = {
   sound: () => void;
   /** The route indicator switch in the info panel. */
   route: (on: boolean) => void;
+  /** The switch for following the whale down on its dives. */
+  dives: (on: boolean) => void;
   /** The travel speed choice in the info panel. */
   pace: (pace: Pace) => void;
   /** Back to the default follow camera. */
@@ -18,7 +20,7 @@ export type UIActions = {
 export type UIController = {
   ready: () => void;
   error: (message: string) => void;
-  sync: (state: { seed: number; sound: boolean; route: boolean; pace: Pace }) => void;
+  sync: (state: { seed: number; sound: boolean; route: boolean; dives: boolean; pace: Pace }) => void;
   /** Shows the reset view control while the user's own view is on. */
   showReset: (visible: boolean) => void;
   /** Shows or hides the route indicator and sets its text. */
@@ -43,6 +45,7 @@ export function createUI(actions: UIActions): UIController {
   const title = find('title');
   const route = find('route');
   const routeToggle = find('routeToggle') as HTMLInputElement | null;
+  const diveToggle = find('diveToggle') as HTMLInputElement | null;
   const paceChoice = find('pace');
   const resetBtn = find('resetBtn');
 
@@ -109,6 +112,7 @@ export function createUI(actions: UIActions): UIController {
   listen(seedBtn, 'click', () => actions.newSeed());
   listen(soundBtn, 'click', () => actions.sound());
   listen(routeToggle, 'change', () => actions.route(Boolean(routeToggle?.checked)));
+  listen(diveToggle, 'change', () => actions.dives(Boolean(diveToggle?.checked)));
   listen(paceChoice, 'change', (event) => {
     const value = (event.target as HTMLInputElement).value;
     if (isPace(value)) actions.pace(value);
@@ -135,9 +139,10 @@ export function createUI(actions: UIActions): UIController {
       veil?.removeAttribute('hidden');
       document.body.dataset.ready = 'error';
     },
-    sync({ seed, sound, route: routeOn, pace }) {
+    sync({ seed, sound, route: routeOn, dives, pace }) {
       if (seedLabel) seedLabel.textContent = String(seed >>> 0);
       if (routeToggle) routeToggle.checked = routeOn;
+      if (diveToggle) diveToggle.checked = dives;
       const paceInput = paceChoice?.querySelector<HTMLInputElement>(`input[value="${pace}"]`);
       if (paceInput) paceInput.checked = true;
       if (soundBtn) {

@@ -46,7 +46,9 @@ export const DIVE_DWELL = 3.5;
 const UNDER_EYE = 1.5 * DEPTH_SCALE;
 const UNDER_DISTANCE = 0.7;
 /** Under water the haze is thick: never trail further than this. */
-const UNDER_MAX_DISTANCE = 18 * LENGTH_SCALE;
+export const UNDER_MAX_DISTANCE = 18 * LENGTH_SCALE;
+/** Under water the orbit may also look up at the whale from below, down to this pitch (radians). */
+export const UNDER_ORBIT_PITCH = -0.9;
 /** Distance and look-ahead grow with speed up to this many m/s. */
 const SPEED_CAP = 28;
 const SPEED_DISTANCE = PULL_BACK / SPEED_CAP;
@@ -67,7 +69,7 @@ const SIGHT_CLEARANCE = 0.5;
 const SHOULDER = 2 * LENGTH_SCALE;
 const LOOK_AHEAD = 7 * LENGTH_SCALE;
 const LAND_CLEARANCE = 2;
-const FLOOR_CLEARANCE = 1.5;
+const FLOOR_CLEARANCE = 2;
 
 const PEEK_YAW = 0.6;
 const PEEK_PITCH: readonly [number, number] = [-0.1, 0.3];
@@ -114,6 +116,7 @@ export class FollowCamera {
   private peekYawTarget = 0;
   private peekPitchTarget = 0;
   private below = 0;
+  private stayUp = false;
 
   private readonly heading = createSpring();
   private readonly px = createSpring();
@@ -210,6 +213,11 @@ export class FollowCamera {
     return { yaw: Math.atan2(Math.sin(yaw), Math.cos(yaw)), pitch: Math.atan2(dy, flat), distance: Math.hypot(flat, dy) };
   }
 
+  /** Keep the eye above the water through the whale's dives (the viewer's choice, or reduced motion). */
+  setStayAtSurface(on: boolean): void {
+    this.stayUp = on;
+  }
+
   /** User orbit around the whale, relative to its heading and looking at it; null blends back to the chase. */
   setOrbit(view: ReviewView | null): void {
     this.orbit = view ? { ...view } : null;
@@ -267,13 +275,13 @@ export class FollowCamera {
 
     // Follow the whale under after a short dwell; come back up as soon as it rises.
     if (this.under) {
-      if (t.y > RISE_ABOVE) {
+      if (t.y > RISE_ABOVE || this.stayUp) {
         this.under = false;
         this.crossing = true;
       }
     } else {
       this.below = t.y < DIVE_BELOW ? this.below + step : 0;
-      if (t.y < DIVE_BELOW && (snap || this.below >= DIVE_DWELL)) {
+      if (!this.stayUp && t.y < DIVE_BELOW && (snap || this.below >= DIVE_DWELL)) {
         this.under = true;
         this.crossing = true;
       }

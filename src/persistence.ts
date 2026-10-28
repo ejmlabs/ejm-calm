@@ -12,6 +12,8 @@ export type CalmMemory = {
   route?: boolean;
   /** Travel speed choice (normal unless set). */
   pace?: Pace;
+  /** Follow the whale down on its dives (on unless set to false). */
+  dives?: boolean;
 };
 
 export function validateMemory(value: unknown): value is CalmMemory {
@@ -24,6 +26,7 @@ export function validateMemory(value: unknown): value is CalmMemory {
     if (typeof data.sound.volume !== 'number' || !Number.isFinite(data.sound.volume) || data.sound.volume < 0 || data.sound.volume > 1) return false;
   }
   if (data.route !== undefined && typeof data.route !== 'boolean') return false;
+  if (data.dives !== undefined && typeof data.dives !== 'boolean') return false;
   if (data.pace !== undefined && !isPace(data.pace)) return false;
   if (data.framing) {
     const { yaw, pitch, distance } = data.framing;

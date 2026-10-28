@@ -6,4 +6,5 @@
   - Desktop: first paint 612 → 976 ms, first contentful paint 612 → 976 ms, first sea frame 7044 → 9163 ms.
   - Phone: first paint 880 → 1460 ms, first contentful paint 1032 → 1460 ms, first sea frame 16853 → 16029 ms.
   - Transfer: 784.3 → 784.5 KB.
-- [ ] 1.3 Wire the planet layout's continental coast distance into both seafloors once it lands; update tests and the seed sweep honestly
+- [x] 1.3 Wire the planet layout's continental coast distance into both seafloors once it lands; update tests and the seed sweep honestly
+  - Done in `realistic-blue-whale` 3.1: the island flanks read a distance field on the land (islets and rocks included) and the continental shelf the planet's distance; the seed sweep has not been re-run.

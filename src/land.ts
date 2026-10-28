@@ -2,11 +2,13 @@ import type { NoiseFunction2D } from 'simplex-noise';
 import { fbm2, makeNoise2D, ridged2 } from './noise.js';
 import { hash } from './rng.js';
 import { clamp, smoothstep } from './math.js';
-import { MACRO_FLOOR, MACRO_OPEN, createPlanet, type Planet } from './planet.js';
+import { COAST_SLOPE, MACRO_FLOOR, MACRO_OPEN, createPlanet, type Planet } from './planet.js';
 import type { Shore } from './shore.js';
 import { createLandmarks, type Landmarks } from './landmarks.js';
 import { createRegions, blendLook, type RegionWeights, type Regions } from './regions.js';
 import { createNavField, squaredDistance, type NavField } from './world-nav.js';
+import { seabedDepth } from './bathymetry.js';
+import { createDepthField } from './depth-field.js';
 
 /**
  * Earth-like land for one seed: continents and archipelagos from the planet's
@@ -26,6 +28,10 @@ export type Land = Shore & {
   /** Signed coast field: > 0 on land, < 0 at sea. Cheap compared with heightAt. */
   maskAt: (x: number, z: number) => number;
   heightAt: (x: number, z: number, lod?: number) => number;
+  /** Bathymetric depth (metres, ≥ 0) at world X/Z: the shelf, slope and abyssal plain by distance from the coast. */
+  depthAt: (x: number, z: number) => number;
+  /** Builds the depth field around world X/Z ahead of need for up to `budgetMs`; true when nothing is left to build. */
+  prefetchDepth: (x: number, z: number, budgetMs?: number) => boolean;
   /** heightAt that also reports how much of a sea-cliff face the point is on, in [0, 1]. */
   surfaceAt: (x: number, z: number, lod: number, out: { cliff: number }) => number;
   /** Submerged sand banks in [0, 1]: visual only, they never block navigation. */
@@ -66,6 +72,10 @@ export type LandOptions = {
 /** The planet's layout takes over the mask from the first radius and wholly by the second (the opening view's coast lies within 2 km). */
 export const REGION_FROM = 2200;
 export const REGION_FULL = 5000;
+/** The coast detail only appears where the macro mask is above its floor: within this many metres of a planet coast. */
+const COAST_DETAIL_REACH = -MACRO_FLOOR / COAST_SLOPE;
+/** The domain warp moves points up to about this far, so world and planet distances differ by at most twice it. */
+const WARP_REACH = 2 * 1300;
 
 /** Half-width of the full-depth exit channel from the opening bay, and the mask value it holds the sea to (tens of metres deep). */
 const EXIT_WIDTH = 180;
@@ -400,6 +410,22 @@ export function createLand(seed: number, options: LandOptions): Land {
     known: (i, j) => (grid && i >= 0 && j >= 0 && i < gridSize && j < gridSize ? grid.mask[j * gridSize + i] : undefined),
   });
 
+  // Metres to the nearest land of any kind, islets and rocks included, out to where island flanks reach the plain.
+  const depthField = createDepthField(maskAt);
+
+  /**
+   * Ocean depth: the island profile by the true distance to the nearest land, and the wider continental shelf by the
+   * planet's continental distance. The coast detail can add land up to COAST_DETAIL_REACH beyond the planet's own
+   * coastline and the warp moves points up to WARP_REACH/2, so that distance is shortened by both and only ever
+   * errs shallow.
+   */
+  function depthAt(x: number, z: number): number {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
+    warp(x, z);
+    const continent = Math.max(0, planet.openAt(wx - ox, wz - oz) - COAST_DETAIL_REACH - WARP_REACH);
+    return seabedDepth(continent, depthField.coastDistanceAt(x, z));
+  }
+
   return {
     seed,
     regions,
@@ -408,6 +434,8 @@ export function createLand(seed: number, options: LandOptions): Land {
     anchor,
     maskAt,
     heightAt,
+    depthAt,
+    prefetchDepth: depthField.prefetch,
     surfaceAt,
     shoalAt,
     get grid() {

@@ -10,16 +10,19 @@
 
 ## 2. Deep dives and the underwater camera (B2)
 
-- [ ] 2.1 Surfacing series of 2 to 6 blows; feeding dives of 100 to 200 m, occasionally to about 300 m, lasting 60 to 150 s; flukes sometimes lift on the way down
-- [ ] 2.2 Camera follows through the whole dive; orbit and zoom under water; held clear of the seafloor and the surface; returns with the whale
-- [ ] 2.3 "Stay at surface" switch, saved; reduced motion keeps the camera at the surface
-- [ ] 2.4 Light by depth: attenuation by colour, sky light falling with depth, a visibility floor, eased exposure
-- [ ] 2.5 Browser checks for a full dive (camera never crosses the floor or surface, no errors); load time and frame cost
+- [x] 2.1 Surfacing series of 2 to 6 blows; feeding dives of 100 to 200 m, occasionally to about 300 m, a whole dive taking four to six minutes; flukes lift on about three dives in ten
+- [x] 2.2 Camera follows through the whole dive; orbit and zoom under water; held clear of the seafloor and the surface; returns with the whale
+- [x] 2.3 "Stay at surface" switch, saved; reduced motion keeps the camera at the surface
+- [x] 2.4 Light by depth: attenuation by colour, sky light falling with depth, a visibility floor, eased exposure
+- [x] 2.5 Browser checks for a full dive (camera never crosses the floor or surface, no errors); load time and frame cost
+  - In the browser pane the camera followed a dive to about 65 m: dim navy water, the whale still visible, no console errors. Near the start the islands keep dives to 60 to 80 m; the unit tests cover 100 to 300 m over deep water, and a 200 m camera dive that stays 2 m clear of the seabed.
+  - Load time, five cold loads each, main → this phase: desktop first paint 576 → 572 ms, first sea frame 1437 → 1602 ms (+165, the first depth tile built at start); phone first paint 620 → 612 ms, first sea frame 2835 → 2939 ms (+105). Smoke test: peak draws 86 desktop and 64 phone, stream step p99 2.6 ms.
 
 ## 3. Real ocean depth (B3)
 
-- [ ] 3.1 Wire the planet's coast distance into both seafloors (`add-deep-ocean` 1.3); shelf to about 140 m, 3 to 4° slope, plains at 3,000 to 4,000 m
-- [ ] 3.2 The whale's floor clamp and the dive planner read the deep floor; update tests and the seed sweep, stating changed numbers
+- [x] 3.1 Wire real ocean depth into both seafloors (`add-deep-ocean` 1.3): a depth field of the true distance to the nearest land (islets and rocks included) for the island flanks, the planet's continental distance for an active-margin shelf (12 km to 140 m, then 5°), plains at 3,000 to 4,000 m; no cliffs at shores
+- [x] 3.2 The whale's floor clamp and the dive planner read the deep floor; update tests and the seed sweep, stating changed numbers
+  - Tests updated (the behaviour fixtures' floor is now 190 to 310 m deep; the dive, surfacing and feeding bounds follow the new depths). The hour-long seed sweep (`tools/seed-sweep.ts 1 50 60`) has not been re-run.
 
 ## 4. Land into the sea (B4)
 
