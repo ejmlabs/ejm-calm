@@ -1,4 +1,5 @@
 import { layoutWorld } from '../src/terrain.js';
+import { createLand, type Land } from '../src/land.js';
 import { createSeafloor } from '../src/seafloor.js';
 import { createWhaleMover } from '../src/whale-behavior.js';
 import { PLAN_REACH } from '../src/whale-course.js';
@@ -9,19 +10,40 @@ import { PLAN_REACH } from '../src/whale-course.js';
  * fails when a seed's net over path is under 0.5 or any ten minutes (sliding by a minute) make under 2 km good; it reports the seeds that dip under 1.5 km in five minutes.
  *
  * usage: npx tsx tools/seed-sweep.ts [first seed] [last seed] [minutes]    (defaults: 1 24 60)
+ *        npx tsx tools/seed-sweep.ts 42,7,1234 - [minutes]    (a list of seeds)
  */
-const first = Number(process.argv[2] ?? 1);
-const last = Number(process.argv[3] ?? 24);
+const list = process.argv[2]?.includes(',') ? process.argv[2].split(',').map(Number) : null;
+const first = list ? list[0]! : Number(process.argv[2] ?? 1);
+const last = list ? list.at(-1)! : Number(process.argv[3] ?? 24);
 const minutes = Number(process.argv[4] ?? 60);
+const seeds = list ?? Array.from({ length: last - first + 1 }, (_, k) => first + k);
 const DT = 1 / 30;
 const MIN_RATIO = 0.5;
 const STALL = 1500;
 const STALL_TEN = 2000;
+/** Natural land this close (m) counts as a coast in view: the land haze starts to hide it at 6.2 km. */
+const COAST_VIEW = 6000;
 
-const rows: Array<{ seed: number; net: number; ratio: number; stalled: number; longest: number; slowest: number; at: number; slowTen: number }> = [];
-for (let seed = first; seed <= last; seed++) {
+/** Whether natural land lies within `reach`, sampled on rings like the page's debug probe. */
+function coastNear(land: Land, x: number, z: number, reach: number): boolean {
+  for (let d = 250; d <= reach; d += 250) {
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      if (land.maskAt(x + Math.cos(a) * d, z + Math.sin(a) * d) > 0) return true;
+    }
+  }
+  return false;
+}
+
+const rows: Array<{ seed: number; net: number; ratio: number; stalled: number; longest: number; slowest: number; at: number; slowTen: number; coast: number; open: number }> = [];
+for (const seed of seeds) {
   const layout = layoutWorld(seed);
   const land = layout.land;
+  const natural = createLand(seed, { viewYaw: layout.viewYaw, offset: land.offset, landmarks: false });
+  let coastSamples = 0;
+  let samples = 0;
+  let openRun = 0;
+  let open = 0;
   const mover = createWhaleMover(seed, layout.whaleHome, layout.viewYaw - Math.PI / 2, createSeafloor(seed, land).heightAt, layout.journey);
   const m = mover.motion;
   land.nav.prefetch(m.x, m.z, 1100, Infinity);
@@ -48,6 +70,13 @@ for (let seed = first; seed <= last; seed++) {
     }
     px = m.x;
     pz = m.z;
+    if (i % (10 / DT) === 0) {
+      const near = coastNear(natural, m.x, m.z, COAST_VIEW);
+      samples++;
+      coastSamples += near ? 1 : 0;
+      openRun = near ? 0 : openRun + 10;
+      open = Math.max(open, openRun);
+    }
     if (i === Math.round(600 / DT)) net10 = Math.hypot(m.x - layout.whaleHome.x, m.z - layout.whaleHome.z);
     if (i % (60 / DT) === 0) fixes.push(m.x, m.z);
     if (process.env['SWEEP_TRACE'] && i % (10 / DT) === 0) detail.push(`${Math.round(i * DT)}s ${m.behavior} ${m.phase} x ${Math.round(m.x)} z ${Math.round(m.z)} hd ${m.heading.toFixed(2)} sp ${m.speed.toFixed(0)} clear ${Math.round(land.clearance(m.x, m.z))} far ${mover.course.far?.toFixed(2)} plan ${mover.course.plan?.toFixed(2)} leg ${mover.course.leg.toFixed(2)} esc ${mover.course.escape && i * DT < mover.course.escape.until ? mover.course.escape.heading.toFixed(2) : '-'} aim ${mover.course.aim ? 'y' : '-'}`);
@@ -76,12 +105,15 @@ for (let seed = first; seed <= last; seed++) {
   if (process.env['SWEEP_KM']) console.log(`  km each five minutes: ${Array.from({ length: Math.floor(fixes.length / 2 / 5) }, (_, w) => (Math.hypot(fixes[2 * (5 * w + 5) ]! - fixes[2 * 5 * w]!, fixes[2 * (5 * w + 5) + 1]! - fixes[2 * 5 * w + 1]!) / 1000).toFixed(1)).join(' ')}`);
   let slowTen = Infinity;
   for (let k = 10; k < fixes.length / 2; k++) slowTen = Math.min(slowTen, Math.hypot(fixes[2 * k]! - fixes[2 * (k - 10)]!, fixes[2 * k + 1]! - fixes[2 * (k - 10) + 1]!));
-  rows.push({ seed, net, ratio: net / path, stalled, longest, slowest, at, slowTen });
-  console.log(`seed ${seed}: net ${(net / 1000).toFixed(1)} km, net/path ${(net / path).toFixed(2)}, ${stalled} stalled 5-minute windows, longest ${longest} min, worst five minutes ${(slowest / 1000).toFixed(1)} km (from minute ${at}), worst ten ${(slowTen / 1000).toFixed(1)} km, net in 10 min ${(net10 / 1000).toFixed(1)} km`);
+  const coast = coastSamples / samples;
+  rows.push({ seed, net, ratio: net / path, stalled, longest, slowest, at, slowTen, coast, open });
+  console.log(`seed ${seed}: net ${(net / 1000).toFixed(1)} km, net/path ${(net / path).toFixed(2)}, coast in view ${(100 * coast).toFixed(0)}%, longest open ${Math.round(open / 60)} min, ${stalled} stalled 5-minute windows, longest ${longest} min, worst five minutes ${(slowest / 1000).toFixed(1)} km (from minute ${at}), worst ten ${(slowTen / 1000).toFixed(1)} km, net in 10 min ${(net10 / 1000).toFixed(1)} km`);
 }
 const worst = rows.reduce((a, b) => (b.ratio < a.ratio ? b : a));
 const mean = rows.reduce((s, r) => s + r.net, 0) / rows.length;
-console.log(`seeds ${first}-${last}, ${minutes} min: mean net ${(mean / 1000).toFixed(1)} km, worst net/path ${worst.ratio.toFixed(2)} (seed ${worst.seed}), worst five minutes ${(Math.min(...rows.map((r) => r.slowest)) / 1000).toFixed(1)} km, worst ten ${(Math.min(...rows.map((r) => r.slowTen)) / 1000).toFixed(1)} km, ${rows.filter((r) => r.slowest < STALL).length} of ${rows.length} seeds dip under ${STALL / 1000} km in five minutes`);
+const ratios = rows.map((r) => r.ratio).sort((a, b) => a - b);
+const shares = rows.map((r) => r.coast).sort((a, b) => a - b);
+console.log(`seeds ${list ? list.join(',') : `${first}-${last}`}, ${minutes} min: mean net ${(mean / 1000).toFixed(1)} km, median net/path ${ratios[ratios.length >> 1]!.toFixed(2)}, coast in view ${(100 * shares[0]!).toFixed(0)} to ${(100 * shares.at(-1)!).toFixed(0)}% (median ${(100 * shares[shares.length >> 1]!).toFixed(0)}%, mean ${((100 * shares.reduce((a, b) => a + b, 0)) / shares.length).toFixed(0)}%), worst net/path ${worst.ratio.toFixed(2)} (seed ${worst.seed}), worst five minutes ${(Math.min(...rows.map((r) => r.slowest)) / 1000).toFixed(1)} km, worst ten ${(Math.min(...rows.map((r) => r.slowTen)) / 1000).toFixed(1)} km, ${rows.filter((r) => r.slowest < STALL).length} of ${rows.length} seeds dip under ${STALL / 1000} km in five minutes`);
 if (worst.ratio < MIN_RATIO) {
   console.error(`seed ${worst.seed} makes ${worst.ratio.toFixed(2)} net over path, under ${MIN_RATIO}`);
   process.exitCode = 1;
