@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, smoothstep } from './math.js';
 
 /**
@@ -186,7 +187,15 @@ export const ROOT_BONE = 2;
 export const FLUKE_BONE = 7;
 export const FLIPPER_L = 8;
 export const FLIPPER_R = 9;
-export const BONE_COUNT = 10;
+/** The fluke blades behind the peduncle: they flex after the stroke, so the tips follow through. */
+export const FLUKE_FLEX = 10;
+/** Outer half of each flipper: it bends behind the inner half. */
+export const FLIPPER_TIP_L = 11;
+export const FLIPPER_TIP_R = 12;
+export const BONE_COUNT = 13;
+/** Where the flex bones sit: metres behind the fluke insertion, and the span fraction of the flipper. */
+export const FLUKE_FLEX_X = 0.45;
+export const FLIPPER_TIP_S = 0.45;
 
 export function spineY(x: number): number {
   const p = sampleProfile(clamp((x - HEAD_X) / BODY_LENGTH, 0, 1));
@@ -338,7 +347,7 @@ export function flipperStation(s: number, tubercles: number): FlipperStation {
   };
 }
 
-function buildFlipper(spec: DetailSpec, side: 1 | -1, bone: number, part: Part): void {
+function buildFlipper(spec: DetailSpec, side: 1 | -1, bone: number, tipBone: number, part: Part): void {
   const root = flipperRoot(side);
   const rest = flipperQuaternion(side, FLIPPER_DROOP, FLIPPER_SWEEP, 0);
   const S = spec.flipperSpan;
@@ -350,6 +359,7 @@ function buildFlipper(spec: DetailSpec, side: 1 | -1, bone: number, part: Part):
     const st = flipperStation(s, spec.tubercles);
     // Root sinks into the body; blend its weight with the trunk.
     const trunk = 1 - smoothstep(0.02, 0.14, s);
+    const tip = smoothstep(0.3, 0.75, s);
     const start = part.positions.length / 3;
     for (let j = 0; j <= C; j++) {
       const phi = (j / C) * Math.PI * 2;
@@ -359,8 +369,8 @@ function buildFlipper(spec: DetailSpec, side: 1 | -1, bone: number, part: Part):
       v.applyQuaternion(rest).add(root);
       part.positions.push(v.x, v.y, v.z);
       part.uvs.push(s * 0.5, (j / C) * ATLAS_BODY_V);
-      part.skinIndex.push(bone, ROOT_BONE, 0, 0);
-      part.skinWeight.push(1 - trunk, trunk, 0, 0);
+      part.skinIndex.push(bone, ROOT_BONE, tipBone, 0);
+      part.skinWeight.push((1 - trunk) * (1 - tip), trunk, (1 - trunk) * tip, 0);
     }
     if (i === S) part.seams.push([start, start + C]);
   }
@@ -402,10 +412,13 @@ function buildFluke(spec: DetailSpec, part: Part): void {
       const phi = (j / C) * Math.PI * 2;
       const k = 0.5 + 0.5 * Math.cos(phi);
       const t = foil(k) * st.thick * Math.sign(Math.sin(phi) || 1) * (j === 0 || j === C ? 0 : 1);
-      part.positions.push(TAIL_X + st.le + k * st.chord - 0.06, y0 + t, zf * FLUKE_HALF_SPAN);
+      const x = st.le + k * st.chord - 0.06;
+      part.positions.push(TAIL_X + x, y0 + t, zf * FLUKE_HALF_SPAN);
       part.uvs.push(0.5 + 0.25 * (zf + 1), (j / C) * ATLAS_BODY_V);
-      part.skinIndex.push(FLUKE_BONE, 0, 0, 0);
-      part.skinWeight.push(1, 0, 0, 0);
+      // Trailing edges and swept-back tips ride the flex bone; the root stays on the peduncle.
+      const flex = smoothstep(0.25, 1.3, x);
+      part.skinIndex.push(FLUKE_BONE, FLUKE_FLEX, 0, 0);
+      part.skinWeight.push(1 - flex, flex, 0, 0);
     }
     if (i === 0 || i === S) part.seams.push([start, start + C]);
   }
@@ -454,8 +467,8 @@ export function buildWhaleGeometry(detail: WhaleDetail): WhaleGeometryInfo {
     fluke: newPart(),
   };
   buildBody(spec, parts.body);
-  buildFlipper(spec, 1, FLIPPER_L, parts.flipperL);
-  buildFlipper(spec, -1, FLIPPER_R, parts.flipperR);
+  buildFlipper(spec, 1, FLIPPER_L, FLIPPER_TIP_L, parts.flipperL);
+  buildFlipper(spec, -1, FLIPPER_R, FLIPPER_TIP_R, parts.flipperR);
   buildFluke(spec, parts.fluke);
 
   const geos = (Object.keys(parts) as Array<keyof typeof parts>).map((key) => toGeometry(parts[key]));
@@ -468,37 +481,11 @@ export function buildWhaleGeometry(detail: WhaleDetail): WhaleGeometryInfo {
     offset += count;
   });
   const merged = mergeGeometries(geos);
+  if (!merged) throw new Error('whale parts do not share attributes');
   for (const g of geos) g.dispose();
   merged.computeBoundingBox();
   merged.computeBoundingSphere();
   return { geometry: merged, ranges };
-}
-
-function mergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const names = ['position', 'normal', 'uv', 'skinIndex', 'skinWeight'] as const;
-  const total = geos.reduce((sum, g) => sum + g.getAttribute('position').count, 0);
-  const out = new THREE.BufferGeometry();
-  for (const name of names) {
-    const first = geos[0]!.getAttribute(name) as THREE.BufferAttribute;
-    const size = first.itemSize;
-    const array = name === 'skinIndex' ? new Uint16Array(total * size) : new Float32Array(total * size);
-    let offset = 0;
-    for (const g of geos) {
-      const attr = g.getAttribute(name) as THREE.BufferAttribute;
-      array.set(attr.array as ArrayLike<number>, offset);
-      offset += attr.array.length;
-    }
-    out.setAttribute(name, new THREE.BufferAttribute(array, size));
-  }
-  const indices: number[] = [];
-  let base = 0;
-  for (const g of geos) {
-    const idx = g.getIndex()!;
-    for (let i = 0; i < idx.count; i++) indices.push(idx.getX(i) + base);
-    base += g.getAttribute('position').count;
-  }
-  out.setIndex(indices);
-  return out;
 }
 
 /** Bones in bind pose. Callers parent `bones[ROOT_BONE]` under the posed body. */
@@ -527,6 +514,19 @@ export function createWhaleBones(): THREE.Bone[] {
     flipperQuaternion(side, FLIPPER_DROOP, FLIPPER_SWEEP, 0, bone.quaternion);
     bones[ROOT_BONE]!.add(bone);
     bones.push(bone);
+  }
+  const flex = new THREE.Bone();
+  flex.name = 'FlukeFlex';
+  flex.position.set(FLUKE_FLEX_X, 0, 0);
+  bones[FLUKE_BONE]!.add(flex);
+  bones.push(flex);
+  for (const side of [1, -1] as const) {
+    // In the flipper's own frame the span runs along ±Z from the root (see buildFlipper).
+    const tip = new THREE.Bone();
+    tip.name = side === 1 ? 'FlipperTipL' : 'FlipperTipR';
+    tip.position.set(0, 0, side * (FLIPPER_TIP_S * FLIPPER_LENGTH - 0.25));
+    bones[side === 1 ? FLIPPER_L : FLIPPER_R]!.add(tip);
+    bones.push(tip);
   }
   return bones;
 }

@@ -312,6 +312,15 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
     });
   }
 
+  // Knuckles: a row of low bumps along the dorsal ridge from behind the fin to the flukes.
+  for (let u = 0.71 + rng() * 0.01; u < 0.95; u += 0.03 + rng() * 0.012) {
+    stamp(u, Math.PI * 2, 0.07, 2, (dx, dy, i) => {
+      const d2 = dx * dx + (dy * 1.4) ** 2;
+      height[i] = height[i]! + 2.6 * Math.exp(-d2);
+      tint(i, [0.12, 0.13, 0.14], 0.2 * Math.exp(-d2));
+    });
+  }
+
   // Pale healed scars on the flanks.
   for (let n = 0; n < 5; n++) {
     let u = 0.25 + rng() * 0.5;
