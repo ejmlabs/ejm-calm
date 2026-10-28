@@ -4,6 +4,9 @@ import * as THREE from 'three';
 import {
   BONE_COUNT,
   FLIPPER_LENGTH,
+  HEAD_X,
+  TAIL_X,
+  spineY,
   FLUKE_BONE,
   FLUKE_HALF_SPAN,
   ROOT_BONE,
@@ -69,6 +72,43 @@ test('whale geometry is finite, closed-ish and skinned at every detail level', (
     assert.ok(size.z >= FLUKE_HALF_SPAN * 2 - 1e-6 && size.z < 0.32 * WHALE_LENGTH, `${detail} span ${size.z}`);
   }
   assert.ok(WHALE_DETAIL.high.rings * WHALE_DETAIL.high.radial > 6000, 'close-ups keep a smooth silhouette');
+});
+
+test('every body triangle faces outward, including the rostrum and tail caps', () => {
+  // The material culls back faces, so an inward triangle shows as a hole.
+  for (const detail of Object.keys(WHALE_DETAIL) as WhaleDetail[]) {
+    const { geometry, ranges } = buildWhaleGeometry(detail);
+    const pos = geometry.getAttribute('position');
+    const index = geometry.getIndex()!;
+    const [start, end] = ranges.body;
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const normal = new THREE.Vector3();
+    const centroid = new THREE.Vector3();
+    const inside = new THREE.Vector3();
+    let inward = 0;
+    let headInward = 0;
+    for (let i = 0; i < index.count; i += 3) {
+      const ia = index.getX(i);
+      if (ia < start || ia >= end) continue;
+      a.fromBufferAttribute(pos, ia);
+      b.fromBufferAttribute(pos, index.getX(i + 1));
+      c.fromBufferAttribute(pos, index.getX(i + 2));
+      normal.subVectors(b, a).cross(c.clone().sub(a));
+      if (normal.lengthSq() < 1e-14) continue;
+      centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+      const x = THREE.MathUtils.clamp(centroid.x, HEAD_X + 0.3, TAIL_X - 0.3);
+      inside.set(x, spineY(x), 0);
+      if (normal.dot(centroid.clone().sub(inside)) < 0) {
+        inward++;
+        if (centroid.x < HEAD_X + 0.05) headInward++;
+      }
+    }
+    assert.equal(headInward, 0, `${detail}: rostrum cap triangles face inward`);
+    assert.equal(inward, 0, `${detail}: ${inward} body triangles face inward`);
+    geometry.dispose();
+  }
 });
 
 test('whale proportions read as a blue whale', () => {

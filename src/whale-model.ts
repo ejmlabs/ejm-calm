@@ -336,8 +336,8 @@ function buildBody(spec: DetailSpec, part: Part): void {
   }
   // Caps: rostrum tip and a closed tail end hidden inside the fluke root.
   const caps: Array<{ ring: number; x: number; flip: boolean; u: number }> = [
-    { ring: 0, x: HEAD_X - 0.0033 * L, flip: false, u: 0 },
-    { ring: stations.length - 1, x: TAIL_X + 0.005 * L, flip: true, u: 1 },
+    { ring: 0, x: HEAD_X - 0.0033 * L, flip: true, u: 0 },
+    { ring: stations.length - 1, x: TAIL_X + 0.005 * L, flip: false, u: 1 },
   ];
   for (const cap of caps) {
     const p = sampleProfile(cap.u);
