@@ -25,6 +25,7 @@ import { createWeather, type WeatherState } from './weather.js';
 import { createRoute } from './route.js';
 import { createWake } from './wake.js';
 import { createShipFx } from './ship-fx.js';
+import { createMoverSync, createObstacles } from './obstacles.js';
 import { createWeatherFx } from './weather-fx.js';
 import { createLandLife, HERD_CELL, TOWN_CELL } from './land-life.js';
 import { PACES, type Pace } from './pace.js';
@@ -212,6 +213,9 @@ let regionLook: ReturnType<typeof createRegionLook>;
 let wake: ReturnType<typeof createWake>;
 let weather: ReturnType<typeof createWeather>;
 let shipFx: ReturnType<typeof createShipFx>;
+/** Whale and ships as obstacles, registered where they are each frame. */
+const obstacles = createObstacles();
+const syncMovers = createMoverSync(obstacles);
 let weatherFx: ReturnType<typeof createWeatherFx>;
 /** The swell's own clock: it runs faster as the whale swims faster. */
 let swellClock = 0;
@@ -410,6 +414,7 @@ function tick(now: number): void {
   world.update(whale.state.x, whale.state.z, camera, dt, swellClock);
   world.ocean.update(dt * swell, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
+  syncMovers(whale.state, world.ships.active());
   // Build the ocean's depth ahead of the whale a slice at a time (a couple of milliseconds a frame at most).
   world.land.prefetchDepth(whale.state.x, whale.state.z, 2);
   // The whale rides the swell while near the surface; deeper down it is free of it.
@@ -691,6 +696,7 @@ if (debug) {
         camMode: rig.mode,
         buildMs: Math.round(buildMs),
         ships: world.ships.active().length,
+        obstacles: obstacles.size,
         birds: flock.birds,
         birdDraws: flock.draws,
         birdTriangles: flock.triangles,
