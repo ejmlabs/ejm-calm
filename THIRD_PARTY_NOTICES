@@ -62,7 +62,7 @@ SOFTWARE.
 
 Ray-capsule intersection
 File: src/obstacles.ts (rayCapsule)
-Origin: ported from Inigo Quilez, "Intersectors"
+Origin: ported from the "Intersectors" article
 (https://iquilezles.org/articles/intersectors/), released under the MIT
 license with the same terms as the three.js license above.
 Copyright © 2016 Inigo Quilez

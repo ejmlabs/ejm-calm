@@ -147,7 +147,7 @@ const oc = new THREE.Vector3();
 
 /**
  * Distance along the ray (origin `ro`, unit direction `rd`) to the capsule pa–pb of radius `r`, or −1 on a miss; 0 when
- * the ray starts inside. Inigo Quilez, "Intersectors: capsule" (iquilezles.org/articles/intersectors, MIT).
+ * the ray starts inside. Ported from a published MIT-licensed intersector; source in THIRD_PARTY_NOTICES.
  */
 export function rayCapsule(ro: THREE.Vector3, rd: THREE.Vector3, pa: THREE.Vector3, pb: THREE.Vector3, r: number): number {
   ba.subVectors(pb, pa);
