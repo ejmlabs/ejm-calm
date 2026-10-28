@@ -2,20 +2,23 @@ import type { NoiseFunction2D } from 'simplex-noise';
 import { fbm2, makeNoise2D, ridged2 } from './noise.js';
 import { hash } from './rng.js';
 import { clamp, smoothstep } from './math.js';
+import { MACRO_FLOOR, MACRO_OPEN, createPlanet, type Planet } from './planet.js';
 import type { Shore } from './shore.js';
 import { createLandmarks, type Landmarks } from './landmarks.js';
 import { createRegions, blendLook, type RegionWeights, type Regions } from './regions.js';
 import { createNavField, squaredDistance, type NavField } from './world-nav.js';
 
 /**
- * Earth-like land for one seed: continents from a warped low-frequency mask,
- * fractal coasts with headlands and bays, offshore islets, beaches, cliffs,
+ * Earth-like land for one seed: continents and archipelagos from the planet's
+ * layout, fractal coasts with headlands and bays, offshore islets, beaches, cliffs,
  * rolling hills and ridged mountain ranges. Heights are metres above sea level;
  * negative values are sea depth.
  */
 export type Land = Shore & {
   seed: number;
   regions: Regions;
+  /** Planet-scale layout: continents, oceans, the migration's lane and its heading. */
+  planet: Planet;
   /** Rocks and islets spaced across the sea. */
   landmarks: Landmarks;
   /** Centre of the landmass kept in view (world XZ). */
@@ -60,7 +63,7 @@ export type LandOptions = {
   landmarks?: boolean;
 };
 
-/** The region modulation of the mask starts to fade in at the first radius and is whole at the second (the opening view's coast lies within 2 km). */
+/** The planet's layout takes over the mask from the first radius and wholly by the second (the opening view's coast lies within 2 km). */
 export const REGION_FROM = 2200;
 export const REGION_FULL = 5000;
 
@@ -105,6 +108,8 @@ type Channels = {
   hill: NoiseFunction2D;
   ridge: NoiseFunction2D;
   range: NoiseFunction2D;
+  gully: NoiseFunction2D;
+  erode: NoiseFunction2D;
 };
 
 function channels(seed: number): Channels {
@@ -121,12 +126,13 @@ function channels(seed: number): Channels {
     range: makeNoise2D(s, 9),
     bay: makeNoise2D(s, 10),
     shoal: makeNoise2D(s, 11),
+    gully: makeNoise2D(s, 12),
+    erode: makeNoise2D(s, 13),
   };
 }
 
 export function createLand(seed: number, options: LandOptions): Land {
   const n = channels(seed);
-  const regions = createRegions(seed);
   // A landmark stands only in open water: no natural coast within a kilometre, so it never narrows a way through.
   const landmarks = createLandmarks(seed, options.landmarks === false ? () => false : (mark) => {
     const saved = { held, lifted, raised, headland, wx, wz };
@@ -158,6 +164,9 @@ export function createLand(seed: number, options: LandOptions): Land {
   const exitTurn = exitSide * (0.95 + (hash(seed, 'land-exit-turn') / 0x100000000) * 0.6);
   const exit = { x: look.x * Math.cos(exitTurn) - look.z * Math.sin(exitTurn), z: look.x * Math.sin(exitTurn) + look.z * Math.cos(exitTurn) };
   const bank = { x: -Math.sin(bankYaw) * bankDist, z: -Math.cos(bankYaw) * bankDist, r: 60 };
+  // The migration leaves by the exit and follows the current from there.
+  const planet = createPlanet(seed, Math.atan2(exit.z, -exit.x));
+  const regions = createRegions(planet);
 
   // Domain-warped coordinates shared by the mask and the mountains.
   // (ox, oz) slides the continents so the camera starts in a natural bay.
@@ -201,7 +210,7 @@ export function createLand(seed: number, options: LandOptions): Land {
     const ahead = r > 1 ? (x * look.x + z * look.z) / r : 0;
     // Bounded to the start area: out on the journey the continents speak for themselves.
     const distant = 0.32 * smoothstep(3600, 5400, r) * smoothstep(0.25, 0.8, ahead) * (1 - smoothstep(9000, 14000, r));
-    // Regions thin the land away from the opening: open ocean dominates, islets and continents are rare.
+    // Away from the opening the planet's layout decides: continents, open ocean and archipelagos.
     const thin = smoothstep(REGION_FROM, REGION_FULL, r);
     let isletGain = 1;
     // Along the exit the mask is held at sea, easing out to nothing at the far end.
@@ -213,11 +222,16 @@ export function createLand(seed: number, options: LandOptions): Land {
         channel = (1 - smoothstep(EXIT_WIDTH, EXIT_WIDTH * 2.3, across)) * smoothstep(450, 800, r) * (1 - smoothstep(REGION_FULL, REGION_FULL + 2000, r));
       }
     }
-    let m = rawMask() + held + distant - harbour;
+    const macro = thin > 0 ? planet.macroAt(wx - ox, wz - oz) : 0;
+    // The coast detail: none in the open ocean, where nothing it adds could reach the surface.
+    const coast = thin < 1 ? 1 : smoothstep(MACRO_FLOOR, MACRO_OPEN, macro);
+    let detail = 0;
+    if (coast > 0) detail = rawMask();
+    else headland = 0;
+    let m = detail * (1 - thin + thin * coast) + thin * macro + held + distant - harbour;
     if (channel > 0) m += (Math.min(m, EXIT_FLOOR) - m) * channel;
     if (thin > 0) {
       regions.weightsAt(x, z, blend);
-      m -= thin * blendLook(blend, (look) => look.landOffset);
       isletGain = 1 + thin * (blendLook(blend, (look) => look.isletGain) - 1);
     }
     // Offshore islets: blobs that only rise in the water off the coast.
@@ -344,6 +358,14 @@ export function createLand(seed: number, options: LandOptions): Land {
     const far = smoothstep(1200, 2800, r);
     const scale = 800 + 900 * smoothstep(1800, 4800, r);
     h += peaks * scale * smoothstep(0.04, 0.55, natural) * (0.12 + 0.88 * ranges) * far;
+    // Spurs and gullies down every slope with real relief, finer as `lod` falls: far tiles' shading maps sample
+    // more of them than their own vertices can hold.
+    const relief = smoothstep(30, 400, h);
+    if (relief > 0) h += (ridged2(n.erode, wx / 640, wz / 640, Math.max(1, 6 - lod), 2.1, 0.5) - 0.4) * relief * Math.min(h, 900) * 0.3;
+    // Cliff faces (land only, so the coast mask and the sea are untouched): gullies and buttresses
+    // break the top edge.
+    const face = steep * smoothstep(0.0, 0.03, m) * (1 - smoothstep(0.12, 0.2, m));
+    if (face > 0) h *= 1 - face * 0.35 * ridged2(n.gully, wx / 90, wz / 90, 2);
     return h;
   }
 
@@ -381,6 +403,7 @@ export function createLand(seed: number, options: LandOptions): Land {
   return {
     seed,
     regions,
+    planet,
     landmarks,
     anchor,
     maskAt,

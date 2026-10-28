@@ -42,7 +42,7 @@ test('LOD selection steps with hysteresis and does not thrash', () => {
 });
 
 test('detail follows the quality tier and steps down with it', () => {
-  assert.deepEqual(detailFor('low'), { birds: 10, ships: 4, scatter: 250, microNormal: 'off' });
+  assert.deepEqual(detailFor('low'), { birds: 10, ships: 4, objects: 36, walkers: 64, microNormal: 'off' });
   assert.equal(detailFor('medium').birds, 16);
   assert.equal(detailFor('high').birds, 24);
   const state = createQuality({ software: false, cores: 16, memory: 16, dpr: 2 });

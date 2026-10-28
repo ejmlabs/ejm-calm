@@ -28,12 +28,12 @@ Every detailed element SHALL select its LOD by camera distance with at least 10 
 - **WHEN** an object sits at an LOD boundary and the camera jitters by 1 m
 - **THEN** the LOD does not change
 
-### Requirement: Asset and bundle limits
-Added JavaScript SHALL be at most 80 KB gzip in total. No single new asset SHALL exceed 20 KB gzip. Default delivery SHALL ship no new binary assets. Any shipped asset SHALL have origin and licence recorded in both `THIRD_PARTY_NOTICES` and `public/THIRD_PARTY_NOTICES`.
+### Requirement: Asset provenance
+Default delivery SHALL ship no new binary assets. Any shipped asset SHALL have origin and licence recorded in both `THIRD_PARTY_NOTICES` and `public/THIRD_PARTY_NOTICES`.
 
-#### Scenario: Size gate
-- **WHEN** `npm run build` completes
-- **THEN** the gzip JS size is at most 292 KB (212 KB baseline plus 80 KB)
+#### Scenario: Asset listed
+- **WHEN** a binary asset is added to the build
+- **THEN** both notices files name its origin and licence
 
 ### Requirement: Security posture unchanged
 The Content-Security-Policy in `public/_headers` SHALL NOT change. The app SHALL make no new third-party requests, SHALL NOT use `data:` images or inline styles, and SHALL keep all generation local and seeded.

@@ -1,16 +1,13 @@
-import { makeNoise2D } from './noise.js';
-import { hash } from './rng.js';
 import { smoothstep } from './math.js';
+import { LATITUDE_SPAN, type Planet } from './planet.js';
 
-/** Side of a region cell in metres. */
-export const REGION_CELL = 40000;
 /** Width over which a border between two regions blends. */
 export const REGION_BLEND = 5000;
-/** Region cells are bent by up to this much, so borders are not a square grid. */
-const WARP = 5000;
-const WARP_SCALE = 30000;
-/** The start keeps its own look: no warp (and a temperate cell) within this distance, full warp beyond three times it. */
+/** The start keeps its own look: temperate within this distance, the regions whole beyond three times it. */
 const HOME = 6000;
+/** Open ocean this far (m) from any continent turns deep blue, wholly by the second distance. */
+export const DEEP_FROM = 22000;
+export const DEEP_FULL = 40000;
 
 export type RegionId = 0 | 1 | 2 | 3;
 export type RegionWeights = [number, number, number, number];
@@ -18,8 +15,6 @@ export type RegionWeights = [number, number, number, number];
 /** Everything a region changes. Colours are sRGB hex; factors are multipliers of the scene's own value. */
 export type RegionLook = {
   name: string;
-  /** Subtracted from the land mask: how much land the region thins to. */
-  landOffset: number;
   /** Multiplies the offshore islet lift. */
   isletGain: number;
   water: number;
@@ -36,10 +31,10 @@ export type RegionLook = {
 };
 
 export const REGION_LOOKS: readonly RegionLook[] = [
-  { name: 'Temperate', landOffset: 0.5, isletGain: 1, water: 0x1a4e68, fog: 0x163e54, fogMix: 0, fogDensity: 1, hazeDensity: 1, land: [1, 1, 1], birds: [0.5, 0.35, 0.15], ships: 0.6 },
-  { name: 'Tropical', landOffset: 0.46, isletGain: 1.6, water: 0x1e7a8c, fog: 0x2a8a8a, fogMix: 0.35, fogDensity: 0.9, hazeDensity: 0.85, land: [0.94, 1.1, 0.9], birds: [0.2, 0.7, 0.1], ships: 0.5 },
-  { name: 'Polar', landOffset: 0.58, isletGain: 0.5, water: 0x1a4a62, fog: 0x7e98a8, fogMix: 0.45, fogDensity: 1.5, hazeDensity: 1.4, land: [1.08, 1.1, 1.14], birds: [0.4, 0.05, 0.55], ships: 0.2 },
-  { name: 'Deep blue', landOffset: 0.7, isletGain: 0.25, water: 0x123e66, fog: 0x1a4a78, fogMix: 0.3, fogDensity: 0.8, hazeDensity: 0.9, land: [1, 1, 1], birds: [0.15, 0.1, 0.75], ships: 0.7 },
+  { name: 'Temperate', isletGain: 1, water: 0x1a4e68, fog: 0x163e54, fogMix: 0, fogDensity: 1, hazeDensity: 1, land: [1, 1, 1], birds: [0.5, 0.35, 0.15], ships: 0.6 },
+  { name: 'Tropical', isletGain: 1.6, water: 0x1e7a8c, fog: 0x2a8a8a, fogMix: 0.35, fogDensity: 0.9, hazeDensity: 0.85, land: [0.94, 1.1, 0.9], birds: [0.2, 0.7, 0.1], ships: 0.5 },
+  { name: 'Polar', isletGain: 0.5, water: 0x1a4a62, fog: 0x7e98a8, fogMix: 0.45, fogDensity: 1.5, hazeDensity: 1.4, land: [1.08, 1.1, 1.14], birds: [0.4, 0.05, 0.55], ships: 0.2 },
+  { name: 'Deep blue', isletGain: 0.25, water: 0x123e66, fog: 0x1a4a78, fogMix: 0.3, fogDensity: 0.8, hazeDensity: 0.9, land: [1, 1, 1], birds: [0.15, 0.1, 0.75], ships: 0.7 },
 ];
 
 export type Regions = {
@@ -47,49 +42,31 @@ export type Regions = {
   weightsAt: (x: number, z: number, out?: RegionWeights) => RegionWeights;
   /** Region with the largest weight. */
   dominantAt: (x: number, z: number) => RegionId;
-  /** Region of a lattice cell (the home cell is always temperate). */
-  cellRegion: (i: number, j: number) => RegionId;
 };
 
-/** Seeded region field: 40 km cells of one region each, warped, with borders blended over about 5 km. */
-export function createRegions(seed: number): Regions {
-  const noiseX = makeNoise2D(hash(seed, 'regions'), 1);
-  const noiseZ = makeNoise2D(hash(seed, 'regions'), 2);
-  const half = REGION_BLEND / 2 / REGION_CELL;
-
-  function cellRegion(i: number, j: number): RegionId {
-    if (i === 0 && j === 0) return 0;
-    return (hash(seed, 0, i, j) % 4) as RegionId;
-  }
-
-  /** Weights of the cell holding `f` and its two neighbours along one axis: [before, own, after]. */
-  function axis(f: number, out: [number, number, number]): number {
-    const i = Math.floor(f);
-    const t = f - i;
-    out[0] = t < half ? 1 - smoothstep(-half, half, t) : 0;
-    out[2] = t > 1 - half ? smoothstep(1 - half, 1 + half, t) : 0;
-    out[1] = 1 - out[0] - out[2];
-    return i;
-  }
-
-  const ax: [number, number, number] = [0, 0, 0];
-  const az: [number, number, number] = [0, 0, 0];
+/**
+ * The four seas on the planet's layout: tropical, temperate and polar by latitude (the bands blend over about
+ * 5 km), and deep blue out in open ocean far from any continent. The start is temperate.
+ */
+export function createRegions(planet: Pick<Planet, 'latitudeAt' | 'openAt'>): Regions {
+  const band = REGION_BLEND / 2 / LATITUDE_SPAN;
 
   function weightsAt(x: number, z: number, out: RegionWeights = [0, 0, 0, 0]): RegionWeights {
-    const gate = smoothstep(HOME, HOME * 3, Math.hypot(x, z)) * WARP;
-    const px = x + noiseX(x / WARP_SCALE, z / WARP_SCALE) * gate;
-    const pz = z + noiseZ(x / WARP_SCALE + 7.3, z / WARP_SCALE - 2.9) * gate;
-    // The origin sits at the middle of cell (0, 0).
-    const i = axis(px / REGION_CELL + 0.5, ax);
-    const j = axis(pz / REGION_CELL + 0.5, az);
-    out[0] = out[1] = out[2] = out[3] = 0;
-    for (let b = 0; b < 3; b++) {
-      if (az[b] === 0) continue;
-      for (let a = 0; a < 3; a++) {
-        if (ax[a] === 0) continue;
-        out[cellRegion(i + a - 1, j + b - 1)] += ax[a]! * az[b]!;
-      }
+    const away = smoothstep(HOME, HOME * 3, Math.hypot(x, z));
+    if (away <= 0) {
+      out[0] = 1;
+      out[1] = out[2] = out[3] = 0;
+      return out;
     }
+    const latitude = planet.latitudeAt(x, z);
+    const deep = smoothstep(DEEP_FROM, DEEP_FULL, planet.openAt(x, z));
+    const tropical = 1 - smoothstep(1 / 3 - band, 1 / 3 + band, latitude);
+    const polar = smoothstep(2 / 3 - band, 2 / 3 + band, latitude);
+    const shelf = away * (1 - deep);
+    out[1] = tropical * shelf;
+    out[2] = polar * shelf;
+    out[3] = deep * away;
+    out[0] = Math.max(0, 1 - out[1] - out[2] - out[3]);
     return out;
   }
 
@@ -102,7 +79,6 @@ export function createRegions(seed: number): Regions {
       for (let k = 1; k < 4; k++) if (scratch[k]! > scratch[best]!) best = k;
       return best as RegionId;
     },
-    cellRegion,
   };
 }
 

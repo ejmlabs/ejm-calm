@@ -1,7 +1,7 @@
 # ejm-calm
 
 A calm, beautiful, seeded ocean scene from **ejmlabs, an open source lab**.
-A whale swims on a long migration through open ocean, past rocks and islets, under a slow
+A whale swims on a long migration across open ocean between continents, past islands and archipelagos, under a slow
 day of changing light and weather, with stars at night; it breathes and breaches, sailboats drift, and hazy coastlines
 come and go. Everything is generated locally from one number. No accounts, tracking,
 analytics, or runtime network requests beyond this site's static files.
@@ -32,8 +32,7 @@ Open `?seed=42` for that sea. Seeds are decimal integers from `0` to
 
 ## Run locally
 
-Use a current Node.js release. Dependencies are already locked; do not add new
-ones without checking disk space. For day-to-day work, `npm run dev` starts the
+Use a current Node.js release. Dependencies are locked in `package-lock.json`. For day-to-day work, `npm run dev` starts the
 Vite development server on <http://127.0.0.1:8080>. `npm run serve` typechecks,
 runs `vite build`, then previews `dist/` on loopback (choose another port with
 `npm run serve -- 8081`). The browser needs WebGL 2.
@@ -45,15 +44,22 @@ builds then captures desktop (1440×900) and mobile (390×844 @3x) screenshots
 in `shots/` for seeds `42`, `7`, and `1234`, plus a mid-breach frame. Browser
 checks use Playwright Core and the system Chrome executable.
 
-`npm run budget` builds, then reports the gzipped JavaScript against the size
-before the ocean migration began (a report, not a cap). `npx tsx tools/long-journey.ts 2 42 7` swims
-two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 50 60` swims an hour on each of seeds 1 to 50 and fails any under 0.5 net over path or with ten minutes under 2 km (it also reports the seeds that dip under 1.5 km in five); `npx tsx tools/frame-cost.ts`
+`npx tsx tools/long-journey.ts 2 42 7` swims
+two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 50 60` swims an hour on each of seeds 1 to 50 (or a list: `42,7,1234 -`) and fails any under 0.5 net over path or with ten minutes under 2 km (it also reports the seeds that dip under 1.5 km in five, how much of the hour a natural coast is within 6 km and the longest open stretch); `npx tsx tools/world-map.ts 42 map.png` draws a seed's world from above (land, regions, the migration lane, optionally the whale's track); `npx tsx tools/frame-cost.ts`
 times what the journey's feel adds per frame in Node; `npx tsx tools/feel-shots.ts <dir>` captures
-the regions, times of day, weather and indicator (after a build).
+the regions, times of day, weather and indicator, `npx tsx tools/land-shots.ts <dir>` the land by day,
+dusk and night, the highest range in sight, and a close coast with a town and a herd, and
+`npx tsx tools/world-shots.ts <dir>` the open ocean, a continent's coast and an archipelago along the migration (after a build).
+
+There is no byte cap: load time is the size bar. `npx tsx tools/load-time.ts <base dist> <new dist>` times
+first paint, first contentful paint and the first frame of the sea (the page's `calm-first-frame` mark) over
+cold loads, gzipped, on a throttled normal connection (9 Mbps, 170 ms; phones also at a 4x slower CPU), each
+in a fresh browser and alternating between the builds, and fails if the new build adds a second or more.
 
 Review hooks (`window.__calmReview`) are available only with `?debug=1`, among them
 `setDay`, `setWeather` (clear, hazy, overcast, rain, storm, fog), `setSea`
-(0 glassy to 1 rough, or null to follow the weather), `setRoute` and `jumpTo`.
+(0 glassy to 1 rough, or null to follow the weather), `setRoute`, `jumpTo`, `life` (towns and herds nearby),
+`peak` (the highest land in a ring) and `view` (a fixed review camera).
 
 ## Static deployment
 

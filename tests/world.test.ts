@@ -14,6 +14,7 @@ import { createNavField } from '../src/world-nav.js';
 import { waterSignal, SURFACE_BAND } from '../src/seams.js';
 import { WHALE_ISLAND_MARGIN, createWhalePilot, shortestAngle, type WhaleCourse } from '../src/whale-course.js';
 import { fork } from '../src/rng.js';
+import { detailFor } from '../src/quality.js';
 
 test('chunk coordinates floor negatives and boundaries; keys round-trip', () => {
   assert.equal(chunkCoord(0, 512), 0);
@@ -115,11 +116,22 @@ test('recenterDelta: nothing inside the radius, snapped moves outside, continuou
   assert.ok(Math.min(...gaps) >= 120, `shortest gap between recentres ${Math.min(...gaps)} s`);
 });
 
+/** The first coast along a ray from the start beyond `from` metres: sea, then land a kilometre on. */
+function coastAlong(land: { maskAt: (x: number, z: number) => number }, angle: number, from = 40000): [number, number] {
+  const dx = Math.cos(angle);
+  const dz = Math.sin(angle);
+  for (let d = from; d < 1_500_000; d += 500) {
+    if (land.maskAt(dx * d, dz * d) < -0.3 && land.maskAt(dx * (d + 1000), dz * (d + 1000)) > 0.3) return [dx * (d + 500), dz * (d + 500)];
+  }
+  throw new Error(`no coast along ${angle}`);
+}
+
 test('land is endless: finite everywhere, coasts and highlands far from the start', () => {
   const land = createLand(42, { viewYaw: 1 });
   let crossings = 0;
   let peak = -Infinity;
-  for (const [cx, cz] of [[50000, 0], [0, -50000], [-120000, 80000]] as const) {
+  const coasts = [0.3, 2.4, 4.4].map((a) => coastAlong(land, a));
+  for (const [cx, cz] of coasts) {
     let prev = land.maskAt(cx - 4000, cz) > 0;
     for (let x = -4000; x <= 4000; x += 25) {
       const here = land.maskAt(cx + x, cz) > 0;
@@ -132,17 +144,18 @@ test('land is endless: finite everywhere, coasts and highlands far from the star
       peak = Math.max(peak, h);
     }
   }
-  // Open ocean dominates: a few coasts in 24 km of sampled line, not dozens.
-  assert.ok(crossings >= 4, `coast crossings far out ${crossings}`);
+  // Each line crosses its coast, a few times at most: coasts, not scattered islets.
+  assert.ok(crossings >= 3 && crossings <= 30, `coast crossings far out ${crossings}`);
   assert.ok(peak > 200, `highest far point ${peak.toFixed(0)}`);
   // Clearance is valid far away: on land it is negative, out at sea positive.
   let sea = 0;
   let shore = 0;
+  const [ax, az] = coasts[0]!;
   for (let i = 0; i < 60; i++) {
-    const x = 50000 + i * 97;
-    const c = land.clearance(x, 0);
-    if (land.maskAt(x, 0) > 0.05) assert.ok(c <= land.nav.cell, `land at ${x} has clearance ${c}`);
-    if (land.maskAt(x, 0) < -0.05) {
+    const x = ax - 3000 + i * 97;
+    const c = land.clearance(x, az);
+    if (land.maskAt(x, az) > 0.05) assert.ok(c <= land.nav.cell, `land at ${x} has clearance ${c}`);
+    if (land.maskAt(x, az) < -0.05) {
       sea++;
       if (c > 0) shore++;
     }
@@ -420,6 +433,7 @@ test('a fast world update stays within its frame budget and keeps ships and navi
     reflectionGain: 1,
     waterSize: 64,
     landSegments: 48,
+    detail: detailFor('high'),
     mobile: false,
   });
   const camera = new THREE.PerspectiveCamera();

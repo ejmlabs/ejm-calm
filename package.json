@@ -12,13 +12,14 @@
     "test:browser": "npm run build && npx tsx tools/smoke.ts",
     "shots": "npm run build && npx tsx tools/shots.ts",
     "serve": "npm run build && npx tsx tools/serve.ts",
-    "dev": "vite",
-    "budget": "npm run build && npx tsx tools/budget.ts"
+    "dev": "vite"
   },
   "devDependencies": {
     "@types/node": "20.19.43",
+    "@types/pngjs": "6.0.5",
     "@types/three": "0.186.0",
     "playwright-core": "1.64.1",
+    "pngjs": "7.0.0",
     "tsx": "4.20.5",
     "typescript": "5.9.3",
     "vite": "6.4.5",

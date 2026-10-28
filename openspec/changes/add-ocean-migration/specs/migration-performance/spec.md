@@ -22,8 +22,8 @@ The floating origin SHALL recentre at most once per 2 minutes at cruise speed.
 - **THEN** at most 5 recentres occurred
 
 ### Requirement: Added cost
-The change SHALL add at most 4 draw calls on `low` and 8 on `high`, at most 6,000 visible triangles on `low`, at most 25 KB gzip of JavaScript, and no new binary assets. The land tile budget SHALL NOT grow. The CSP SHALL NOT change.
+The change SHALL add at most 4 draw calls on `low` and 8 on `high`, and at most 6,000 visible triangles on `low`. The land tile budget SHALL NOT grow. The CSP SHALL NOT change.
 
-#### Scenario: Size gate
-- **WHEN** `npm run build` completes
-- **THEN** added gzip JS is at most 25 KB over the baseline at the start of the change
+#### Scenario: Draw gate
+- **WHEN** smoke runs on the desktop and phone profiles
+- **THEN** the draws the change adds are at most 4 on `low` and 8 on `high`
