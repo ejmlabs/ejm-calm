@@ -126,6 +126,8 @@ export function biomeColor(height: number, slopeY: number, patch: number, out: C
 
 /** Cells under this depth on all four corners are skipped (open sea). */
 const DEEP = -1.5;
+/** Skirts reach no deeper than this under the sea (m), and at least this far below their edge. */
+const SHORE_SKIRT = 2.5;
 const B = 2;
 
 /**
@@ -245,8 +247,11 @@ export function buildTile(
   }
   if (!index.length) return null;
 
-  // Skirts hang below every emitted edge so a coarser neighbour never shows a crack.
+  // Skirts hang below every emitted edge so a coarser neighbour never shows a crack, but never more than
+  // SHORE_SKIRT under the sea: below that the opaque ocean hides any crack from above, the seafloor patch covers it
+  // from below, and a long skirt would hang into the water as a dark wall.
   const skirt = step * 1.5 + 2;
+  const skirtBottom = (y: number) => Math.max(y - skirt, Math.min(y - SHORE_SKIRT, -SHORE_SKIRT));
   let next = count * count;
   const skirtOf = new Map<number, number>();
   const lowered = (v: number): number => {
@@ -255,7 +260,7 @@ export function buildTile(
       s = next++;
       skirtOf.set(v, s);
       positions[s * 3] = positions[v * 3]!;
-      positions[s * 3 + 1] = positions[v * 3 + 1]! - skirt;
+      positions[s * 3 + 1] = skirtBottom(positions[v * 3 + 1]!);
       positions[s * 3 + 2] = positions[v * 3 + 2]!;
       for (let c = 0; c < 3; c++) {
         normals[s * 3 + c] = normals[v * 3 + c]!;

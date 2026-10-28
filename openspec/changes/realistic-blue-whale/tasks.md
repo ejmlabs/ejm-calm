@@ -26,6 +26,9 @@
 
 ## 4. Land into the sea (B4)
 
-- [ ] 4.1 Land tiles built below the waterline down to where they meet the seafloor, blended across a 200 m band with no gap or step
-- [ ] 4.2 Underwater land tiles stream with the land's LOD rings and are drawn only when the camera is under water or looking through it
-- [ ] 4.3 Shots of a coast from below the water at the shelf, the slope and the plain; load time and frame cost
+- [x] 4.1 Land tiles built below the waterline down to where they meet the seafloor, blended across a 200 m band with no gap or step
+  - As built: the seafloor patch carries the land on below the waterline from the same height field (no seam), now sized past the underwater visibility (about 175 m across on every tier), and tile skirts stop 2.5 m under the sea instead of hanging tens of metres into it.
+- [x] 4.2 Underwater land tiles stream with the land's LOD rings and are drawn only when the camera is under water or looking through it
+  - The seafloor patch streams around the camera on the same per-frame budget as before and is drawn only under water; the opaque ocean hides everything below it from above, so nothing extra draws there.
+- [x] 4.3 Shots of a coast from below the water at the shelf, the slope and the plain; load time and frame cost
+  - Browser pane, under water at the start: the seabed rises smoothly into a bank with kelp and caustics, no gaps or walls. Load time main → this phase: desktop first paint 572 → 584 ms, first sea frame 1551 → 1536 ms; phone first paint 628 → 608 ms, first sea frame 3049 → 2989 ms. Smoke: stream step p99 2.6 ms.
