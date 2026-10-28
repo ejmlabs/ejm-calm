@@ -11,7 +11,8 @@ import { clamp } from './math.js';
 import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
-import { createUnderwater } from './underwater.js';
+import { createUnderwater, UNDERWATER_LAYER } from './underwater.js';
+import { createFishShowcase } from './fish-mesh.js';
 import { feedSitesNear } from './feed-sites.js';
 import { createSeafloor } from './seafloor.js';
 import { createRegionLook } from './region-look.js';
@@ -176,6 +177,8 @@ let regionLook: ReturnType<typeof createRegionLook>;
 let wake: ReturnType<typeof createWake>;
 let weather: ReturnType<typeof createWeather>;
 let shipFx: ReturnType<typeof createShipFx>;
+const fishTime = { value: 0 };
+let fishShowcase: ReturnType<typeof createFishShowcase> | null = null;
 
 try {
   const buildStart = performance.now();
@@ -226,6 +229,9 @@ try {
   // The floating origin moved: shift the camera with the world so the chase does not jump.
   world.origin.onRecenter((dx, dz) => rig.shift(dx, dz));
   underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, origin: world.origin, tier: quality.tier, seed });
+  // Review only (`?debug=1&fish=1`): every fish species in a small school ahead of the camera.
+  if (debug && params.get('fish') === '1') fishShowcase = createFishShowcase(fishTime, UNDERWATER_LAYER);
+  if (fishShowcase) scene.add(fishShowcase.group);
   buildMs = performance.now() - buildStart;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
@@ -395,6 +401,8 @@ function tick(now: number): void {
   if (peekDepth !== null) peekCamera(peekDepth);
 
   const signal = underwater.update(dt, time, camera, whale.state);
+  fishTime.value = time;
+  fishShowcase?.follow(camera);
   audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin });
   renderer.render(scene, camera);
 
@@ -605,5 +613,6 @@ window.addEventListener('pagehide', () => {
   world.dispose();
   birds.dispose();
   underwater.dispose();
+  fishShowcase?.dispose();
   renderer.dispose();
 });
