@@ -1,8 +1,8 @@
 # calm logo review
 
-Independent review of `logos/{breach,fluke,swell}`. Compared against the ejmlabs family
-(`site-polish/packages/tokens/assets/projects/{cli,ide,harness,relay}`, `family-light.png`) and the
-parent symbol. Checked the SVG source, the renders in `previews/`, and 8× nearest-neighbour blow-ups
+Review of `logos/{breach,fluke,swell}` against the ejmlabs family
+(`assets/projects/{cli,ide,harness,relay}` and `family-light.png` in the ejm-ui tokens package) and the
+parent symbol. It covers the SVG source, the renders in `previews/`, and 8× nearest-neighbour blow-ups
 of the 16/32 px favicons placed next to the family's own `favicon-16/32.png`.
 
 ## Verdict

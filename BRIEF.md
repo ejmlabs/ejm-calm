@@ -1,7 +1,6 @@
 # calm logo brief + ejmlabs brand research
 
-Status: brief only. The design session that was meant to run this did not
-happen, so no logo directions had been made when this was written.
+Status: original brief, written before any directions existed.
 
 ## Product
 calm (calm.ejmlabs.com) is a procedurally generated three.js scene: a humpback
@@ -9,7 +8,7 @@ whale in an Earth-like ocean, with ships, coastlines and mountains. It should
 feel slow, quiet and deep. The site title is currently plain `calm` and the
 project has no favicon of its own.
 
-## Brand sources (ejm-ui, /workspace/agents/work/site-polish/packages/tokens)
+## Brand sources (the ejm-ui tokens package)
 - Palette (`assets/brand/palette.json`, brand guide Oct 2026):
   Sage #8A9A7B, Forest #29443B, Ink #202721, Paper #F6F5EF, Mist #E8EDE3, White.
   Contrast: Ink on Paper 14.0, Paper on Forest 9.7, Ink on Sage 5.1, Forest on
@@ -45,8 +44,8 @@ project has no favicon of its own.
     wide gaps.
 
 ## Deliverables
-Working copy: /workspace/agents/work/calm-logo (branch design/calm-logo, a git
-worktree of ejm-calm; don't commit to main, push or deploy).
+The directions, previews and generator scripts live in this repository under
+`logos/`, `previews/` and `tools/logo/`.
 1. Two or three distinct directions in `logos/<direction>/`: mark.svg (Sage),
    mark-ink.svg, mark-paper.svg, logo-primary.svg (mark + outlined "calm"
    wordmark), logo-paper.svg (for dark backgrounds), favicon.svg (a simplified
@@ -57,8 +56,10 @@ worktree of ejm-calm; don't commit to main, push or deploy).
 2. Previews at `previews/<direction>-{light,dark}.png` (light = Paper #F6F5EF,
    dark = Ink #202721 or Forest #29443B), favicon at 16/32/48, and a combined
    `previews/contact-sheet.png`. Render with
-   `resvg-js --font-file /workspace/agents/work/site-polish/packages/tokens/assets/fonts/Manrope-Variable.ttf in.svg out.png`
-   (resvg-js is installed at ~/.local/bin; headless google-chrome also works).
+   `resvg-js --font-file "$LOGO_FONT" in.svg out.png`, where `LOGO_FONT` is the
+   path to Manrope-Variable.ttf from the ejm-ui tokens package (`assets/fonts/`);
+   a headless browser also works. The scripts in `tools/logo/` read the same
+   `LOGO_FONT` variable.
 3. DESIGN-NOTES.md: for each direction, the idea, how it maps to ejmlabs tokens
    (colours, Manrope 600, ~36-unit ribbon weight, rounded caps, nested-ribbon
    lineage), and how it holds up at small sizes.

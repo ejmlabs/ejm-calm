@@ -7,7 +7,8 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-FONT = "/workspace/agents/work/site-polish/packages/tokens/assets/fonts/Manrope-Variable.ttf"
+FONT = os.environ.get("LOGO_FONT")  # Manrope-Variable.ttf from the ejm-ui tokens package (assets/fonts/)
+NO_FONT = "Set LOGO_FONT to the path of Manrope-Variable.ttf from the ejm-ui tokens package (assets/fonts/)."
 SAGE, FOREST, INK, PAPER = "#8A9A7B", "#29443B", "#202721", "#F6F5EF"
 
 def f(v):
@@ -138,6 +139,7 @@ _font = None
 def glyph_paths(text="calm", size=216, x0=0, base=205):
     global _font
     if _font is None:
+        if not FONT: sys.exit(NO_FONT)
         _font = instantiateVariableFont(TTFont(FONT), {"wght": 600})
     gs = _font.getGlyphSet(); cmap = _font.getBestCmap(); upm = _font["head"].unitsPerEm
     sc = size / upm; x = x0; out = []; xs = []

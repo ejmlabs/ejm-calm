@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Render fluke previews + contact sheet. Run after build.py.  Needs resvg-js and Pillow."""
-import os, re, subprocess
+import os, re, subprocess, sys
 from PIL import Image
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-FONT = "/workspace/agents/work/site-polish/packages/tokens/assets/fonts/Manrope-Variable.ttf"
+FONT = os.environ.get("LOGO_FONT")  # Manrope-Variable.ttf from the ejm-ui tokens package (assets/fonts/)
+NO_FONT = "Set LOGO_FONT to the path of Manrope-Variable.ttf from the ejm-ui tokens package (assets/fonts/)."
 SAGE, FOREST, INK, PAPER, MIST = "#8A9A7B", "#29443B", "#202721", "#F6F5EF", "#E8EDE3"
 PV = os.path.join(ROOT, "previews"); os.makedirs(PV, exist_ok=True)
 L = lambda n: os.path.join(ROOT, "logos", "fluke", n + ".svg")
@@ -20,6 +21,7 @@ def place(path, x, y, h):
     return f'<g transform="translate({x:.1f} {y:.1f}) scale({k:.4f})">{body}</g>', w * k
 
 def render(svg, out, w=None):
+    if not FONT: sys.exit(NO_FONT)
     tmp = out + ".svg"; open(tmp, "w").write(svg)
     cmd = ["resvg-js", "--font-file", FONT] + (["--fit-width", str(w)] if w else [])
     subprocess.run(cmd + [tmp, out], check=True, capture_output=True); os.remove(tmp)

@@ -1,9 +1,9 @@
 # calm logo review: fluke v2
 
-Independent review of `logos/fluke/*.svg` (v2, "Fluke, but more polish"). I compared it against BRIEF.md,
-REVIEW.md, DESIGN-NOTES.md "fluke v2", the ejmlabs family (`family-light.png`, `{cli,ide,harness,relay}`)
-and the previews. I also made my own resvg renders, measured ink bounding boxes and blew up the
-16/32 px favicons with nearest-neighbour scaling.
+Review of `logos/fluke/*.svg` (v2, "Fluke, but more polish") against BRIEF.md, REVIEW.md,
+DESIGN-NOTES.md "fluke v2", the ejmlabs family (`family-light.png`, `{cli,ide,harness,relay}`)
+and the previews, using resvg renders, measured ink bounding boxes and nearest-neighbour
+blow-ups of the 16/32 px favicons.
 
 ## Verdict: **Needs changes**
 
@@ -99,8 +99,8 @@ open curled ribbon lobes.
 
 ## Pass 2 (v3)
 
-Re-inspected the `logos/fluke/*.svg` source and `tools/logo/fluke.py`, the contact sheet, the light/dark previews,
-my own 4× render of `mark-ink.svg` and 8× nearest-neighbour blow-ups of the 16/32/48 favicons.
+Covers the `logos/fluke/*.svg` source and `tools/logo/fluke.py`, the contact sheet, the light/dark previews,
+a 4× render of `mark-ink.svg` and 8× nearest-neighbour blow-ups of the 16/32/48 favicons.
 
 ### Final verdict: **Ship with minor fixes**
 
@@ -120,7 +120,7 @@ are gone, so nothing is left that blocks shipping.
 Earlier Minors are resolved too. The lockup gap is now **54.5 units** (mark ink 18–238, 'c' at 292.5), between
 ide's 40 and relay's 56. Side margins are 18 units, like cli. Pills are 30 thick and 56 long with a ~27-unit gap
 to the stem. The tips are round, and the marks are ~0.75 KB. Hygiene, titles and the file set still pass
-(I re-grepped for raster/script/href/filter/gradient/style/text: none found, and the wordmark is still outlined).
+(no raster, script, href, filter, gradient, style or text elements, and the wordmark is still outlined).
 
 ### Remaining findings (none blocking)
 
