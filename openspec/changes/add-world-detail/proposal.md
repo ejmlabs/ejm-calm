@@ -13,8 +13,8 @@ The captain asked for vastly better terrain, bird and ship detail.
 - **Terrain detail**: ridged and domain-warped macro shape, mid-scale features (coves, sea stacks, gullies, strata), a distance-faded procedural micro-normal and grain in the land shader, real sun lighting, a material system (sand, wet sand band, rock, grass, forest, seabed sand and rock) driven by per-vertex weights, wet shoreline and foam line, instanced rocks and trees near the camera.
 - **Birds**: three low-poly species (gull, tern, albatross) as instanced meshes with a vertex-shader wing flap, simple boids flocking with a leader, 10 to 24 birds near the whale.
 - **Ships**: lofted hulls, rigging and shader-driven sails, a wake and bow spray, motion from one shared swell function, three types in the first release (sloop, schooner, trawler) with an optional fourth (ferry).
-- **Performance system**: four LODs per element, a detail tier tied to the existing `low | medium | high` quality tier, and hard budgets for frame time, draw calls, triangles and shipped bytes.
-- No new runtime dependencies, no third-party requests, CSP unchanged. All new geometry and textures are procedural. If an asset is ever downloaded it needs a licence entry in `THIRD_PARTY_NOTICES` and `public/THIRD_PARTY_NOTICES`.
+- **Performance system**: four LODs per element, a detail tier tied to the existing `low | medium | high` quality tier, and hard budgets for frame time, draw calls and triangles. Load time, not shipped bytes, is the size bar (see `add-land-detail`).
+- No third-party requests, CSP unchanged. All new geometry and textures are procedural. If an asset is ever downloaded it needs a licence entry in `THIRD_PARTY_NOTICES` and `public/THIRD_PARTY_NOTICES`.
 
 ## Capabilities
 
@@ -33,5 +33,5 @@ None. The repository has no existing OpenSpec capabilities.
 
 - Code: `src/world-tiles.ts`, `src/terrain.ts`, `src/land.ts` (shape), `src/landmesh.ts` (material), `src/birds.ts`, `src/ships.ts`, `src/world-ships.ts`, `src/quality.ts`, plus new `src/swell.ts`, `src/flock.ts`, `src/hulls.ts`, `src/wake.ts`, `src/scatter.ts`.
 - Tests: new unit tests for the shared swell, flocking, LOD selection and the budget checks in `tools/smoke.ts`.
-- Bundle: at most 80 KB gzip added to the JS (currently 212 KB gzip). No new binary assets by default.
+- No new binary assets by default.
 - Docs: `README.md` and `FOLLOWUP.md` updated when behaviour lands; `FOLLOWUP.md` items on unlit land and flat sails are closed by this change.

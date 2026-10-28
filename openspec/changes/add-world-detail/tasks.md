@@ -42,7 +42,7 @@
 ## 6. Polish and audit (P5)
 
 - [ ] 6.1 Run the frame budget on desktop and a throttled mobile profile; record in the PR
-- [ ] 6.2 Bundle size check against the 80 KB gzip cap
+- [ ] 6.2 Load-time check against `main` (`tools/load-time.ts`; replaces the bundle cap)
 - [ ] 6.3 CSP check: no new inline style, `data:` image or external request
 - [ ] 6.4 Update `README.md`, `FOLLOWUP.md`; add `THIRD_PARTY_NOTICES` entries only if an asset was shipped
 - [ ] 6.5 Typecheck, tests and `npm run test:browser` pass

@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = resolve(ROOT, 'dist');
@@ -93,11 +94,16 @@ export async function startServer({ port = 8080, root = DIST }: StartServerOptio
         reply(404, 'Not found');
         return;
       }
-      const body = await readFile(file);
+      const type = MIME[extname(file)] ?? 'application/octet-stream';
+      // Text is gzipped when the browser accepts it, as production hosts serve it.
+      const gzip = /^(text\/|application\/json|image\/svg)/.test(type) && /\bgzip\b/.test(String(request.headers['accept-encoding'] ?? ''));
+      const body = gzip ? gzipSync(await readFile(file)) : await readFile(file);
       response.writeHead(200, {
         ...HEADERS,
-        'Content-Type': MIME[extname(file)] ?? 'application/octet-stream',
+        'Content-Type': type,
         'Content-Length': body.length,
+        Vary: 'Accept-Encoding',
+        ...(gzip ? { 'Content-Encoding': 'gzip' } : {}),
       });
       response.end(request.method === 'HEAD' ? undefined : body);
     } catch {

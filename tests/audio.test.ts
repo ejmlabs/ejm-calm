@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { resolve, extname, basename } from 'node:path';
 import {
   GULL_CALLS,
@@ -181,12 +181,10 @@ test('every audio file has both formats, a listed open licence and a source addr
   const rows = sources.split('\n').filter((line) => line.startsWith('| ') && !line.startsWith('| Output') && !line.startsWith('|---'));
   const files = (await readdir(audioDir)).filter((name) => name !== 'SOURCES.md');
   assert.ok(files.length > 0);
-  const totals: Record<string, number> = { '.ogg': 0, '.m4a': 0 };
   const stems = new Set<string>();
   for (const name of files) {
     const ext = extname(name);
     assert.ok(ext === '.ogg' || ext === '.m4a', `unexpected file ${name}`);
-    totals[ext]! += (await stat(resolve(audioDir, name))).size;
     stems.add(basename(name, ext));
     const listed = rows.filter((row) => row.split('|')[1]!.split(',').map((s) => s.trim()).includes(name));
     assert.ok(listed.length > 0, `${name} is not listed in SOURCES.md`);
@@ -199,9 +197,6 @@ test('every audio file has both formats, a listed open licence and a source addr
   }
   for (const stem of stems) {
     assert.ok(files.includes(`${stem}.ogg`) && files.includes(`${stem}.m4a`), `${stem} needs .ogg and .m4a`);
-  }
-  for (const [ext, size] of Object.entries(totals)) {
-    assert.ok(size < 2.5 * 1024 * 1024, `${ext} audio totals ${size} bytes`);
   }
 });
 

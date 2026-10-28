@@ -72,7 +72,7 @@ Each element has four LOD levels chosen by distance with hysteresis, never by po
 
 ### D8 Assets
 
-Everything procedural. The micro-detail needs no texture. If a small tileable detail normal ever proves necessary it is generated on a canvas at start (256 x 256) rather than shipped. Any shipped asset must be listed in `THIRD_PARTY_NOTICES` and `public/THIRD_PARTY_NOTICES` with origin and licence, and counted against the byte budget.
+Everything procedural. The micro-detail needs no texture. If a small tileable detail normal ever proves necessary it is generated on a canvas at start (256 x 256) rather than shipped. Any shipped asset must be listed in `THIRD_PARTY_NOTICES` and `public/THIRD_PARTY_NOTICES` with origin and licence.
 
 ## Risks / Trade-offs
 

@@ -11,6 +11,8 @@ import type { WorkerRequest } from './world-worker.js';
 import { damp } from './math.js';
 import { blendLook } from './regions.js';
 import { OPENING_NAV_RADIUS, PLAN_REACH } from './whale-course.js';
+import { createWalkers } from './walkers.js';
+import type { DetailBudget } from './quality.js';
 
 export type WorldOptions = {
   sunDirection: THREE.Vector3;
@@ -22,6 +24,8 @@ export type WorldOptions = {
   reflectionGain: number;
   waterSize: number;
   landSegments: number;
+  /** Life on the land and its surface detail, by quality tier. */
+  detail: Pick<DetailBudget, 'objects' | 'walkers' | 'microNormal'>;
   /** Fewer ships on small screens. */
   mobile: boolean;
   /** Build land tiles and far shelf maps in a worker (browser). */
@@ -36,6 +40,13 @@ export type World = {
   land: Land;
   ocean: OceanHandle;
   landStream: LandStream;
+  /** People and animals drawn now may number at most this (follows the quality tier). */
+  setWalkerCap: (cap: number) => void;
+  /**
+   * Materials first drawn only after the opening frame (land dissolving in, people and animals), to compile ahead of
+   * that frame.
+   */
+  laterMaterials: readonly THREE.Material[];
   ships: {
     /** Ships afloat and visible (stable array). */
     active: () => readonly ShipHandle[];
@@ -92,8 +103,14 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     hazeDensity: options.hazeDensity,
     hazeGradient: options.hazeGradient,
     worker: options.worker,
+    objects: options.detail.objects,
+    microNormal: options.detail.microNormal,
   });
   root.add(landStream.group);
+  const walkers = createWalkers(landStream, options.detail.walkers);
+  root.add(walkers.group);
+  // Their own clock: still when the frame step is (reduced motion), and not hurried by the swell.
+  let walkerClock = 0;
   landStream.prime(layout.whaleHome.x, layout.whaleHome.z);
 
   // The whale's first minutes need no stall: build the water around the start now.
@@ -172,6 +189,7 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     root.position.set(-origin.x, 0, -origin.z);
     root.updateMatrixWorld();
     ocean.setOrigin(origin.x, origin.z);
+    landStream.setOrigin(origin.x, origin.z);
     recentres++;
   });
 
@@ -194,6 +212,8 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     land,
     ocean,
     landStream,
+    setWalkerCap: walkers.setCap,
+    laterMaterials: [...landStream.materials, ...walkers.materials],
     ships: { active: ships.active, setVisible: ships.setVisible },
     update(wx, wz, camera, dt, time) {
       const start = performance.now();
@@ -217,6 +237,8 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
       if (Math.hypot(cameraWorld.x - wx, cameraWorld.z - wz) > CAMERA_LEASH) cameraWorld.set(wx, 0, wz);
       origin.maybeRecenter(wx, wz);
       landStream.update(cameraWorld.x, cameraWorld.z, dt, vx, vz);
+      walkerClock += dt;
+      walkers.update(cameraWorld.x, cameraWorld.z, walkerClock);
       const k = Math.min(LEAD, LEAD_MAX / Math.max(1e-6, Math.hypot(vx, vz)));
       const ax = wx + vx * k;
       const az = wz + vz * k;
@@ -256,6 +278,7 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
       const tiles = landStream.stats();
       const nav = land.nav.stats();
       const fleet = ships.stats();
+      const life = walkers.stats();
       return {
         origin: [origin.x, origin.z],
         whaleWorld: whale,
@@ -269,6 +292,13 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
         streamWorstMs: Math.max(worst[0]!, worst[1]!),
         whaleSpeed: Math.hypot(vx, vz),
         landTriangles: tiles.triangles,
+        /** Trees, rocks and houses in the wanted tiles drawn now, and their triangles. */
+        landObjects: tiles.objects,
+        objectTriangles: tiles.objectTriangles,
+        walkers: life.walkers,
+        walkerDraws: life.draws,
+        walkerTriangles: life.triangles,
+        walkerClock,
         navTiles: nav.tiles,
         navBlocks: nav.blocks,
         recentres,
@@ -282,6 +312,7 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     dispose() {
       worker?.terminate();
       ships.dispose();
+      walkers.dispose();
       landStream.dispose();
       ocean.dispose();
       scene.remove(root);
