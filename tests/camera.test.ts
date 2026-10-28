@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { createSpring, springStep, springStepAngle } from '../src/spring.js';
 import { DIVE_BELOW, DIVE_DWELL, EYE_CLEARANCE, FollowCamera, MIN_DISTANCE, PEEK_IDLE, RISE_ABOVE, WHALE_HALF } from '../src/camera.js';
 import { WATER_LEVEL, type FollowTarget } from '../src/seams.js';
+import { DEPTH_SCALE } from '../src/whale-size.js';
 
 const fwd = (h: number) => ({ x: -Math.cos(h), z: Math.sin(h) });
 
@@ -162,7 +163,7 @@ test('follows the whale under water and never rests in the surface band', () => 
   assert.equal(r.mode, 'under');
   assert.ok(camera.position.y < WATER_LEVEL - EYE_CLEARANCE);
   // A target whose natural eye height is inside the band is held outside it.
-  settle(-2.4);
+  settle(RISE_ABOVE - 0.4 * DEPTH_SCALE);
   r.look(0, 200); // a peek upward would lift the eye into the band
   for (let i = 0; i < 150; i++) {
     r.update(1 / 60, 0);
@@ -307,7 +308,8 @@ for (const screen of SCREENS) {
 test('the camera follows a dive under and comes back up', () => {
   const { frames } = journey(dive, 14);
   const deepest = Math.min(...frames.map((f) => f.eye.y));
-  assert.ok(deepest < -8, `eye only reached ${deepest}`);
+  // The trailing eye sits above a big whale's back, so it goes well under but not as deep as the whale.
+  assert.ok(deepest < -5, `eye only reached ${deepest}`);
   assert.ok(frames.at(-1)!.eye.y > WATER_LEVEL + EYE_CLEARANCE, 'did not resurface');
 });
 
@@ -349,4 +351,33 @@ test('a stopped whale turning in place does not swing the camera round', () => {
   const { frames } = journey(spin, 8);
   const swing = Math.abs(frames.at(-1)!.yaw - frames[0]!.yaw);
   assert.ok(swing < 0.8, `swung ${swing.toFixed(2)} rad while the whale turned ${6.4} rad`);
+});
+
+test('the eye follows a 200 m dive down and back, clear of the seabed, unless asked to stay at the surface', () => {
+  const floor = -230;
+  const camera = new THREE.PerspectiveCamera(48, 1, 0.5, 12000);
+  const r = new FollowCamera(camera, { groundAt: () => floor });
+  const t: FollowTarget = { x: 0, y: -1.2, z: 0, heading: 0 };
+  let deepest = 0;
+  for (let i = 0; i < 300 * 60; i++) {
+    // Down to 200 m over two minutes, a minute there, then back up.
+    const s = i / 60;
+    t.y = s < 120 ? -1.2 - 198.8 * (s / 120) : s < 180 ? -200 : Math.min(-1.2, -200 + 198.8 * ((s - 180) / 100));
+    t.x += 0.2;
+    r.setTarget(t);
+    r.update(1 / 60, s);
+    deepest = Math.min(deepest, camera.position.y);
+    assert.ok(camera.position.y >= floor + 2 - 1e-6, `eye ${camera.position.y} m at ${s.toFixed(1)} s`);
+  }
+  assert.ok(deepest < -150, `eye only reached ${deepest} m`);
+  assert.ok(camera.position.y > WATER_LEVEL + EYE_CLEARANCE, 'came back up with the whale');
+
+  r.setStayAtSurface(true);
+  t.y = -150;
+  for (let i = 0; i < 20 * 60; i++) {
+    r.setTarget(t);
+    r.update(1 / 60, 400 + i / 60);
+  }
+  assert.equal(r.mode, 'chase');
+  assert.ok(camera.position.y > WATER_LEVEL + EYE_CLEARANCE, 'stayed above the water');
 });

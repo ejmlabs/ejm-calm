@@ -2,7 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Page } from 'playwright-core';
 import { withBrowser, openCalm, DESKTOP, MOBILE, type DeviceProfile } from './browser.js';
-import { createRegions, REGION_CELL, REGION_LOOKS } from '../src/regions.js';
+import { REGION_LOOKS } from '../src/regions.js';
+import { layoutWorld } from '../src/terrain.js';
 import { DAY } from '../src/sky.js';
 import { pickTimeOfDay } from '../src/sky.js';
 
@@ -62,20 +63,18 @@ const call = <K extends Exclude<keyof CalmReview, 'stats'>>(page: Page, hook: K,
 /** Day fraction (of a full day from the seed's own start) that lands on the preset. */
 const dayFor = (name: (typeof DAY)[number]) => (((DAY.indexOf(name) - start + DAY.length) % DAY.length) / DAY.length);
 
-/** The cell centre nearest the start for each region. */
+/** For each region, the first point along the migration's lane well inside it. */
 function regionCentres(): Array<{ id: number; x: number; z: number }> {
-  const regions = createRegions(seed);
+  const { land } = layoutWorld(seed);
   const out: Array<{ id: number; x: number; z: number }> = [];
   for (let id = 0; id < 4; id++) {
-    let best: { x: number; z: number; d: number } | null = null;
-    for (let i = -3; i <= 3; i++) {
-      for (let j = -3; j <= 3; j++) {
-        if (regions.cellRegion(i, j) !== id) continue;
-        const d = Math.hypot(i, j);
-        if (!best || d < best.d) best = { x: i * REGION_CELL, z: j * REGION_CELL, d };
+    for (let s = 0; s < 1_000_000; s += 2000) {
+      const { x, z } = land.planet.laneCentre(s);
+      if (land.regions.weightsAt(x, z)[id]! > 0.9) {
+        out.push({ id, x, z });
+        break;
       }
     }
-    if (best) out.push({ id, x: best.x, z: best.z });
   }
   return out;
 }

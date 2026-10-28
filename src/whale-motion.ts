@@ -1,32 +1,46 @@
 import * as THREE from 'three';
 import { clamp, lerp, smoothstep } from './math.js';
+import { DEPTH_SCALE, WHALE_LENGTH } from './whale-size.js';
 
-export type WhalePhase = 'swim' | 'surface' | 'spout' | 'dive' | 'deep' | 'breach' | 'splash';
+export type WhalePhase = 'swim' | 'surface' | 'spout' | 'roll' | 'dive' | 'deep' | 'breach' | 'splash';
 
 export const PHASE_LEN: Record<WhalePhase, number> = {
   swim: 18,
-  surface: 6,
-  spout: 3.5,
-  dive: 5,
-  deep: 38,
+  surface: 4,
+  spout: 4.5,
+  roll: 7,
+  dive: 10,
+  deep: 60,
   breach: 5.5,
   splash: 2.5,
 };
 
-export const PHASE_ORDER: WhalePhase[] = ['swim', 'surface', 'spout', 'dive', 'deep', 'swim', 'surface', 'spout', 'dive', 'breach', 'splash', 'dive'];
+/**
+ * A surfacing is a string of blows, each a rise, a spout and a roll back under; the last blow ends in the
+ * fluke-up dive and the long stretch at depth. Now and then a breach follows the dive.
+ */
+export const PHASE_ORDER: WhalePhase[] = ['deep', 'surface', 'spout', 'roll', 'surface', 'spout', 'dive', 'breach', 'splash', 'roll', 'surface', 'spout', 'dive'];
 
 /**
  * Body-origin heights and resting trim. Near the surface the whale rides
  * slightly nose-up with its tail stock sagging: the head crown, blowholes,
- * back line and fin break the water; the tail stays under.
+ * back line and fin break the water; the tail stays under. Heights against the waterline follow how deep
+ * the body is (DEPTH_SCALE).
  */
-export const DEEP_Y = -4.5;
-export const SWIM_Y = -0.4;
+export const DEEP_Y = -4.5 * DEPTH_SCALE;
+export const SWIM_Y = -0.4 * DEPTH_SCALE;
 /** Cruising depth of the long dive between surfacings. */
-export const DEEP_DIVE_Y = -14;
+export const DEEP_DIVE_Y = -14 * DEPTH_SCALE;
+/** Sinking rate (m/s) the fluke-up dive hands on to the long dive. */
+export const DIVE_SINK = 1;
 /** Smallest gap kept between the body origin and the seafloor. */
-export const FLOOR_CLEARANCE = 3;
-export const SURFACE_Y = -0.7;
+export const FLOOR_CLEARANCE = 3 * DEPTH_SCALE;
+export const SURFACE_Y = -0.7 * DEPTH_SCALE;
+/**
+ * Glide depth between blows: the back is just under, well above the camera's dive line,
+ * so the chase view stays on the surface through a whole surfacing.
+ */
+export const SHALLOW_Y = -1.9 * DEPTH_SCALE;
 export const SWIM_PITCH = 0.04;
 export const SURFACE_PITCH = 0.085;
 export const REST_ARCH = -0.4;
@@ -37,20 +51,21 @@ export const GRAVITY = 9.81;
  * a ballistic flight, then re-entry and a slow recovery under the splash.
  */
 export const BREACH_EXIT = 0.16;
-export const BREACH_EXIT_Y = -1;
-export const BREACH_APEX_Y = 4.2;
+export const BREACH_EXIT_Y = -1 * DEPTH_SCALE;
+/** Body-origin height at the top of a breach: a blue whale lifts most of its body clear, rarely all of it. */
+export const BREACH_APEX_Y = 0.18 * WHALE_LENGTH;
 export const BREACH_V0 = Math.sqrt(2 * GRAVITY * (BREACH_APEX_Y - BREACH_EXIT_Y));
 export const BREACH_AIR_TIME = (2 * BREACH_V0) / GRAVITY;
 export const BREACH_LAND = BREACH_EXIT + BREACH_AIR_TIME / PHASE_LEN.breach;
 export const BREACH_APEX = (BREACH_EXIT + BREACH_LAND) * 0.5;
 /** Body-origin height where the falling whale first strikes the water. */
-export const BREACH_CONTACT_Y = 1;
+export const BREACH_CONTACT_Y = 1 * DEPTH_SCALE;
 /** Phase time of that strike: the re-entry splash fires here. */
 export const BREACH_SPLASH =
   BREACH_EXIT + (BREACH_V0 + Math.sqrt(BREACH_V0 ** 2 - 2 * GRAVITY * (BREACH_CONTACT_Y - BREACH_EXIT_Y))) / GRAVITY / PHASE_LEN.breach;
 const BREACH_LOW = BREACH_LAND + 0.08;
-const BREACH_END_Y = -2.2;
-const BREACH_LOW_Y = -4.6;
+const BREACH_END_Y = -2.2 * DEPTH_SCALE;
+const BREACH_LOW_Y = -4.6 * DEPTH_SCALE;
 const EXIT_PITCH = 1.22;
 /** Still nose-down when it hits: the body crashes through instead of landing flat. */
 export const LAND_PITCH = -0.5;
@@ -101,7 +116,7 @@ function bump(t: number, a: number, b: number, c: number, d: number): number {
 /** Breach body height. Exactly ballistic between exit and re-entry. */
 export function breachHeight(t: number): number {
   const T = PHASE_LEN.breach;
-  if (t < BREACH_EXIT) return hermite(DEEP_Y, 0, BREACH_EXIT_Y, BREACH_V0, BREACH_EXIT * T, t / BREACH_EXIT);
+  if (t < BREACH_EXIT) return hermite(DEEP_Y, -DIVE_SINK, BREACH_EXIT_Y, BREACH_V0, BREACH_EXIT * T, t / BREACH_EXIT);
   if (t <= BREACH_LAND) {
     const s = (t - BREACH_EXIT) * T;
     return BREACH_EXIT_Y + BREACH_V0 * s - 0.5 * GRAVITY * s * s;
@@ -121,7 +136,8 @@ export function breachAirborne(t: number): boolean {
  * Pose for a phase at normalised time t. Each phase ends exactly where the next
  * one in PHASE_ORDER begins, so the cycle needs no smoothing to stay continuous.
  */
-export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPose()): WhalePose {
+/** `lift` scales how high a fluke-up dive raises the flukes (1 full, toward 0 a dive that keeps them under). */
+export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPose(), lift = 1): WhalePose {
   const x = clamp(t, 0, 1);
   out.roll = 0;
   out.arch = 0;
@@ -141,35 +157,56 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
       out.flipLift = -0.12 * Math.sin(Math.PI * clamp(x / 0.3, 0, 1));
       break;
     }
-    case 'surface':
-      out.y = lerp(SWIM_Y, SURFACE_Y, smoothstep(0, 1, x));
-      out.pitch = lerp(SWIM_PITCH, SURFACE_PITCH, smoothstep(0, 1, x));
-      out.arch = REST_ARCH;
-      out.stroke = lerp(1, 0.6, smoothstep(0, 1, x));
-      out.bob = 1;
+    case 'surface': {
+      // Rise from the glide into a blow: the head leads up, the back settles awash.
+      out.y = lerp(SHALLOW_Y, SURFACE_Y, smoothstep(0, 0.8, x));
+      out.pitch = SURFACE_PITCH * smoothstep(0, 1, x) + 0.1 * bump(x, 0, 0.35, 0.5, 0.9);
+      out.arch = REST_ARCH * smoothstep(0.2, 1, x);
+      out.stroke = lerp(1, 0.6, smoothstep(0.3, 1, x));
+      out.bob = smoothstep(0.2, 1, x);
+      out.flipLift = -0.12 * bump(x, 0, 0.3, 0.5, 1);
       break;
+    }
     case 'spout':
-      out.y = SURFACE_Y;
+      // The exhale lifts the head a little.
+      out.y = SURFACE_Y + 0.08 * DEPTH_SCALE * Math.sin(Math.PI * x);
       out.pitch = SURFACE_PITCH + 0.02 * Math.sin(Math.PI * x);
       out.arch = REST_ARCH;
       out.stroke = 0.6;
       out.bob = 1;
       break;
+    case 'roll': {
+      // After a blow the head dips first and the back rolls over, fin last, then the body glides just under.
+      out.y = lerp(SURFACE_Y, SHALLOW_Y, smoothstep(0.1, 0.7, x));
+      out.pitch = SURFACE_PITCH * (1 - smoothstep(0, 0.25, x)) - 0.1 * bump(x, 0.1, 0.35, 0.5, 0.85);
+      // The back humps as the head goes down while the tail stock still hangs low: the flukes stay
+      // under (only the last dive lifts them out).
+      out.arch = REST_ARCH * (1 - smoothstep(0.3, 0.85, x)) + 0.3 * bump(x, 0.05, 0.3, 0.45, 0.8);
+      out.stroke = lerp(0.6, 1, smoothstep(0.3, 0.9, x));
+      out.bob = 1 - smoothstep(0.2, 0.75, x);
+      out.flipSweep = 0.1 * bump(x, 0.2, 0.5, 0.7, 1);
+      break;
+    }
     case 'dive': {
-      // Round out, arch the back, lift the flukes clear and slide under.
-      out.y = lerp(SURFACE_Y, DEEP_Y, smoothstep(0.25, 1, x));
-      out.pitch = SURFACE_PITCH * (1 - smoothstep(0, 0.3, x)) - 0.44 * bump(x, 0, 0.36, 0.66, 1);
-      out.arch = REST_ARCH * (1 - smoothstep(0, 0.2, x)) + 0.6 * bump(x, 0.04, 0.42, 0.56, 0.92);
-      out.stroke = lerp(0.6, 1, smoothstep(0, 1, x)) + 0.5 * bump(x, 0.1, 0.35, 0.6, 0.9);
-      out.rate = 1 - 0.35 * bump(x, 0.25, 0.45, 0.55, 0.8);
-      out.bob = 1 - smoothstep(0, 0.5, x);
-      out.flipLift = -0.1 * bump(x, 0, 0.3, 0.6, 1);
+      // Fluke-up: the back humps high, the tail stock arches out and the flukes lift clear,
+      // then the whale slides under and keeps sinking into the long dive.
+      const sink = x < 0.45 ? 0 : hermite(0, 0, DEEP_Y - SURFACE_Y + 1.2 * DEPTH_SCALE, -DIVE_SINK, 0.55 * PHASE_LEN.dive, (x - 0.45) / 0.55);
+      out.y = SURFACE_Y - 1.2 * DEPTH_SCALE * smoothstep(0.08, 0.5, x) + sink;
+      out.pitch = SURFACE_PITCH * (1 - smoothstep(0, 0.15, x)) - 0.62 * lift * bump(x, 0.05, 0.4, 0.6, 0.97);
+      out.arch = REST_ARCH * (1 - smoothstep(0, 0.15, x)) + 0.8 * lift * bump(x, 0.04, 0.38, 0.55, 0.95);
+      // The flukes hang still while they are out of the water, then drive the body down.
+      out.stroke = lerp(0.6, 1, smoothstep(0.6, 1, x)) * (1 - 0.7 * bump(x, 0.2, 0.35, 0.55, 0.7));
+      out.rate = 1 - 0.4 * bump(x, 0.2, 0.35, 0.55, 0.75);
+      out.bob = 1 - smoothstep(0, 0.45, x);
+      out.flipLift = -0.15 * bump(x, 0, 0.3, 0.6, 1);
+      out.flipSweep = 0.25 * bump(x, 0.3, 0.6, 0.8, 1);
       break;
     }
     case 'deep': {
-      // Sound down from the dive, glide along at depth with a slow undulation, then climb back.
-      const down = bump(x, 0, 0.2, 0.8, 1);
-      out.y = lerp(DEEP_Y, DEEP_DIVE_Y, down) + 0.9 * Math.sin(Math.PI * 4 * x) * bump(x, 0.12, 0.3, 0.7, 0.88);
+      // Sound down from the dive, glide along at depth with a slow undulation, then climb back to the glide depth.
+      const down = smoothstep(0, 0.2, x);
+      const up = smoothstep(0.75, 1, x);
+      out.y = lerp(lerp(DEEP_Y, DEEP_DIVE_Y, down), SHALLOW_Y, up) + 0.9 * DEPTH_SCALE * Math.sin(Math.PI * 4 * x) * bump(x, 0.12, 0.3, 0.7, 0.88);
       out.pitch = -0.22 * bump(x, 0, 0.06, 0.12, 0.22) + 0.24 * bump(x, 0.78, 0.86, 0.92, 1) - 0.05 * Math.cos(Math.PI * 4 * x) * bump(x, 0.12, 0.3, 0.7, 0.88);
       const glide = bump(x, 0.18, 0.3, 0.7, 0.82);
       out.stroke = 1 - 0.3 * glide;
@@ -216,7 +253,7 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
 }
 
 /** Width of the blend into the floor limit, metres. */
-const FLOOR_SOFT = 1.5;
+const FLOOR_SOFT = 1.5 * DEPTH_SCALE;
 
 /**
  * Keeps the body origin at least FLOOR_CLEARANCE above the seafloor. A C1 soft

@@ -4,9 +4,9 @@ import type { QualityTier } from './quality.js';
 import { clamp, lerp } from './math.js';
 import { hash } from './rng.js';
 import { WATER_LEVEL, underwaterUniforms, waterSignal, type FloatingOrigin, type WaterSignal } from './seams.js';
-import { WATER_IOR, blendFog, radianceFor, surfaceLight, waterTint, type FogState } from './underwater-optics.js';
+import { WATER_IOR, blendFog, depthLight, radianceFor, seenLight, waterTint, type FogState } from './underwater-optics.js';
 import { createFloorPatch } from './underwater-floor.js';
-import { createSeafloor, type Seafloor } from './seafloor.js';
+import { createSeafloor, type DepthAt, type Seafloor } from './seafloor.js';
 import { createUnderwaterLife } from './underwater-life.js';
 import { createSwarms } from './underwater-swarm.js';
 import type { FeedSite } from './feed-sites.js';
@@ -32,6 +32,8 @@ export type UnderwaterOptions = {
   sky: SkyHandle;
   /** Ground height at world X/Z (negative under the sea). */
   heightAt: (x: number, z: number, lod?: number) => number;
+  /** Bathymetric depth for the seafloor; it must match the one main's own seafloor uses. */
+  depthAt?: DepthAt;
   origin: FloatingOrigin;
   tier: QualityTier;
   seed?: number;
@@ -49,10 +51,12 @@ export type UnderwaterHandle = {
   dispose: () => void;
 };
 
+// The seafloor patch reaches past the underwater visibility on every tier (about 175 m across), so a coast's
+// underwater flanks carry on into the haze instead of stopping where the patch ends.
 const TIER = {
-  low: { rays: 9, snow: 140, floorCells: 48, floorStep: 2.6, caustics: 1, budget: 500 },
-  medium: { rays: 13, snow: 260, floorCells: 64, floorStep: 2.2, caustics: 2, budget: 900 },
-  high: { rays: 16, snow: 380, floorCells: 72, floorStep: 2, caustics: 2, budget: 1400 },
+  low: { rays: 9, snow: 140, floorCells: 64, floorStep: 2.8, caustics: 1, budget: 500 },
+  medium: { rays: 13, snow: 260, floorCells: 80, floorStep: 2.2, caustics: 2, budget: 900 },
+  high: { rays: 16, snow: 380, floorCells: 96, floorStep: 1.8, caustics: 2, budget: 1400 },
 } as const;
 
 export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRenderer, options: UnderwaterOptions): UnderwaterHandle {
@@ -76,6 +80,13 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     { light: sky.ambient, base: sky.lightBase.ambient },
   ];
   const lightTint = new THREE.Color().setHex(0x7fd0dc, THREE.SRGBColorSpace);
+  /** The colour the light keeps at depth, normalised so its brightest channel is 1. */
+  const depthTint = new THREE.Color();
+  const tinted = new THREE.Color();
+  /** Adapted brightness: eases toward seenLight over a few seconds, as eyes adjust. */
+  let adapted = 1;
+  /** Seconds for the eye to adapt most of the way. */
+  const ADAPT_SECONDS = 4;
 
   // three applies scene fog after tone mapping, so `scene.fog.color` is a display colour (as the
   // sky sets it); these shaders fog before tone mapping and take the matching radiance instead.
@@ -336,7 +347,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
 
   /* -------------------------------------------------------------- seafloor */
 
-  const seafloor = createSeafloor(seed, { heightAt: options.heightAt });
+  const seafloor = createSeafloor(seed, { heightAt: options.heightAt }, options.depthAt);
   const floor = createFloorPatch({
     heightAt: seafloor.heightAt,
     cells: tier.floorCells,
@@ -500,10 +511,15 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       writtenColor.copy(fog.color);
     }
 
-    const light = lerp(1, surfaceLight(Math.max(0, depth)) * 0.9, s);
+    // Light fails with depth, red first and blue last; the eye adapts over a few seconds and never quite loses the whale.
+    adapted += (seenLight(depth) - adapted) * (1 - Math.exp(-Math.max(0, dt) / ADAPT_SECONDS));
+    depthLight(depth, depthTint);
+    depthTint.multiplyScalar(1 / Math.max(depthTint.r, depthTint.g, depthTint.b));
+    const light = lerp(1, adapted * 0.9, s);
+    const deepen = s * smoothstep01(depth / 40);
     for (const l of lights) {
       l.light.intensity = l.base.intensity * light;
-      l.light.color.copy(l.base.color).lerp(lightTint, s * 0.55);
+      l.light.color.copy(l.base.color).lerp(lightTint, s * 0.55).lerp(tinted.copy(l.base.color).multiply(depthTint), deepen);
     }
 
     // Exponential-fog equivalent of the FogExp2 visibility, for shaders that fade linearly.
@@ -522,7 +538,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     shared.uPattern.value.set(mod(origin.x, PATTERN_PERIOD), mod(origin.z, PATTERN_PERIOD));
     shared.uFogColor.value.copy(fogRadiance);
     shared.uFogDensity.value = blended.density;
-    shared.uLight.value = surfaceLight(Math.max(0, depth)) * daylight;
+    shared.uLight.value = adapted * daylight;
     refractSun();
 
     surface.visible = below0;
@@ -550,7 +566,6 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       u['uWaterAlpha']!.value = below0 ? 0 : 0.82;
       u['uAirAlpha']!.value = below0 ? 0.55 : 0;
     }
-    void dt;
     return signal;
   }
 

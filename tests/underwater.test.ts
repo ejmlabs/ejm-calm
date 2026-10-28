@@ -2,7 +2,21 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { SURFACE_BAND, waterSignal } from '../src/seams.js';
-import { WATER_IOR, WATER_LOOK, acesFilmic, airAngle, blendFog, criticalAngle, radianceFor, surfaceLight, waterTint, type FogState } from '../src/underwater-optics.js';
+import {
+  VISIBLE_LIGHT,
+  WATER_IOR,
+  WATER_LOOK,
+  acesFilmic,
+  airAngle,
+  blendFog,
+  criticalAngle,
+  depthLight,
+  radianceFor,
+  seenLight,
+  surfaceLight,
+  waterTint,
+  type FogState,
+} from '../src/underwater-optics.js';
 import { floorCentre, visualFloor } from '../src/underwater-floor.js';
 
 test('water signal is 0 above the band, 1 below, and smooth and monotonic across it', () => {
@@ -66,7 +80,7 @@ test("Snell's window: critical angle ≈ 48.6° for sea water; light passes insi
   assert.ok(edge !== null && edge > (85 * Math.PI) / 180);
 });
 
-test('underwater tint darkens with depth and visibility stays in the 40–70 m range', () => {
+test('underwater tint darkens with depth and visibility stays in the 55–90 m range of clear open ocean', () => {
   const a: FogState = { color: new THREE.Color(), density: 0 };
   const b: FogState = { color: new THREE.Color(), density: 0 };
   waterTint(0, 1, a);
@@ -75,7 +89,7 @@ test('underwater tint darkens with depth and visibility stays in the 40–70 m r
   assert.ok(b.density >= a.density);
   for (const f of [a, b]) {
     const visibility = Math.sqrt(-Math.log(0.05)) / f.density;
-    assert.ok(visibility > 40 && visibility < 70, `${visibility}`);
+    assert.ok(visibility > 55 && visibility < 90, `${visibility}`);
     assert.ok(f.color.b > f.color.r, 'blue-green, not red');
   }
   assert.ok(surfaceLight(0) === 1 && surfaceLight(10) < surfaceLight(5));
@@ -123,4 +137,18 @@ test('view fog weight: none well above, full well below, never decreasing on the
   }
   assert.equal(fogMix(-1, 0), 0);
   assert.equal(fogMix(1, 1), 1);
+});
+
+test('light fails with depth, red first and blue last, and the deep stays dim but visible', () => {
+  const c = depthLight(30, new THREE.Color());
+  assert.ok(c.r < 0.001 && c.g < c.b && c.b > 0.4, `30 m: ${c.r} ${c.g} ${c.b}`);
+  assert.equal(seenLight(0), 1);
+  let prev = 1;
+  for (let d = 5; d <= 300; d += 5) {
+    assert.ok(seenLight(d) <= prev + 1e-12, `brighter at ${d} m`);
+    prev = seenLight(d);
+  }
+  assert.ok(seenLight(60) < 0.5, 'dim by 60 m');
+  assert.equal(seenLight(200), VISIBLE_LIGHT);
+  assert.equal(seenLight(300), VISIBLE_LIGHT);
 });

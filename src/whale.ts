@@ -5,13 +5,21 @@ import { makeNoise2D } from './noise.js';
 import type { Shore } from './shore.js';
 import type { QualityTier } from './quality.js';
 import { createWhaleMover, type WhaleBehavior } from './whale-behavior.js';
+import { WHALE_MAX_TURN_RATE } from './whale-course.js';
 import {
   FLIPPER_DROOP,
   FLIPPER_L,
   FLIPPER_R,
   FLIPPER_SWEEP,
+  FLIPPER_TIP_L,
+  FLIPPER_TIP_R,
   FLUKE_BONE,
+  FLUKE_FLEX,
   ROOT_BONE,
+  BLOWHOLE_U,
+  BLOWHOLE_X,
+  BODY_LENGTH,
+  HEAD_X,
   WHALE_LOD,
   buildWhaleGeometry,
   createWhaleBones,
@@ -29,7 +37,8 @@ import {
   type WhalePhase,
   type WhalePose,
 } from './whale-motion.js';
-import { BLOWHOLE_U, BLOWHOLE_X, createWhaleSkin } from './whale-skin.js';
+import { createWhaleSkin } from './whale-skin.js';
+import { DEPTH_SCALE, LENGTH_SCALE, WHALE_LENGTH } from './whale-size.js';
 
 export type { WhalePhase } from './whale-motion.js';
 export type { WhaleBehavior } from './whale-behavior.js';
@@ -58,6 +67,8 @@ export type WhaleHandle = {
   forcePhase: (phase: WhalePhase, at?: number) => void;
   /** Review only: put the whale at world (x, z). */
   place: (x: number, z: number) => void;
+  /** Factor on the travel speed (see PACES). */
+  setPace: (pace: number) => void;
   /** World-space size of the posed body (skinned), for debug stats. */
   measure: () => THREE.Vector3;
   /** Detail level currently drawn by the LOD. */
@@ -75,10 +86,26 @@ export type WhaleOptions = {
   floorAt?: (x: number, z: number) => number;
 };
 
-/** Base stroke frequency (Hz): slow, heavy beats for a 12 m animal. */
-const STROKE_HZ = 0.3;
+/** Base stroke frequency (Hz): slow, heavy beats, slower the bigger the animal (about 0.2 Hz for a blue whale). */
+const STROKE_HZ = 0.3 / Math.sqrt(LENGTH_SCALE);
+/** The blow: a tall, slender column, up to about 9 m for a blue whale. */
+const BLOW_HEIGHT = 9 * (WHALE_LENGTH / 25);
+/** Splash launch speeds scale with the square root of size, so spray heights scale with it. */
+const SPLASH_SPEED = Math.sqrt(LENGTH_SCALE);
+/** Spine bend (radians per bone) at the sharpest turn, and its share on each tail bone B1..B5. */
+const TURN_BEND = 0.09;
+const TURN_TAIL = [0.5, 0.8, 1, 0.9, 0.6];
+/** Fluke blade flex: amplitude (radians) and its lag behind the stroke. */
+const FLUKE_FLEX_AMP = 0.16;
+const FLUKE_LAG = 4.2;
+/** Flipper tips lag their own sweep by this much of the stroke. */
+const FLIPPER_LAG = 0.9;
+/** Flipper trunk bone, tip bone and side. */
+const FLIPPERS = [[FLIPPER_L, FLIPPER_TIP_L, 1], [FLIPPER_R, FLIPPER_TIP_R, -1]] as const;
 /** Forced review breach starts just after the exit so the shot lands near the apex. */
 const FORCED_BREACH_T = 0.26;
+/** Milliseconds the last skin took to generate (debug stats). */
+export let skinMs = 0;
 
 function softCircleTexture(): THREE.CanvasTexture {
   const size = 64;
@@ -215,15 +242,50 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   const body = new THREE.Group();
   group.add(body);
 
-  const skin = createWhaleSkin(seed, tier === 'high' ? 1024 : 512);
-  const material = new THREE.MeshStandardMaterial({
+  // A 25 m body needs a fine atlas up close: about a centimetre per texel on the high tier. A quick small atlas
+  // goes on first; the full one is generated once the sea is on screen and swapped in, so it does not hold up the
+  // first frame.
+  const fullSkin = tier === 'high' ? 2048 : tier === 'medium' ? 1024 : 512;
+  let skin = createWhaleSkin(seed, Math.min(512, fullSkin));
+  let disposed = false;
+  if (fullSkin > 512) {
+    const upgrade = () => {
+      if (disposed) return;
+      const start = performance.now();
+      const fine = createWhaleSkin(seed, fullSkin);
+      skinMs = performance.now() - start;
+      material.map = fine.map;
+      material.normalMap = fine.normalMap;
+      material.needsUpdate = true;
+      skin.dispose();
+      skin = fine;
+    };
+    const idle = (globalThis as { requestIdleCallback?: (fn: () => void, options?: { timeout: number }) => void }).requestIdleCallback;
+    if (idle) idle(upgrade, { timeout: 4000 });
+    else setTimeout(upgrade, 1500);
+  }
+  // Wet skin: a thin clear coat carries the sky's sheen over the dark back, and a soft sheen
+  // lifts the silhouette at grazing angles so the body still reads at dusk and at night.
+  // Phones keep the cheaper standard material.
+  const surface = {
     map: skin.map,
     normalMap: skin.normalMap,
     normalScale: new THREE.Vector2(0.9, 0.9),
     roughness: 0.42,
     metalness: 0,
     envMapIntensity: 0.6,
-  });
+  };
+  const material =
+    tier === 'low'
+      ? new THREE.MeshStandardMaterial(surface)
+      : new THREE.MeshPhysicalMaterial({
+          ...surface,
+          clearcoat: 0.35,
+          clearcoatRoughness: 0.32,
+          sheen: 0.35,
+          sheenRoughness: 0.6,
+          sheenColor: new THREE.Color(0x7d93a4),
+        });
 
   const bones = createWhaleBones();
   body.add(bones[ROOT_BONE]!);
@@ -255,7 +317,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   spoutGroup.visible = false;
   spoutGroup.layers.set(MIST_LAYER);
   const spoutSprites: THREE.Sprite[] = [];
-  const SPOUT_N = 10;
+  const SPOUT_N = 16;
   for (let i = 0; i < SPOUT_N; i++) {
     const mat = new THREE.SpriteMaterial({
       map: mistTex,
@@ -343,9 +405,9 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       sprite,
       kind,
       angle: (j / n) * Math.PI * 2 + (r(1) - 0.5) * (kind === 'crown' ? 0.4 : 0.8),
-      out: kind === 'crown' ? 0.55 + r(2) * 0.8 : kind === 'drop' ? 2 + r(2) * 3.5 : 0.5 + r(2),
-      up: kind === 'crown' ? 6.5 + r(3) * 5.5 : kind === 'drop' ? 6 + r(3) * 4 : 1.5 + r(3),
-      size: kind === 'crown' ? 1.3 + r(4) * 1.4 : kind === 'drop' ? 0.45 + r(4) * 0.5 : 1.8 + r(4) * 0.6,
+      out: kind === 'crown' ? 0.55 + r(2) * 0.8 : (kind === 'drop' ? 2 + r(2) * 3.5 : 0.5 + r(2)) * LENGTH_SCALE,
+      up: (kind === 'crown' ? 6.5 + r(3) * 5.5 : kind === 'drop' ? 6 + r(3) * 4 : 1.5 + r(3)) * SPLASH_SPEED,
+      size: (kind === 'crown' ? 1.3 + r(4) * 1.4 : kind === 'drop' ? 0.45 + r(4) * 0.5 : 1.8 + r(4) * 0.6) * LENGTH_SCALE,
     });
   }
   group.add(spray);
@@ -361,12 +423,13 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     const sprite = new THREE.Sprite(mat);
     sheet.add(sprite);
     const side = i % 2 === 0 ? 1 : -1;
-    const x = -4 + r(1) * 5;
-    const prof = sampleProfile(clamp((x + 6) / 10.6, 0, 1));
-    sheetSprites.push({ sprite, x, y: prof.mid + (r(2) - 0.3) * 0.8, z: side * prof.width * 1.02, speed: 3 + r(3) * 3 });
+    const u = 0.19 + r(1) * 0.47;
+    const x = HEAD_X + u * BODY_LENGTH;
+    const prof = sampleProfile(u);
+    sheetSprites.push({ sprite, x, y: prof.mid + (r(2) - 0.3) * 0.8 * DEPTH_SCALE, z: side * prof.width * 1.02, speed: (3 + r(3) * 3) * LENGTH_SCALE });
   }
   body.add(sheet);
-  const splashFx = { age: Infinity, power: 0, x: 0, z: 0, radius: 2, exit: false, sheetAge: Infinity };
+  const splashFx = { age: Infinity, power: 0, x: 0, z: 0, radius: 2 * LENGTH_SCALE, exit: false, sheetAge: Infinity };
 
   const mover = createWhaleMover(seed, home, startHeading, options.floorAt, options.journey);
   const motion = mover.motion;
@@ -387,6 +450,8 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
 
   let strokePhase = (hash(seed, 0x57) / 0x100000000) * Math.PI * 2;
   let lastBreachT = -1;
+  /** True once the blow has left the whale and hangs where it was breathed. */
+  let spoutHeld = false;
   const angles = spineAngles(0, 0, 0);
   const tmpQ = new THREE.Quaternion();
   const tmpV = new THREE.Vector3();
@@ -404,24 +469,32 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     whaleOrientation(state.heading, state.pitch, state.roll, body.quaternion);
 
     spineAngles(strokePhase, p.stroke, p.arch, angles);
+    // Into a turn the body curves along its length: head and tail both toward the inside.
+    const turn = clamp(motion.turn / WHALE_MAX_TURN_RATE, -1, 1);
     // Spine order in SPINE: H2, H1, B0, B1..B5.
-    bones[1]!.rotation.set(0, 0, angles.head[0]!);
-    bones[0]!.rotation.set(0, 0, angles.head[1]!);
-    for (let i = 0; i < 5; i++) bones[3 + i]!.rotation.set(0, 0, angles.tail[i]!);
+    bones[1]!.rotation.set(0, TURN_BEND * 0.8 * turn, angles.head[0]!);
+    bones[0]!.rotation.set(0, TURN_BEND * 0.6 * turn, angles.head[1]!);
+    for (let i = 0; i < 5; i++) bones[3 + i]!.rotation.set(0, -TURN_BEND * TURN_TAIL[i]! * turn, angles.tail[i]!);
     // Flukes trail the stroke and tip up through the dive.
     bones[FLUKE_BONE]!.rotation.z += p.arch * 0.1;
+    // The blades flex after the peduncle turns, so each stroke ends with the tips following through.
+    bones[FLUKE_FLEX]!.rotation.set(0, 0, FLUKE_FLEX_AMP * p.stroke * Math.sin(strokePhase - FLUKE_LAG));
 
-    // Flippers sweep with the stroke and spread wide in the air.
+    // Flippers scull with the stroke and spread wide in the air; into a turn the inside one
+    // drops and reaches forward and the outside one lifts, steering with them.
     const sweep = Math.sin(strokePhase + 1.1) * p.stroke;
-    for (const [index, side] of [[FLIPPER_L, 1], [FLIPPER_R, -1]] as const) {
+    for (const [index, tip, side] of FLIPPERS) {
+      const inside = turn * side;
       flipperQuaternion(
         side,
-        FLIPPER_DROOP + p.flipLift + 0.1 * sweep,
-        FLIPPER_SWEEP + p.flipSweep + 0.07 * Math.sin(strokePhase + 0.4) * p.stroke,
+        FLIPPER_DROOP + p.flipLift + 0.1 * sweep + 0.18 * inside,
+        FLIPPER_SWEEP + p.flipSweep + 0.07 * Math.sin(strokePhase + 0.4) * p.stroke - 0.12 * inside,
         0.12 * sweep,
         tmpQ,
       );
       bones[index]!.quaternion.copy(tmpQ);
+      // The outer half bends behind the inner half's sweep.
+      bones[tip]!.rotation.set(side * 0.14 * Math.sin(strokePhase + 1.1 - FLIPPER_LAG) * p.stroke, 0, 0);
     }
   }
 
@@ -445,6 +518,9 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       mover.place(x, z);
       state.x = x;
       state.z = z;
+    },
+    setPace(pace: number) {
+      mover.pace = pace;
     },
     forcePhase(phase: WhalePhase, at?: number) {
       const preset = phase === 'breach' ? FORCED_BREACH_T : phase === 'spout' ? 0.5 : phase === 'surface' ? 0.45 : phase === 'deep' ? 0.3 : 0;
@@ -488,6 +564,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     },
     dispose() {
       for (const level of levels) level.mesh.geometry.dispose();
+      disposed = true;
       material.dispose();
       skin.dispose();
       skeleton.dispose();
@@ -509,31 +586,38 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   function startSplash(power: number, atNose: boolean): void {
     body.updateMatrixWorld(true);
     // Exit: where the rising body cuts the surface. Re-entry: under the body's centre.
-    const local = atNose ? tmpV.set(-1.2, 0, 0) : tmpV.set(-2.2, 0, 0);
+    const local = tmpV.set((atNose ? -1.2 : -2.2) * LENGTH_SCALE, 0, 0);
     local.applyMatrix4(body.matrixWorld);
     splashFx.age = 0;
     splashFx.power = power;
     splashFx.x = local.x;
     splashFx.z = local.z;
-    splashFx.radius = atNose ? 1.3 : 2.4;
+    splashFx.radius = (atNose ? 1.3 : 2.4) * LENGTH_SCALE;
     splashFx.exit = atNose;
     if (atNose) splashFx.sheetAge = 0;
   }
 
   function updateSpout(): void {
-    // Thin mist column rising from the blowholes; vertical in world space.
-    // ~1 m wide at the base, a bushy ~3.4 m crown and ~5.4 m tall. Peak opacity ≤ 0.5.
+    // Tall, slender mist column blown from the blowholes; vertical in world space: about 1 m wide at the base
+    // with a narrow crown, BLOW_HEIGHT tall. Peak opacity ≤ 0.55.
     const t = state.phase === 'spout' ? state.phaseT : 0;
     state.spout = state.phase === 'spout' ? Math.sin(t * Math.PI) : 0;
-    const rising = t < 0.62;
-    const rise = clamp(t / 0.62, 0, 1);
-    // Hold the full plume ~0.45 s after it tops out before it disperses.
-    const fade = rising ? clamp(rise * 2.5, 0, 1) : clamp(1 - (t - 0.75) / 0.25, 0, 1);
+    const rising = t < 0.45;
+    const rise = clamp(t / 0.45, 0, 1);
+    // The plume hangs in the air after it tops out and thins slowly while the whale glides on.
+    const fade = rising ? clamp(rise * 2.5, 0, 1) : clamp(1 - (t - 0.6) / 0.4, 0, 1);
     spoutGroup.visible = fade > 0.02;
-    if (!spoutGroup.visible) return;
-    tmpV.copy(blowhole).applyMatrix4(body.matrixWorld);
-    spoutGroup.position.set(tmpV.x, Math.max(0.05, tmpV.y), tmpV.z);
-    const columnH = lerp(0.4, 5.4, rise);
+    if (!spoutGroup.visible) {
+      spoutHeld = false;
+      return;
+    }
+    // The blow leaves the whale once it is out: it stays where it was breathed, the whale swims on.
+    if (rising || !spoutHeld) {
+      tmpV.copy(blowhole).applyMatrix4(body.matrixWorld);
+      spoutGroup.position.set(tmpV.x, Math.max(0.05, tmpV.y), tmpV.z);
+    }
+    spoutHeld = !rising;
+    const columnH = lerp(0.4, BLOW_HEIGHT, rise);
     for (let i = 0; i < spoutSprites.length; i++) {
       const sprite = spoutSprites[i]!;
       const mat = sprite.material as THREE.SpriteMaterial;
@@ -541,10 +625,10 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       const jx = hash(seed, i, 1, 'spout') / 0x100000000 - 0.5;
       const jz = hash(seed, i, 2, 'spout') / 0x100000000 - 0.5;
       // Narrow stem, then a crown that spreads as it rises.
-      const spread = (0.15 + u * u * 1.6) * (rising ? 0.45 : 0.8 + (1 - fade));
+      const spread = (0.15 + u * u * 1.4) * (rising ? 0.45 : 0.8 + (1 - fade));
       sprite.position.set(jx * spread, u * columnH, jz * spread);
-      sprite.scale.set(lerp(0.85, 3.4, u * u), lerp(1.5, 2.6, u), 1);
-      mat.opacity = fade * lerp(0.5, 0.3, u);
+      sprite.scale.set(lerp(0.9, 3.2, u * u), lerp(1.5, 2.6, u) * (BLOW_HEIGHT / 5.4), 1);
+      mat.opacity = fade * lerp(0.55, 0.32, u) * (rising ? 1 : lerp(1, 0.6, u * (1 - fade)));
     }
   }
 
@@ -572,7 +656,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       for (const s of sheetSprites) {
         const mat = s.sprite.material as THREE.SpriteMaterial;
         s.sprite.position.set(s.x + s.speed * a, s.y, s.z);
-        s.sprite.scale.set(0.5, 1.6 + a * 1.5, 1);
+        s.sprite.scale.set(0.5 * LENGTH_SCALE, (1.6 + a * 1.5) * LENGTH_SCALE, 1);
         mat.opacity = 0.85 * (1 - smoothstep(0.3, 1.1, a));
       }
     }
@@ -596,7 +680,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
           mat.opacity = 0;
           continue;
         }
-        const ring = splashFx.radius * s.out + age * (exit ? 0.8 : 2.2);
+        const ring = splashFx.radius * s.out + age * (exit ? 0.8 : 2.2) * LENGTH_SCALE;
         s.sprite.position.set(Math.cos(s.angle) * ring, 0.02, Math.sin(s.angle) * ring);
         s.sprite.scale.set(s.size * (exit ? 0.8 : 1) * (1 + age * 0.4), top, 1);
         // Sheets thin out as they slump; the crown is gone within ~1.8 s.
@@ -609,7 +693,7 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       }
       // Drops are flung off the crown rim and fall in an arc; mist hangs low and small.
       const reach = splashFx.radius + s.out * lift * (1 - Math.exp(-age * 1.5));
-      const size = Math.min(s.size * (1 + age * (s.kind === 'mist' ? 0.4 : 0.2)), 2.4);
+      const size = Math.min(s.size * (1 + age * (s.kind === 'mist' ? 0.4 : 0.2)), 2.4 * LENGTH_SCALE);
       const base = size * 0.6 + 0.05;
       s.sprite.position.set(Math.cos(s.angle) * reach, Math.max(base, top + base), Math.sin(s.angle) * reach);
       s.sprite.scale.set(size, size, 1);
@@ -621,14 +705,14 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
 
   function updateWash(pose: WhalePose): void {
     // Only while the body rides at the surface; fades through dives and breaches.
-    const w = pose.bob * clamp(1 - Math.abs(pose.y - SURFACE_Y) / 0.6, 0, 1);
+    const w = pose.bob * clamp(1 - Math.abs(pose.y - SURFACE_Y) / (0.6 * DEPTH_SCALE), 0, 1);
     washPivot.visible = w > 0.02;
     if (!washPivot.visible) return;
     // Sized so the foam band sits on the waterline footprint (rostrum to fin).
-    tmpV.set(-2.2, 0, 0).applyMatrix4(body.matrixWorld);
+    tmpV.set(-2.2 * LENGTH_SCALE, 0, 0).applyMatrix4(body.matrixWorld);
     washPivot.position.set(tmpV.x, 0.05, tmpV.z);
     washPivot.rotation.y = state.heading;
-    wash.scale.set(4.7, 1.05, 1);
+    wash.scale.set(4.7 * LENGTH_SCALE, 1.05 * DEPTH_SCALE, 1);
     washMat.opacity = 0.28 * w;
   }
 

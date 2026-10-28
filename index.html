@@ -28,7 +28,7 @@
       id="space"
       tabindex="0"
       role="img"
-      aria-label="A calm ocean scene with a whale, ships and islands. Drag to look around."
+      aria-label="A calm ocean scene with a whale, ships and islands. Drag to turn around the whale, scroll or pinch to zoom; arrow keys, plus and minus also work, and 0 resets the view."
     ></canvas>
 
     <div id="veil">
@@ -51,10 +51,10 @@
         A quiet ocean generated on your device from one number, the seed. The same seed opens the same
         sea for anyone: whale, ships, islands, light and weather.
       </p>
-      <p>Sit and watch. Drag to look around; the view eases back on its own.</p>
+      <p>Sit and watch, or turn the view around the whale; reset view goes back to following it.</p>
       <p class="keys">
-        <span class="mouse">Drag looks around. Share copies a link. New seed opens another sea.</span>
-        <span class="touch">Drag looks around. Share copies a link. New seed opens another sea.</span>
+        <span class="mouse">Drag turns around the whale, scroll zooms. Share copies a link. New seed opens another sea.</span>
+        <span class="touch">Drag turns around the whale, pinch zooms. Share copies a link. New seed opens another sea.</span>
       </p>
       <p>
         Nothing is collected: no accounts, no tracking, no analytics, and nothing is sent anywhere.
@@ -63,6 +63,15 @@
       <p class="setting">
         <label><input id="routeToggle" type="checkbox" /> Show the region and distance travelled when the sea changes</label>
       </p>
+      <p class="setting">
+        <label><input id="diveToggle" type="checkbox" checked /> Follow the whale down on its dives</label>
+      </p>
+      <fieldset id="pace" class="setting">
+        <legend>Whale speed</legend>
+        <label><input type="radio" name="pace" value="slow" /> slow</label>
+        <label><input type="radio" name="pace" value="normal" checked /> normal</label>
+        <label><input type="radio" name="pace" value="fast" /> fast</label>
+      </fieldset>
       <p class="fine">
         Made by ejmlabs, an open source lab. MIT license.
         <a id="sourceLink" href="https://github.com/ejmlabs/ejm-calm" rel="noopener noreferrer" target="_blank">Source</a>
@@ -71,6 +80,7 @@
     </aside>
 
     <div id="hud" role="toolbar" aria-label="Scene controls" inert>
+      <button id="resetBtn" type="button" class="text" title="Follow the whale again" hidden>reset view</button>
       <button id="seedBtn" type="button" class="text" title="Open another seeded sea">new seed</button>
       <button id="shareBtn" type="button" class="text" title="Copy a link to this sea">share</button>
       <button id="soundBtn" type="button" class="icon" aria-pressed="false" aria-label="Sound" title="Sound off">

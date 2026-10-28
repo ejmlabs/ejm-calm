@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { clamp, smoothstep } from './math.js';
 import { SURFACE_BAND, WATER_LEVEL, type FollowTarget } from './seams.js';
 import { createSpring, nearestAngle, springSet, springStep, springStepAngle, type Spring } from './spring.js';
+import { DEPTH_SCALE, LENGTH_SCALE, WHALE_LENGTH } from './whale-size.js';
 
 /** Persisted framing. `yaw` is always 0: the chase camera is locked to the whale's heading. */
 export type CameraFraming = { yaw: number; pitch: number; distance: number };
@@ -30,21 +31,24 @@ export const PULL_BACK = 0.25;
 export const LEAN_MAX = 0.05;
 const LEAN_GAIN = 0.5;
 
-export const DEFAULT_FRAMING: CameraFraming = { yaw: 0, pitch: 0.3, distance: 16 };
-export const FRAMING_DISTANCE: readonly [number, number] = [14, 40];
+// Distances and heights here follow the whale's size (see whale-size.ts).
+export const DEFAULT_FRAMING: CameraFraming = { yaw: 0, pitch: 0.3, distance: 16 * LENGTH_SCALE };
+export const FRAMING_DISTANCE: readonly [number, number] = [14 * LENGTH_SCALE, 40 * LENGTH_SCALE];
 const FRAMING_PITCH: readonly [number, number] = [0.1, 0.4];
 
 /** The eye never rests closer than this to the waterline. */
 export const EYE_CLEARANCE = SURFACE_BAND + 0.15;
 /** Hysteresis on the whale's depth for following it under (and back up). */
-export const DIVE_BELOW = -3;
-export const RISE_ABOVE = -2;
-/** Seconds below DIVE_BELOW before the camera follows, so short shallow dips do not flip it. */
-export const DIVE_DWELL = 0.35;
-const UNDER_EYE = 1.5;
+export const DIVE_BELOW = -3 * DEPTH_SCALE;
+export const RISE_ABOVE = -2 * DEPTH_SCALE;
+/** Seconds below DIVE_BELOW before the camera follows, so short dips (the run-up to a breach, its re-entry) do not flip it. */
+export const DIVE_DWELL = 3.5;
+const UNDER_EYE = 1.5 * DEPTH_SCALE;
 const UNDER_DISTANCE = 0.7;
 /** Under water the haze is thick: never trail further than this. */
-const UNDER_MAX_DISTANCE = 18;
+export const UNDER_MAX_DISTANCE = 18 * LENGTH_SCALE;
+/** Under water the orbit may also look up at the whale from below, down to this pitch (radians). */
+export const UNDER_ORBIT_PITCH = -0.9;
 /** Distance and look-ahead grow with speed up to this many m/s. */
 const SPEED_CAP = 28;
 const SPEED_DISTANCE = PULL_BACK / SPEED_CAP;
@@ -55,17 +59,17 @@ const SPEED_LOOK_AHEAD = 0.6;
 /** Below about this speed the camera holds its bearing instead of following the heading. */
 const COUPLING_SPEED: readonly [number, number] = [0.6, 3];
 /** Never closer to the whale's body than this. */
-export const MIN_DISTANCE = 6;
+export const MIN_DISTANCE = 6 * LENGTH_SCALE;
 /** Half the whale's length: the framed points are the centre and ± this along the heading. */
-export const WHALE_HALF = 6;
+export const WHALE_HALF = WHALE_LENGTH / 2;
 /** Framing safe area in NDC: corrections start at SOFT, HARD is never exceeded. */
 const SAFE_SOFT = 0.7;
 export const SAFE_HARD = 0.88;
 const SIGHT_CLEARANCE = 0.5;
-const SHOULDER = 2;
-const LOOK_AHEAD = 7;
+const SHOULDER = 2 * LENGTH_SCALE;
+const LOOK_AHEAD = 7 * LENGTH_SCALE;
 const LAND_CLEARANCE = 2;
-const FLOOR_CLEARANCE = 1.5;
+const FLOOR_CLEARANCE = 2;
 
 const PEEK_YAW = 0.6;
 const PEEK_PITCH: readonly [number, number] = [-0.1, 0.3];
@@ -81,6 +85,7 @@ const W_FRAMING = 1.6;
 const W_PEEK = 9;
 const W_PEEK_RETURN = 1.1;
 const W_REVIEW = 1.4;
+const W_ORBIT = 3;
 const W_SPEED = 1.2;
 const W_AIM = 2.5;
 const W_FIT = 1.5;
@@ -102,6 +107,8 @@ export class FollowCamera {
   private readonly target: FollowTarget = { x: 0, y: 0, z: 0, heading: 0 };
   private review: ReviewView | null = null;
   private lastReview: ReviewView = { yaw: 0, pitch: 0, distance: 20 };
+  private orbit: ReviewView | null = null;
+  private lastOrbit: ReviewView = { yaw: 0, pitch: 0, distance: 20 };
   private under = false;
   private crossing = false;
   private snapping = true;
@@ -109,6 +116,7 @@ export class FollowCamera {
   private peekYawTarget = 0;
   private peekPitchTarget = 0;
   private below = 0;
+  private stayUp = false;
 
   private readonly heading = createSpring();
   private readonly px = createSpring();
@@ -120,6 +128,7 @@ export class FollowCamera {
   private readonly peekYaw = createSpring();
   private readonly peekPitch = createSpring();
   private readonly reviewBlend = createSpring();
+  private readonly orbitBlend = createSpring();
   /** Smoothed whale height; its velocity is the vertical speed. */
   private readonly py = createSpring();
   private readonly speed = createSpring();
@@ -192,6 +201,29 @@ export class FollowCamera {
     this.framing.distance = clamp(this.framing.distance * Math.exp(delta * 0.001), FRAMING_DISTANCE[0], FRAMING_DISTANCE[1]);
   }
 
+  /** The eye right now as an orbit view: yaw from behind the smoothed heading, pitch above the whale, distance. */
+  get view(): ReviewView {
+    const p = this.camera.position;
+    const t = this.target;
+    const dx = p.x - t.x;
+    const dy = p.y - t.y;
+    const dz = p.z - t.z;
+    const flat = Math.hypot(dx, dz);
+    const yaw = Math.atan2(dx, dz) - this.heading.x - Math.PI / 2;
+    return { yaw: Math.atan2(Math.sin(yaw), Math.cos(yaw)), pitch: Math.atan2(dy, flat), distance: Math.hypot(flat, dy) };
+  }
+
+  /** Keep the eye above the water through the whale's dives (the viewer's choice, or reduced motion). */
+  setStayAtSurface(on: boolean): void {
+    this.stayUp = on;
+  }
+
+  /** User orbit around the whale, relative to its heading and looking at it; null blends back to the chase. */
+  setOrbit(view: ReviewView | null): void {
+    this.orbit = view ? { ...view } : null;
+    if (view) this.lastOrbit = this.orbit!;
+  }
+
   /** Debug framing; null returns to the chase with a smooth blend. */
   setReview(view: ReviewView | null): void {
     this.review = view ? { ...view } : null;
@@ -243,13 +275,13 @@ export class FollowCamera {
 
     // Follow the whale under after a short dwell; come back up as soon as it rises.
     if (this.under) {
-      if (t.y > RISE_ABOVE) {
+      if (t.y > RISE_ABOVE || this.stayUp) {
         this.under = false;
         this.crossing = true;
       }
     } else {
       this.below = t.y < DIVE_BELOW ? this.below + step : 0;
-      if (t.y < DIVE_BELOW && (snap || this.below >= DIVE_DWELL)) {
+      if (!this.stayUp && t.y < DIVE_BELOW && (snap || this.below >= DIVE_DWELL)) {
         this.under = true;
         this.crossing = true;
       }
@@ -320,6 +352,26 @@ export class FollowCamera {
     let lookZ = sz + fz * ahead;
     let lookAtY = lookY;
 
+    // The user's orbit blends in and out over about a second, keeping the eye on the following side of the waterline.
+    const o = clamp(go(this.orbitBlend, this.orbit ? 1 : 0, W_ORBIT), 0, 1);
+    const os = o * o * (3 - 2 * o);
+    if (o > 1e-4) {
+      const s = os;
+      const v = this.lastOrbit;
+      const a = h + Math.PI / 2 + v.yaw;
+      const flat = Math.cos(v.pitch) * v.distance;
+      const ox = t.x + Math.sin(a) * flat;
+      const oz = t.z + Math.cos(a) * flat;
+      const floor = this.groundAt ? this.groundAt(ox, oz) + (this.under ? FLOOR_CLEARANCE : LAND_CLEARANCE) : -Infinity;
+      const oy = this.bandClamp(Math.max(t.y + Math.sin(v.pitch) * v.distance, floor));
+      eyeX += (ox - eyeX) * s;
+      eyeY += (oy - eyeY) * s;
+      eyeZ += (oz - eyeZ) * s;
+      lookX += (t.x - lookX) * s;
+      lookZ += (t.z - lookZ) * s;
+      lookAtY += (t.y - lookAtY) * s;
+    }
+
     // Review framing blends in and out over ~2 s (or snaps for screenshots).
     const b = clamp(go(this.reviewBlend, this.review ? 1 : 0, W_REVIEW), 0, 1);
     if (b > 1e-4) {
@@ -389,10 +441,11 @@ export class FollowCamera {
     }
 
     // Too wide even when looking straight at it: back off smoothly, and at once past SAFE_HARD.
+    // The user's own zoom may fill the frame, so the orbit view eases this off.
     let full = this.framingError(eyeX, eyeY, eyeZ, t.x, t.y, t.z);
     go(this.fit, Math.max(1, this.fit.x * (full / SAFE_SOFT)), W_FIT);
-    for (let i = 0; i < 3 && full > SAFE_HARD; i++) {
-      const k = (full / SAFE_HARD) * 1.02;
+    for (let i = 0; i < 3 && full > SAFE_HARD && os < 1; i++) {
+      const k = 1 + ((full / SAFE_HARD) * 1.02 - 1) * (1 - os);
       eyeX = t.x + (eyeX - t.x) * k;
       eyeZ = t.z + (eyeZ - t.z) * k;
       full = this.framingError(eyeX, eyeY, eyeZ, t.x, t.y, t.z);
@@ -410,8 +463,8 @@ export class FollowCamera {
     this.camera.position.set(eyeX, eyeY, eyeZ);
     this.camera.lookAt(this.lookAt);
 
-    // Speed feels like a wider view and a lean into the turn; neither under water, in the review view, or with reduced motion.
-    const feel = reducedMotion || this.under || b > 1e-4 ? 0 : smoothstep(6, SPEED_CAP, speed);
+    // Speed feels like a wider view and a lean into the turn; neither under water, in the orbit or review view, or with reduced motion.
+    const feel = reducedMotion || this.under || b > 1e-4 || o > 1e-4 ? 0 : smoothstep(6, SPEED_CAP, speed);
     const lift = go(this.fovLift, FOV_LIFT * feel, W_FEEL);
     const lean = go(this.lean, clamp(this.heading.v * LEAN_GAIN, -LEAN_MAX, LEAN_MAX) * feel, W_FEEL);
     const fov = FOV[this.portrait ? 1 : 0] + lift;

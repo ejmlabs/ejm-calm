@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp } from './math.js';
+import { clamp, lerp } from './math.js';
 
 /**
  * Pure optics and colour helpers for the underwater view: Snell's window, fog
@@ -44,15 +44,37 @@ export function surfaceLight(depth: number): number {
   return Math.exp(-0.055 * Math.max(0, depth));
 }
 
+/**
+ * Light left at `depth` metres by colour, in clear open ocean: red is gone by about 15 m, green fades by around 50 m
+ * and blue reaches a couple of hundred metres (diffuse attenuation of about 0.3, 0.06 and 0.022 per metre).
+ */
+export function depthLight(depth: number, out: THREE.Color): THREE.Color {
+  const d = Math.max(0, depth);
+  return out.setRGB(Math.exp(-0.3 * d), Math.exp(-0.06 * d), Math.exp(-0.022 * d));
+}
+
+/** Eyes adapt to the dark down to a quarter of the light, and the deep never drops below VISIBLE_LIGHT of the surface's. */
+export const ADAPT_GAIN = 4;
+export const VISIBLE_LIGHT = 0.08;
+const scratch = new THREE.Color();
+
+/** Brightness the adapted eye sees at `depth`, 1 at the surface: dim but never black, so the whale stays in view. */
+export function seenLight(depth: number): number {
+  depthLight(depth, scratch);
+  const luminance = 0.2126 * scratch.r + 0.7152 * scratch.g + 0.0722 * scratch.b;
+  return clamp(luminance * ADAPT_GAIN, VISIBLE_LIGHT, 1);
+}
+
 /** Underwater look keyed by daylight: shallow and deep display colours (sRGB hex) and fog densities. */
 export type WaterLook = { shallow: number; deep: number; density: number; deepDensity: number };
 
 export const WATER_LOOK: WaterLook = {
   shallow: 0x2f8590,
   deep: 0x0c3a4a,
-  // FogExp2: visibility (95 %) is ~1.73 / density, so about 55 m near the top and 45 m deep.
-  density: 0.031,
-  deepDensity: 0.038,
+  // FogExp2: visibility (95 %) is ~1.73 / density: clear open-ocean water, about 80 m near the top and 65 m
+  // deep, so a 25 m whale stays in view from the trailing camera.
+  density: 0.021,
+  deepDensity: 0.026,
 };
 
 const shallowColor = new THREE.Color();
@@ -66,7 +88,8 @@ export function waterTint(depth: number, daylight: number, out: FogState, look: 
   const k = 1 - Math.exp(-Math.max(0, depth) / 10);
   shallowColor.setHex(look.shallow, THREE.SRGBColorSpace);
   deepColor.setHex(look.deep, THREE.SRGBColorSpace);
-  out.color.copy(shallowColor).lerp(deepColor, k).multiplyScalar(clamp(daylight, 0.2, 1));
+  // The water itself darkens toward a deep navy as the light fails with depth.
+  out.color.copy(shallowColor).lerp(deepColor, k).multiplyScalar(clamp(daylight, 0.2, 1) * lerp(0.35, 1, seenLight(depth)));
   out.density = look.density + (look.deepDensity - look.density) * k;
   return out;
 }

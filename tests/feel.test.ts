@@ -308,7 +308,7 @@ test('a landmark stands only in open water: sea all round it out to a kilometre'
 test('an unknown weather state is ignored', () => {
   const w = createWeather(1);
   w.set('overcast');
-  w.set('fog' as never);
+  w.set('hail' as never);
   w.update(1, 1, [1, 0, 0, 0]);
   assert.ok(Number.isFinite(w.look.coverage) && w.target() === 'overcast');
 });

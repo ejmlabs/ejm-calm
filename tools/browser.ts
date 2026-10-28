@@ -20,15 +20,20 @@ export const MOBILE: DeviceProfile = {
   userAgent: 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
 };
 
+/** Headless system Chrome with software WebGL. */
+export function launchBrowser(): Promise<Browser> {
+  const executablePath = process.env.BROWSER_PATH || '/usr/bin/google-chrome';
+  const args = ['--disable-dev-shm-usage', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
+  // Opt in with BROWSER_NO_SANDBOX=1. Default keeps the sandbox on.
+  if (process.env.BROWSER_NO_SANDBOX === '1') args.unshift('--no-sandbox');
+  return chromium.launch({ executablePath, headless: true, args });
+}
+
 export async function withBrowser<T>(run: (browser: Browser, url: string) => Promise<T>): Promise<T> {
   const app = await startServer({ port: 0 });
   let browser: Browser | undefined;
   try {
-    const executablePath = process.env.BROWSER_PATH || '/usr/bin/google-chrome';
-    const args = ['--disable-dev-shm-usage', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
-    // Opt in with BROWSER_NO_SANDBOX=1. Default keeps the sandbox on.
-    if (process.env.BROWSER_NO_SANDBOX === '1') args.unshift('--no-sandbox');
-    browser = await chromium.launch({ executablePath, headless: true, args });
+    browser = await launchBrowser();
     return await run(browser, app.url);
   } finally {
     await browser?.close();

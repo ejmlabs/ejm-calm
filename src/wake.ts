@@ -17,6 +17,10 @@ export type WakeOptions = {
   spread?: number;
   /** Wake strength follows speed over this range (m/s). */
   speeds?: readonly [number, number];
+  /** Body heights (m): no wake below the first, full wake above the second. */
+  depths?: readonly [number, number];
+  /** Height of the sea at world (x, z); the foam lies on it. Flat water when not given. */
+  surface?: (x: number, z: number) => number;
 };
 
 export type Wake = {
@@ -33,7 +37,7 @@ export type Wake = {
 };
 
 const COLOR = new THREE.Color(0xeaf3f6);
-/** Foam rides just above the flat water plane. */
+/** Foam rides just above the water. */
 const LIFT = 0.04;
 /** Seconds of age at which the trail has faded out. */
 const LIFE = 4.5;
@@ -44,8 +48,8 @@ const ACROSS_ALPHA = [0, 0.4, 1, 0.4, 0] as const;
 const COLUMNS = ACROSS.length;
 
 /** Strength of the wake of a body: none when slow or under water, full when fast and at the surface. */
-export function wakeStrength(speed: number, y: number, speeds: readonly [number, number] = [3, 14]): number {
-  return smoothstep(speeds[0], speeds[1], speed) * smoothstep(-2.6, -0.9, y);
+export function wakeStrength(speed: number, y: number, speeds: readonly [number, number] = [3, 14], depths: readonly [number, number] = [-2.6, -0.9]): number {
+  return smoothstep(speeds[0], speeds[1], speed) * smoothstep(depths[0], depths[1], y);
 }
 
 /**
@@ -60,6 +64,8 @@ export function createWake(options: WakeOptions = {}): Wake {
   const width = options.width ?? 0.8;
   const spread = options.spread ?? 0.45;
   const speeds = options.speeds ?? [3, 14];
+  const depths = options.depths ?? [-2.6, -0.9];
+  const surface = options.surface ?? (() => 0);
 
   // Trail points, newest first in ring order: world x, z, heading, strength, age.
   const px = new Float64Array(count);
@@ -147,7 +153,7 @@ export function createWake(options: WakeOptions = {}): Wake {
         const o = (written * COLUMNS + c) * 3;
         const side = ACROSS[c]! * half;
         trailPositions[o] = cx - fz * side;
-        trailPositions[o + 1] = 0;
+        trailPositions[o + 1] = surface(source.x + trailPositions[o]!, source.z + cz + fx * side);
         trailPositions[o + 2] = cz + fx * side;
         const q = (written * COLUMNS + c) * 4;
         trailColors[q] = 1;
@@ -181,8 +187,8 @@ export function createWake(options: WakeOptions = {}): Wake {
           const w = out + side * (edge === 0 ? -thick : thick) * 0.5;
           // Right of the heading is (−fz, fx).
           bowBase[o + edge * 3] = fx * bow - fx * back + -fz * w;
-          bowBase[o + edge * 3 + 1] = 0;
           bowBase[o + edge * 3 + 2] = fz * bow - fz * back + fx * w;
+          bowBase[o + edge * 3 + 1] = surface(source.x + bowBase[o + edge * 3]!, source.z + bowBase[o + edge * 3 + 2]!);
         }
         const a = PEAK * 1.3 * s * (1 - u) ** 1.2;
         const c = (arm * ARM + i) * 8;
@@ -200,7 +206,7 @@ export function createWake(options: WakeOptions = {}): Wake {
   return {
     group,
     update(source, dt) {
-      strength = wakeStrength(source.speed, source.y, speeds);
+      strength = wakeStrength(source.speed, source.y, speeds, depths);
       // Everything drawn is an offset from here, trail and bow wave alike.
       mesh.position.set(source.x, LIFT, source.z);
       const fx = -Math.cos(source.heading);

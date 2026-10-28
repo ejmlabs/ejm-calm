@@ -4,9 +4,13 @@ import * as THREE from 'three';
 import {
   BONE_COUNT,
   FLIPPER_LENGTH,
+  HEAD_X,
+  TAIL_X,
+  spineY,
   FLUKE_BONE,
   FLUKE_HALF_SPAN,
   ROOT_BONE,
+  SPLASHGUARD_U,
   WHALE_DETAIL,
   WHALE_LENGTH,
   WHALE_LOD,
@@ -64,34 +68,84 @@ test('whale geometry is finite, closed-ish and skinned at every detail level', (
     const box = new THREE.Box3().setFromBufferAttribute(pos as THREE.BufferAttribute);
     const size = box.getSize(new THREE.Vector3());
     assert.ok(Math.abs(size.x - WHALE_LENGTH) < 0.3, `${detail} length ${size.x}`);
-    // Flippers and flukes are the widest parts, as on a humpback.
-    assert.ok(size.z > FLUKE_HALF_SPAN * 2 && size.z < 8, `${detail} span ${size.z}`);
+    // The flukes are the widest part; a blue whale's flippers are short.
+    assert.ok(size.z >= FLUKE_HALF_SPAN * 2 - 1e-6 && size.z < 0.32 * WHALE_LENGTH, `${detail} span ${size.z}`);
   }
   assert.ok(WHALE_DETAIL.high.rings * WHALE_DETAIL.high.radial > 6000, 'close-ups keep a smooth silhouette');
 });
 
-test('whale proportions read as a humpback', () => {
+test('every body triangle faces outward, including the rostrum and tail caps', () => {
+  // The material culls back faces, so an inward triangle shows as a hole.
+  for (const detail of Object.keys(WHALE_DETAIL) as WhaleDetail[]) {
+    const { geometry, ranges } = buildWhaleGeometry(detail);
+    const pos = geometry.getAttribute('position');
+    const index = geometry.getIndex()!;
+    const [start, end] = ranges.body;
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const normal = new THREE.Vector3();
+    const centroid = new THREE.Vector3();
+    const inside = new THREE.Vector3();
+    let inward = 0;
+    let headInward = 0;
+    for (let i = 0; i < index.count; i += 3) {
+      const ia = index.getX(i);
+      if (ia < start || ia >= end) continue;
+      a.fromBufferAttribute(pos, ia);
+      b.fromBufferAttribute(pos, index.getX(i + 1));
+      c.fromBufferAttribute(pos, index.getX(i + 2));
+      normal.subVectors(b, a).cross(c.clone().sub(a));
+      if (normal.lengthSq() < 1e-14) continue;
+      centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+      const x = THREE.MathUtils.clamp(centroid.x, HEAD_X + 0.3, TAIL_X - 0.3);
+      inside.set(x, spineY(x), 0);
+      if (normal.dot(centroid.clone().sub(inside)) < 0) {
+        inward++;
+        if (centroid.x < HEAD_X + 0.05) headInward++;
+      }
+    }
+    assert.equal(headInward, 0, `${detail}: rostrum cap triangles face inward`);
+    assert.equal(inward, 0, `${detail}: ${inward} body triangles face inward`);
+    geometry.dispose();
+  }
+});
+
+test('whale proportions read as a blue whale', () => {
+  // Adult blue whales are 24 to 27 m.
+  assert.ok(WHALE_LENGTH >= 24 && WHALE_LENGTH <= 27);
   const { geometry, ranges } = buildWhaleGeometry('high');
   const pos = geometry.getAttribute('position');
-  // Long pectoral flippers: about a third of the body.
-  assert.ok(FLIPPER_LENGTH / WHALE_LENGTH > 0.28 && FLIPPER_LENGTH / WHALE_LENGTH < 0.38);
+  // Short, slender flippers: about an eighth of the length.
+  assert.ok(FLIPPER_LENGTH / WHALE_LENGTH > 0.1 && FLIPPER_LENGTH / WHALE_LENGTH < 0.15);
   const [f0, f1] = ranges.flipperL;
   let reach = 0;
   for (let i = f0; i < f1; i++) for (let j = f0; j < f1; j += 7) {
     reach = Math.max(reach, Math.hypot(pos.getX(i) - pos.getX(j), pos.getY(i) - pos.getY(j), pos.getZ(i) - pos.getZ(j)));
   }
-  assert.ok(reach > 3.6 && reach < 4.6, `flipper reach ${reach}`);
-  // Fluke has a central notch and pointed tips.
-  assert.ok(flukeStation(0).chord < flukeStation(0.15).chord - 0.3, 'notched trailing edge');
-  assert.ok(flukeStation(1).chord < 0.05, 'pointed fluke tips');
-  // Deep head and throat, compressed tail stock, small dorsal fin over a hump.
-  const head = sampleProfile(0.2);
+  assert.ok(reach > 0.1 * WHALE_LENGTH && reach < 0.15 * WHALE_LENGTH, `flipper reach ${reach}`);
+  // Broad flukes, a quarter of the length or so, with a small notch and pointed tips.
+  assert.ok(FLUKE_HALF_SPAN * 2 > 0.22 * WHALE_LENGTH && FLUKE_HALF_SPAN * 2 < 0.3 * WHALE_LENGTH);
+  assert.ok(flukeStation(0).chord < flukeStation(0.15).chord - 0.02 * WHALE_LENGTH, 'notched trailing edge');
+  assert.ok(flukeStation(1).chord < 0.003 * WHALE_LENGTH, 'pointed fluke tips');
+  // Slender body: about an eighth as deep as it is long.
+  let depth = 0;
+  for (let u = 0; u <= 1; u += 0.01) depth = Math.max(depth, sampleProfile(u).top - sampleProfile(u).bot);
+  assert.ok(depth / WHALE_LENGTH > 0.11 && depth / WHALE_LENGTH < 0.135, `body depth ${depth}`);
+  // Broad, flat head: wider than it is deep.
+  const head = sampleProfile(0.06);
+  assert.ok(head.width * 2 > head.top - head.bot, 'flat U-shaped head');
+  // A raised splashguard in front of the blowholes.
+  assert.ok(sampleProfile(SPLASHGUARD_U).guard > 0.004 * WHALE_LENGTH, 'splashguard');
+  // Laterally compressed tail stock.
   const stock = sampleProfile(0.85);
-  assert.ok(head.top - head.bot > 2, 'deep head');
   assert.ok(stock.width * 2 < (stock.top - stock.bot) * 0.9, 'laterally compressed tail stock');
-  assert.ok(stock.width > 0.3, 'tail stock keeps some body from below');
-  const fin = sampleProfile(0.664);
-  assert.ok(fin.fin > 0.2 && fin.fin < 0.45, 'small dorsal fin');
+  // A small dorsal fin about three quarters of the way back.
+  let fin = 0;
+  let finU = 0;
+  for (let u = 0.6; u <= 0.9; u += 0.002) if (sampleProfile(u).fin > fin) [fin, finU] = [sampleProfile(u).fin, u];
+  assert.ok(fin > 0.008 * WHALE_LENGTH && fin < 0.02 * WHALE_LENGTH, `small dorsal fin ${fin}`);
+  assert.ok(finU > 0.72 && finU < 0.82, `fin set far back (${finU})`);
 });
 
 test('whale geometry is deterministic and LOD tables are ordered', () => {
@@ -153,13 +207,14 @@ test('breach follows a ballistic arc with nose-up exit and a rolled re-entry', (
   assert.ok(whalePose('breach', (BREACH_EXIT + BREACH_LAND) / 2).flipLift < -0.8, 'flippers spread in the air');
 });
 
-test('dive lifts the flukes clear of the water', () => {
+/** Highest the fluke root rises over a phase (stroke left out: the arch and pitch do the lifting). */
+function flukePeak(phase: 'dive' | 'roll'): number {
   const holder = new THREE.Object3D();
   const bones = createWhaleBones();
   holder.add(bones[ROOT_BONE]!);
   let peak = -Infinity;
   for (let t = 0; t <= 1; t += 0.02) {
-    const pose = whalePose('dive', t);
+    const pose = whalePose(phase, t);
     holder.position.set(0, pose.y, 0);
     whaleOrientation(0.7, pose.pitch, 0, holder.quaternion);
     const angles = spineAngles(0, 0, pose.arch);
@@ -169,7 +224,12 @@ test('dive lifts the flukes clear of the water', () => {
     holder.updateMatrixWorld(true);
     peak = Math.max(peak, bones[FLUKE_BONE]!.getWorldPosition(new THREE.Vector3()).y);
   }
-  assert.ok(peak > 0.6, `fluke root rises above the surface (${peak})`);
+  return peak;
+}
+
+test('the fluke-up dive lifts the flukes clear of the water; a roll between blows keeps them under', () => {
+  assert.ok(flukePeak('dive') > 0.6, `fluke root rises above the surface (${flukePeak('dive')})`);
+  assert.ok(flukePeak('roll') < -0.25, `fluke root stays under in a roll (${flukePeak('roll')})`);
 });
 
 test('whale faces its direction of travel and the stroke wave runs head to tail', () => {

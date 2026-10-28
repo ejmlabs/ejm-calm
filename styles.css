@@ -331,6 +331,30 @@ button.icon:hover {
   margin: 0.2rem 0 0;
   accent-color: var(--focus);
 }
+#about fieldset.setting {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0 0 0.7rem;
+  padding: 0;
+  border: 0;
+  font-size: 0.88rem;
+}
+#about fieldset.setting legend {
+  float: left;
+  margin-right: 0.2rem;
+  padding: 0;
+}
+#about fieldset.setting label {
+  align-items: center;
+  gap: 0.35rem;
+}
+#about fieldset.setting input {
+  margin: 0;
+}
+#hud [hidden] {
+  display: none;
+}
 #about .keys {
   color: rgba(238, 244, 248, 0.72);
 }

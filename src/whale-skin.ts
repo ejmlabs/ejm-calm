@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { hash, random } from './rng.js';
 import { makeNoise2D } from './noise.js';
 import { clamp, lerp, smoothstep } from './math.js';
-import { ATLAS_BODY_V, BODY_LENGTH, HEAD_X, crossSection, sampleProfile, type Profile } from './whale-model.js';
+import { ATLAS_BODY_V, BLOWHOLE_U, BODY_LENGTH, SPLASHGUARD_U, WHALE_LENGTH, crossSection, sampleProfile, type Profile } from './whale-model.js';
 
 export type WhaleSkin = {
   map: THREE.CanvasTexture;
@@ -10,17 +10,25 @@ export type WhaleSkin = {
   dispose: () => void;
 };
 
-// sRGB 0–1. Humpbacks are near-black above and white or mottled beneath.
-const BACK = [0.2, 0.225, 0.255];
-const FLANK = [0.34, 0.37, 0.4];
-const BELLY = [0.78, 0.8, 0.8];
+// sRGB 0–1. Blue whales are blue-grey, mottled with paler grey all over, a little lighter beneath; a film of
+// diatoms tints the belly yellowish on some animals (hence "sulphur-bottom").
+const BACK = [0.25, 0.31, 0.38];
+const FLANK = [0.33, 0.4, 0.47];
+const BELLY = [0.47, 0.52, 0.57];
+const MOTTLE = [0.6, 0.66, 0.72];
+const DARK = [0.19, 0.24, 0.3];
+const DIATOM = [0.62, 0.58, 0.42];
+const SCAR = [0.68, 0.71, 0.73];
 const BARNACLE = [0.6, 0.59, 0.56];
 
 /**
- * Runtime-generated skin atlas: countershading, mottling, throat pleats, jaw
- * crease, eye, blowholes, knobs, barnacles and scars, plus a matching normal map.
+ * Runtime-generated skin atlas: blue-grey mottling, a paler belly with diatom film, 55 to 90 throat grooves
+ * to the navel, jaw crease, eye, blowholes and splashguard, and scars, plus a matching normal map.
  * Layout follows the UVs from whale-model: body on top, flippers and flukes below.
  */
+/** Grooves per radian around the throat: about 70 across its width. */
+const GROOVES_PER_RADIAN = 20.5;
+
 export function createWhaleSkin(seed: number, size: number): WhaleSkin {
   const W = size;
   const H = size;
@@ -34,6 +42,8 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
   const profiles: Profile[] = [];
   for (let px = 0; px < W; px++) profiles.push(sampleProfile(clamp((px + 0.5) / W, 0.004, 1)));
   const point = { y: 0, z: 0 };
+  // How much diatom film this animal carries: none on some, plenty on others.
+  const diatoms = rng() ** 1.5;
 
   // Surface noise on the 3D position, so the ventral seam does not show.
   const field = (x: number, y: number, z: number, f: number) => 0.5 * (n0(x * f, y * f + z * 0.5 * f) + n1(z * f + 19.1, x * f - y * 0.5 * f));
@@ -86,33 +96,39 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
       const mid = coarse(gMid, px, py);
       const fine = n0(x * 9 + z * 3, y * 9 - z * 2);
 
-      // Countershading: white throat and belly, dark tail stock underneath.
-      const boundary = lerp(-0.12, -0.48, smoothstep(0.3, 0.55, u)) - 1.1 * smoothstep(0.62, 0.82, u);
-      const belly = 1 - smoothstep(boundary - 0.24, boundary + 0.2, c + low * 0.28 + mid * 0.14);
+      // Weak countershading: a little lighter beneath, darkest along the back.
+      const below = 1 - smoothstep(-0.55, 0.15, c + low * 0.25);
       const sideTone = 1 - smoothstep(0.1, 0.9, c);
-      let r = lerp(BACK[0]!, FLANK[0]!, sideTone * 0.6);
-      let g = lerp(BACK[1]!, FLANK[1]!, sideTone * 0.6);
-      let b = lerp(BACK[2]!, FLANK[2]!, sideTone * 0.6);
-      // Speckled transition: pale flecks on dark, dark blotches on white.
-      const fleck = smoothstep(0.3, 0.44, coarse(gFleck, px, py)) * (1 - belly) * (1 - smoothstep(-0.2, 0.4, c));
-      // Small, irregular grey mottles that thicken toward the flanks; no hard black spots.
-      const blot = smoothstep(0.1, 0.42, coarse(gFleck, px, py) + mid * 0.5) * (0.25 + 0.3 * (1 - belly)) * belly * smoothstep(-0.98, -0.45, c);
-      const white = clamp(belly * (1 - blot) * (0.88 + 0.12 * low) + fleck * 0.45, 0, 1);
-      r = lerp(r, BELLY[0]!, white);
-      g = lerp(g, BELLY[1]!, white);
-      b = lerp(b, BELLY[2]!, white);
-      const mottle = 1 + 0.18 * low + 0.08 * mid + 0.04 * fine;
-      r *= mottle;
-      g *= mottle;
-      b *= mottle;
-      let h = 0.12 * fine + 0.25 * mid;
+      let r = lerp(lerp(BACK[0]!, FLANK[0]!, sideTone), BELLY[0]!, below);
+      let g = lerp(lerp(BACK[1]!, FLANK[1]!, sideTone), BELLY[1]!, below);
+      let b = lerp(lerp(BACK[2]!, FLANK[2]!, sideTone), BELLY[2]!, below);
+      // Mottling: irregular pale blotches and darker patches all over, thickest on the back and flanks behind
+      // the head, sparse on the head itself.
+      const body = smoothstep(0.12, 0.3, u) * (1 - 0.4 * smoothstep(0.85, 1, u));
+      // Blotches merge into larger, softer patches rather than spots.
+      const fleckField = 0.6 * coarse(gFleck, px, py) + 0.7 * mid + 0.2 * low;
+      const pale = smoothstep(0.12, 0.42, fleckField) * (0.5 + 0.5 * smoothstep(-0.2, 0.6, low)) * body;
+      const dark = smoothstep(0.22, 0.45, -fleckField - 0.2 * low) * 0.6 * body;
+      r = lerp(lerp(r, MOTTLE[0]!, pale * 0.55), DARK[0]!, dark * 0.8);
+      g = lerp(lerp(g, MOTTLE[1]!, pale * 0.55), DARK[1]!, dark * 0.8);
+      b = lerp(lerp(b, MOTTLE[2]!, pale * 0.55), DARK[2]!, dark * 0.8);
+      // Diatom film: soft yellowish patches on the belly.
+      const film = below * smoothstep(0.05, 0.45, low + 0.3 * mid) * diatoms;
+      r = lerp(r, DIATOM[0]!, film * 0.55);
+      g = lerp(g, DIATOM[1]!, film * 0.55);
+      b = lerp(b, DIATOM[2]!, film * 0.55);
+      const grain = 1 + 0.06 * low + 0.04 * mid + 0.03 * fine;
+      r *= grain;
+      g *= grain;
+      b *= grain;
+      let h = 0.12 * fine + 0.25 * mid + 0.15 * pale;
 
-      // Ventral pleats: grooves from chin to navel, converging forward.
-      const pleatFade = smoothstep(0.02, 0.08, u) * (1 - smoothstep(0.36, 0.44, u + 0.03 * low)) * (1 - smoothstep(-0.32, 0, c));
+      // Ventral grooves: 55 to 90 of them from the chin back to the navel, converging forward.
+      const pleatFade = smoothstep(0.02, 0.06, u) * (1 - smoothstep(0.46, 0.52, u + 0.03 * low)) * (1 - smoothstep(-0.3, 0.02, c));
       if (pleatFade > 0) {
         const ang = Math.atan2(z, -(y - p.mid));
-        const wave = ang * 8.5 + 0.06 * Math.sin(u * 28 + ang * 3) + 0.04 * mid;
-        const groove = (0.5 + 0.5 * Math.cos(wave * Math.PI * 2)) ** 7;
+        const wave = ang * GROOVES_PER_RADIAN + 0.06 * Math.sin(u * 40 + ang * 3) + 0.04 * mid;
+        const groove = (0.5 + 0.5 * Math.cos(wave * Math.PI * 2)) ** 6;
         h -= 1.6 * groove * pleatFade;
         const shade = 1 - 0.22 * groove * pleatFade;
         r *= shade;
@@ -123,7 +139,7 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
       // Mouth line: dark crease from rostrum back toward the eye.
       if (p.jaw > 0) {
         const d = y - p.jawY;
-        const line = Math.exp(-((d / 0.02) ** 2)) * p.jaw * smoothstep(0.25, 0.6, flank);
+        const line = Math.exp(-((d / (0.0017 * WHALE_LENGTH)) ** 2)) * p.jaw * smoothstep(0.25, 0.6, flank);
         h -= 2.2 * line;
         const shade = 1 - 0.65 * line;
         r *= shade;
@@ -151,40 +167,26 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
       let g: number;
       let b: number;
       let h: number;
-      if (U < 0.5) {
-        // Flippers: white beneath, dark-capped near the root on top.
-        const s = U / 0.5;
-        const nz = n0(s * 7, k * 3 + (top ? 0 : 9));
-        const fine = n1(s * 40, k * 14);
-        const dark = top ? 1 - smoothstep(0.12, 0.5, s + nz * 0.18) : 0.12 * smoothstep(0.4, 0.8, nz);
-        const tone = lerp(BELLY[0]!, BACK[0]! * 1.2, dark);
-        r = tone;
-        g = lerp(BELLY[1]!, BACK[1]! * 1.2, dark);
-        b = lerp(BELLY[2]!, BACK[2]! * 1.2, dark);
-        const mottle = 1 + 0.1 * nz + 0.04 * fine;
-        r *= mottle;
-        g *= mottle;
-        b *= mottle;
-        h = 0.2 * fine;
-      } else {
-        // Flukes: dark above; beneath, a seed-unique black-and-white pattern with a dark trailing margin.
-        const zf = (U - 0.5) / 0.25 - 1;
-        const nz = n1(Math.abs(zf) * 3.2 + 4, k * 2.2) * 0.7 + n0(zf * 7, k * 5) * 0.3;
-        const fine = n0(zf * 50, k * 16);
-        let white = 0;
-        if (!top) {
-          // Soft-edged blotches rather than hard cut-outs.
-          white = (0.15 + 0.7 * smoothstep(-0.35, 0.35, nz)) * (1 - smoothstep(0.7, 0.92, k)) * smoothstep(0.02, 0.14, k);
-        }
-        r = lerp(BACK[0]!, BELLY[0]!, white);
-        g = lerp(BACK[1]!, BELLY[1]!, white);
-        b = lerp(BACK[2]!, BELLY[2]!, white);
-        const mottle = 1 + 0.12 * nz + 0.04 * fine;
-        r *= mottle;
-        g *= mottle;
-        b *= mottle;
-        h = 0.2 * fine;
-      }
+      // Flippers and flukes: blue-grey like the body and a little paler beneath, mottled, with a pale edge
+      // here and there on the flippers.
+      const flipper = U < 0.5;
+      const sx = flipper ? U / 0.5 : Math.abs((U - 0.5) / 0.25 - 1);
+      const nz = n0(sx * 7 + (flipper ? 0 : 13), k * 3 + (top ? 0 : 9));
+      const fine = n1(sx * 40, k * 14);
+      const under = top ? 0 : 0.55;
+      r = lerp(FLANK[0]!, BELLY[0]!, under);
+      g = lerp(FLANK[1]!, BELLY[1]!, under);
+      b = lerp(FLANK[2]!, BELLY[2]!, under);
+      // Flukes stay a fairly even grey; flippers mottle more and sometimes pale toward the tip.
+      const pale = smoothstep(0.15, 0.45, nz) * (flipper ? 0.45 : 0.18) + (flipper ? 0.35 * smoothstep(0.75, 0.95, sx) * smoothstep(0.1, 0.4, nz + 0.3) : 0);
+      r = lerp(r, MOTTLE[0]!, pale);
+      g = lerp(g, MOTTLE[1]!, pale);
+      b = lerp(b, MOTTLE[2]!, pale);
+      const grain = 1 + 0.06 * nz + 0.04 * fine;
+      r *= grain;
+      g *= grain;
+      b *= grain;
+      h = 0.2 * fine;
       color[i * 3] = r;
       color[i * 3 + 1] = g;
       color[i * 3 + 2] = b;
@@ -236,60 +238,25 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
       height[i] = height[i]! + 1.6 * ring + 0.8 * core;
     });
 
-  // Head knobs (tubercles) along the rostrum and lower jaw.
-  for (let row = -2; row <= 2; row++) {
-    const fromTop = Math.abs(row) * 0.32;
-    const side = row < 0 ? -1 : 1;
-    for (let u = 0.02 + rng() * 0.01; u < 0.17; u += 0.016 + rng() * 0.008) {
-      const theta = thetaAt(side, fromTop + (rng() - 0.5) * 0.08);
-      stamp(u, theta, 0.05, 2.2, (dx, dy, i) => {
-        const d2 = dx * dx + dy * dy;
-        height[i] = height[i]! + 2.4 * Math.exp(-d2);
-        tint(i, [0.1, 0.11, 0.12], 0.25 * Math.exp(-d2));
-      });
-      if (rng() < 0.18) barnacle(u + (rng() - 0.5) * 0.004, theta, 0.022);
-    }
-  }
-  for (const side of [1, -1] as const) {
-    for (let u = 0.015 + rng() * 0.01; u < 0.16; u += 0.014 + rng() * 0.008) {
-      // Just below the mouth line on the lower jaw.
-      const p = sampleProfile(u);
-      let best = Math.PI * 0.5;
-      let bestD = Infinity;
-      for (let a = 0.6; a < 2.6; a += 0.02) {
-        crossSection(p, a, point);
-        const d = Math.abs(point.y - (p.jawY - 0.1));
-        if (d < bestD) {
-          bestD = d;
-          best = a;
-        }
-      }
-      const theta = thetaAt(side, best);
-      stamp(u, theta, 0.045, 2.2, (dx, dy, i) => {
-        height[i] = height[i]! + 2.2 * Math.exp(-(dx * dx + dy * dy));
-      });
-    }
-  }
-
-  // Barnacle clusters on the chin and jaw tip only.
-  for (let n = 0; n < 34; n++) barnacle(0.004 + rng() ** 1.6 * 0.07, Math.PI + (rng() - 0.5) * 2.6, 0.018 + rng() * 0.025);
-  for (let n = 0; n < 14; n++) barnacle(0.03 + rng() * 0.08, Math.PI + (rng() - 0.5) * 1.6, 0.016 + rng() * 0.02);
+  // Blue whales carry few barnacles: a handful on the chin, the flipper roots and the fluke edges.
+  for (let n = 0; n < 6; n++) barnacle(0.004 + rng() * 0.05, Math.PI + (rng() - 0.5) * 2.2, 0.012 + rng() * 0.015);
 
   // Eyes, just above the end of the mouth line.
   for (const side of [1, -1] as const) {
-    const u = 0.207;
+    // At the corner of the mouth.
+    const u = 0.228;
     const p = sampleProfile(u);
     let best = Math.PI * 0.5;
     let bestD = Infinity;
     for (let a = 0.6; a < 2.4; a += 0.01) {
       crossSection(p, a, point);
-      const d = Math.abs(point.y - (p.jawY + 0.13));
+      const d = Math.abs(point.y - (p.jawY + 0.009 * WHALE_LENGTH));
       if (d < bestD) {
         bestD = d;
         best = a;
       }
     }
-    stamp(u, thetaAt(side, best), 0.07, 2.6, (dx, dy, i) => {
+    stamp(u, thetaAt(side, best), 0.1, 2.6, (dx, dy, i) => {
       const d = Math.hypot(dx, dy * 1.3);
       tint(i, [0.03, 0.03, 0.035], clamp(1.6 - d * 1.6, 0, 1));
       tint(i, [0.4, 0.42, 0.44], Math.exp(-(((d - 1.35) / 0.3) ** 2)) * 0.35);
@@ -297,22 +264,37 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
     });
   }
 
-  // Paired blowhole slits with a raised splash guard in front.
+  // Paired blowhole slits behind the splashguard (the guard itself is in the geometry; this darkens its rim).
   {
-    const u = 0.188;
+    const u = BLOWHOLE_U;
     for (const side of [1, -1] as const) {
-      stamp(u, thetaAt(side, 0.06), 0.12, 1.4, (dx, dy, i) => {
+      stamp(u, thetaAt(side, 0.07), 0.2, 1.4, (dx, dy, i) => {
         const slit = Math.exp(-((dx / 1) ** 2) - (dy / 0.22) ** 2);
         tint(i, [0.03, 0.035, 0.04], slit * 0.9);
         height[i] = height[i]! - 4 * slit;
       });
     }
-    stamp(u - 0.018, Math.PI * 2, 0.2, 1.5, (dx, dy, i) => {
+    stamp(SPLASHGUARD_U, Math.PI * 2, 0.35, 1.5, (dx, dy, i) => {
       height[i] = height[i]! + 2.5 * Math.exp(-((dx / 0.45) ** 2) - (dy / 1) ** 2);
+      tint(i, DARK, 0.25 * Math.exp(-((dx / 0.45) ** 2) - (dy / 1) ** 2));
     });
   }
 
-  // Pale healed scars on the flanks.
+  // Oval scars from cookie-cutter shark bites, pale and healed, scattered over the flanks.
+  for (let n = 0; n < 14; n++) {
+    const u = 0.15 + rng() * 0.7;
+    const theta = Math.PI * 2 + (rng() < 0.5 ? -1 : 1) * (0.4 + rng() * 1.8);
+    const r = 0.025 + rng() * 0.03;
+    const healed = 0.35 + rng() * 0.4;
+    stamp(u, theta, r, 1.8, (dx, dy, i) => {
+      const d = Math.hypot(dx, dy * 1.4);
+      const a = clamp(1.3 - d, 0, 1) * healed;
+      tint(i, SCAR, a);
+      height[i] = height[i]! - 0.8 * a;
+    });
+  }
+
+  // Long healed scrapes on the flanks.
   for (let n = 0; n < 5; n++) {
     let u = 0.25 + rng() * 0.5;
     let theta = Math.PI * 2 + (rng() < 0.5 ? -1 : 1) * (0.5 + rng() * 1.2);
@@ -323,7 +305,7 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
     for (let sIdx = 0; sIdx < steps; sIdx++) {
       stamp(u, theta, 0.014, 1.8, (dx, dy, i) => {
         const a = Math.exp(-(dx * dx + dy * dy)) * strength;
-        tint(i, [0.62, 0.64, 0.64], a);
+        tint(i, SCAR, a * 0.8);
         height[i] = height[i]! - 0.6 * a;
       });
       u += du + 0.0015;
@@ -402,6 +384,3 @@ export function createWhaleSkin(seed: number, size: number): WhaleSkin {
   };
 }
 
-/** World x of the blowholes, for placing the spout. */
-export const BLOWHOLE_U = 0.188;
-export const BLOWHOLE_X = HEAD_X + BLOWHOLE_U * BODY_LENGTH;

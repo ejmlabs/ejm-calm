@@ -5,8 +5,9 @@ import { smoothstep } from './math.js';
 /**
  * Seafloor relief under the land field: the coast and the first metres of the
  * shelf are the land's own heights; deeper down the floor gains ridges, sandy
- * swales and rock outcrops. Open-ocean depths are eased toward ABYSS so the
- * floor stays within sight of a diving whale.
+ * swales and rock outcrops. The land's own depths are eased toward ABYSS; given
+ * a bathymetric depth (bathymetry.ts), the floor follows it wherever it is
+ * deeper, with low abyssal hills on the plain.
  */
 
 /** Relief starts below this much water... */
@@ -18,6 +19,10 @@ export const ABYSS = 32;
 export const SOFT_DEPTH = 16;
 /** Numeric salt: string salts all hash alike (see rng.ts). */
 const SALT = 0x5346;
+/** Abyssal hills: this tall either way, fading in from the foot of the slope. */
+const HILLS = 300;
+const HILLS_FROM = 2000;
+const HILLS_FULL = 3000;
 
 export type Seafloor = {
   /** Ground height at world X/Z (negative under water). */
@@ -31,18 +36,28 @@ export function softDepth(h: number): number {
   return -SOFT_DEPTH - span * (1 - Math.exp((h + SOFT_DEPTH) / span));
 }
 
-export function createSeafloor(seed: number, land: { heightAt: (x: number, z: number, lod?: number) => number }): Seafloor {
+/** Bathymetric depth (metres, ≥ 0, 0 on land) at world X/Z, e.g. seabedDepth over coast distances. */
+export type DepthAt = (x: number, z: number) => number;
+
+export function createSeafloor(
+  seed: number,
+  land: { heightAt: (x: number, z: number, lod?: number) => number },
+  depthAt?: DepthAt,
+): Seafloor {
   const s = hash(seed, SALT);
   const ridgeNoise = makeNoise2D(s, 1);
   const outcropNoise = makeNoise2D(s, 2);
   const swaleNoise = makeNoise2D(s, 3);
   const warpNoise = makeNoise2D(s, 4);
+  const hillNoise = makeNoise2D(s, 5);
 
   return {
     heightAt(x, z) {
       const base = land.heightAt(x, z);
-      const depth = -base;
-      if (!(depth > RELIEF_START)) return base;
+      const floor = depthAt && base < 0 ? Math.min(softDepth(base), -depthAt(x, z)) : softDepth(base);
+      // The land's depth is never shallower than its eased floor, so without a bathymetry this is -base.
+      const depth = Math.max(-base, -floor);
+      if (!(depth > RELIEF_START)) return floor;
       const w = smoothstep(RELIEF_START, RELIEF_FULL, depth);
       // Warped ridges run in long, uneven lines, like drowned dunes and reef spurs.
       const wx = x + 40 * warpNoise(x / 300, z / 300);
@@ -53,7 +68,8 @@ export function createSeafloor(seed: number, land: { heightAt: (x: number, z: nu
       const swale = fbm2(swaleNoise, x / 45, z / 45, 2) * 1.4;
       // Never shallower than RELIEF_START - 1, so relief cannot breach the shelf.
       const lift = Math.min((ridges + knoll + swale) * w, Math.max(0, depth - RELIEF_START) * 0.7);
-      return softDepth(base) + lift;
+      const hills = depth > HILLS_FROM ? fbm2(hillNoise, x / 5000, z / 5000, 3) * HILLS * smoothstep(HILLS_FROM, HILLS_FULL, depth) : 0;
+      return floor + lift + hills;
     },
   };
 }

@@ -19,9 +19,12 @@ import {
   muffle,
   nearestShips,
   oceanGain,
+  rainGain,
+  seaGain,
   surfGain,
   washGain,
   whaleEvents,
+  weatherWindGain,
   windGain,
   type Muffle,
   type ShipPoint,
@@ -46,6 +49,8 @@ export type AudioInput = {
   /** World coordinates. */
   shore: Shore;
   origin: FloatingOrigin;
+  /** The weather now: rain, wind and sea, each 0 to 1. */
+  weather: { rain: number; wind: number; sea: number };
 };
 
 const SOUNDS = {
@@ -130,6 +135,7 @@ class SoundEngine {
   private voices: Voice[] = [];
   private ocean!: THREE.Audio;
   private wind!: THREE.Audio;
+  private rain!: THREE.Audio;
   private surf!: THREE.PositionalAudio;
   private underwater!: THREE.Audio;
   private song!: THREE.Audio;
@@ -244,6 +250,11 @@ class SoundEngine {
   private build(b: Buffers): void {
     this.ocean = this.loop(this.flat(this.above), b.ocean);
     this.wind = this.loop(this.flat(this.above), b.wind);
+    this.rain = this.loop(this.flat(this.above), this.hiss());
+    const hiss = this.context.createBiquadFilter();
+    hiss.type = 'highpass';
+    hiss.frequency.value = 900;
+    this.rain.setFilter(hiss);
     this.surf = this.loop(this.positional(this.above), b.surf);
     this.underwater = this.loop(this.flat(this.below), b.underwater);
     this.song = this.loop(this.flat(this.below), b.song);
@@ -268,12 +279,26 @@ class SoundEngine {
     this.horn = this.positional(this.above);
     this.horn.setBuffer(b.horn);
     // Beds start at random points so every visit sounds a little different.
-    for (const bed of [this.ocean, this.wind, this.surf, this.underwater, this.song]) {
+    for (const bed of [this.ocean, this.wind, this.rain, this.surf, this.underwater, this.song]) {
       bed.offset = this.rng() * (bed.buffer?.duration ?? 0);
       bed.play();
       bed.offset = 0;
     }
     this.lastTime = this.context.currentTime;
+  }
+
+  /** Rain made here, not fetched: two seconds of noise, a little clumped so it patters. */
+  private hiss(): AudioBuffer {
+    const rate = this.context.sampleRate;
+    const buffer = this.context.createBuffer(1, rate * 2, rate);
+    const data = buffer.getChannelData(0);
+    let patter = 0;
+    for (let i = 0; i < data.length; i++) {
+      if (this.rng() < 0.002) patter = 1;
+      patter *= 0.995;
+      data[i] = (this.rng() * 2 - 1) * (0.55 + 0.45 * patter);
+    }
+    return buffer;
   }
 
   async wake(volume: number): Promise<void> {
@@ -420,8 +445,10 @@ class SoundEngine {
     }
     this.gust = damp(this.gust, this.gustTarget, 0.4, step);
     const height = Math.max(0, this.listenerPos.y);
-    setLevel(this.wind.gain.gain, windGain(height) * this.gust * 0.6, now, 0.6);
-    setLevel(this.ocean.gain.gain, oceanGain(this.clearance), now, 0.6);
+    const weather = input.weather;
+    setLevel(this.wind.gain.gain, windGain(height) * this.gust * 0.6 * weatherWindGain(weather.wind), now, 0.6);
+    setLevel(this.ocean.gain.gain, oceanGain(this.clearance) * seaGain(weather.sea), now, 0.6);
+    setLevel(this.rain.gain.gain, rainGain(weather.rain), now, 1.5);
 
     const surf = surfGain(this.clearance);
     setLevel(this.surf.gain.gain, surf * 0.9, now, 0.5);

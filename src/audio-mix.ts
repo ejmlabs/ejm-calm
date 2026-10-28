@@ -69,6 +69,21 @@ export function windGain(height: number): number {
   return 0.22 + 0.5 * smoothstep(1, 45, height);
 }
 
+/** Rain on the sea: nothing in a dry sky, full in a downpour. */
+export function rainGain(rain: number): number {
+  return 0.8 * smoothstep(0.02, 0.9, rain);
+}
+
+/** The wind bed swells with the weather's wind (0 still to 1 gale). */
+export function weatherWindGain(wind: number): number {
+  return 0.8 + 1.5 * clamp(wind, 0, 1);
+}
+
+/** The open-sea bed grows with the sea (0 glassy to 1 rough). */
+export function seaGain(sea: number): number {
+  return 1 + 0.8 * clamp(sea, 0, 1);
+}
+
 /** Open-sea bed: a little quieter right by a loud surf line. */
 export function oceanGain(clearance: number): number {
   return 0.7 - 0.25 * (1 - smoothstep(30, 300, Math.max(0, clearance)));

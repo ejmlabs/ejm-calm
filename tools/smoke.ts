@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import type { Page } from 'playwright-core';
 import { withBrowser, openCalm, DESKTOP, MOBILE } from './browser.js';
+import { detailFor } from '../src/quality.js';
+import { LENGTH_SCALE } from '../src/whale-size.js';
 
 type DrawWindow = Window & { __draws: number; __frameDraws: number[] };
 
@@ -112,6 +114,39 @@ await withBrowser(async (browser, base) => {
     }
   }
 
+  // Land detail: trees, rocks and houses within their triangles (25,000 on low, 40,000 on medium, 60,000 on high), people and
+  // animals within the tier's cap in at most two draws, on a close coast with a town; still under reduced motion.
+  for (const [device, reducedMotion] of [[DESKTOP, 'no-preference'], [MOBILE, 'no-preference'], [DESKTOP, 'reduce']] as const) {
+    const { page, context, errors } = await openCalm(browser, base, device, { query: { debug: '1' }, reducedMotion });
+    try {
+      type Life = { kind: string; x: number; y: number; z: number; vantage: number[] | null };
+      type Review = { life: (radius: number) => Life[]; view: (from: number[] | null, to?: number[]) => void; stats: () => Record<string, number | string> };
+      const review = (script: string) => page.evaluate(`window.__calmReview.${script}`);
+      const town = ((await review('life(8000)')) as Life[]).find((l) => l.kind === 'town' && l.vantage);
+      assert.ok(town, 'a town in sight of the water within 8 km of the start of seed 42');
+      await review(`view(${JSON.stringify(town.vantage)}, ${JSON.stringify([town.x, town.y + 3, town.z])})`);
+      await page.waitForFunction(() => (window as unknown as { __calmReview: Review }).__calmReview.stats()['chunksPending'] === 0, undefined, { timeout: 60000 });
+      await page.waitForTimeout(1500);
+      const s = (await review('stats()')) as Record<string, number | string>;
+      const tier = s['tier'] as 'low' | 'medium' | 'high';
+      const triangles = { low: 25000, medium: 40000, high: 60000 }[tier];
+      const walkers = detailFor(tier).walkers;
+      assert.ok((s['landObjects'] as number) > 0, 'trees, rocks and houses on the land');
+      assert.ok((s['objectTriangles'] as number) <= triangles, `${device.name} ${tier}: ${s['objectTriangles']} object triangles (limit ${triangles})`);
+      assert.ok((s['walkers'] as number) > 0 && (s['walkers'] as number) <= walkers, `${device.name} ${tier}: ${s['walkers']} walkers (cap ${walkers})`);
+      assert.ok((s['walkerDraws'] as number) <= 2, `${s['walkerDraws']} walker draws`);
+      if (reducedMotion === 'reduce') {
+        await page.waitForTimeout(800);
+        assert.equal(((await review('stats()')) as Record<string, number>)['walkerClock'], s['walkerClock'], 'people and animals stand still under reduced motion');
+      }
+      await review('view(null)');
+      assert.deepEqual(errors, []);
+      console.log(`land (${device.name}, ${tier}, motion ${reducedMotion}): ${s['landTriangles']} land triangles, ${s['landObjects']} objects, ${s['objectTriangles']} object triangles, ${s['walkers']} walkers in ${s['walkerDraws']} draws`);
+    } finally {
+      await context.close();
+    }
+  }
+
   // The journey's feel: the wake, stars, ship foam and lanterns stay inside their draws (4 on low, 8 on high), the day moves, and the route
   // indicator is off until asked for, answers its switch, is gone six seconds later and keeps its setting.
   for (const device of [DESKTOP, MOBILE]) {
@@ -198,6 +233,41 @@ await withBrowser(async (browser, base) => {
       assert.ok(stats['recentres']! - before['recentres']! <= 5, `${stats['recentres']! - before['recentres']!} recentres in 300 s`);
       assert.deepEqual(errors, []);
       console.log(`throughput: ${Math.round(stats['path']! - before['path']!)} m swum in 300 s (${run.steps} world steps in ${Math.round(run.ms / 1000)} s), ${gaps} coverage gaps, ${navMisses} nav misses, stream step p99 ${run.p99.toFixed(2)} ms, worst ${run.worst.toFixed(1)} ms, ${(100 * run.over).toFixed(1)} percent over 3 ms, ${stats['recentres']! - before['recentres']!} recentres, ${stats['navTiles']} nav tiles, ${stats['chunks']} land tiles`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // View and speed controls: a drag orbits and shows reset, the wheel zooms without scrolling the page, reset follows again,
+  // and the speed choice is saved.
+  {
+    const { page, context, errors } = await openCalm(browser, base, DESKTOP, { query: { debug: '1' } });
+    try {
+      type Review = { stats: () => Record<string, number | number[]> };
+      const stats = () => page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.stats());
+      await page.waitForTimeout(1500);
+      assert.equal(await page.locator('#resetBtn').isVisible(), false, 'no reset until the view is moved');
+      const box = (await page.locator('#space').boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 300, box.y + box.height / 2, { steps: 10 });
+      await page.mouse.up();
+      assert.equal(await page.locator('#resetBtn').isVisible(), true, 'a drag shows reset view');
+      for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 400);
+      await page.waitForTimeout(2500);
+      const far = (await stats())['dist'] as number;
+      // The farthest orbit (ORBIT_DISTANCE in view-controls) is 60 m at the 12 m whale it was tuned on.
+      const farthest = 60 * LENGTH_SCALE;
+      assert.ok(far > farthest * 0.75 && far < farthest * 1.04, `zoomed out to ${far} m`);
+      assert.equal(await page.evaluate(() => window.scrollY), 0, 'the page does not scroll');
+      await page.locator('#resetBtn').click();
+      assert.equal(await page.locator('#resetBtn').isVisible(), false, 'reset hides itself');
+      await page.locator('#aboutBtn').click();
+      await page.locator('#pace input[value="fast"]').check();
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ejm-calm:v1')!).pace), 'fast', 'the speed is saved');
+      await page.locator('#pace input[value="normal"]').check();
+      assert.deepEqual(errors, []);
+      console.log(`controls: orbit, zoom to ${Math.round(far)} m, reset and speed choice work`);
     } finally {
       await context.close();
     }

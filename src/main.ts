@@ -1,28 +1,35 @@
 import * as THREE from 'three';
 import { resolveSeed, seedURL, nextSeed } from './seed.js';
-import { createQuality, updateQuality } from './quality.js';
+import { createQuality, detailFor, updateQuality } from './quality.js';
 import { layoutWorld } from './terrain.js';
 import { createSky, HAZE_ANGLES } from './sky.js';
-import { createWhale } from './whale.js';
+import { createWhale, skinMs, type WhalePhase } from './whale.js';
+import { PHASE_LEN } from './whale-motion.js';
 import { createWorld } from './world.js';
 import { createBirds } from './birds.js';
 import { FOV, FollowCamera } from './camera.js';
-import { clamp } from './math.js';
+import { clamp, smoothstep } from './math.js';
+import { DEPTH_SCALE, LENGTH_SCALE } from './whale-size.js';
 import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
-import { createUnderwater } from './underwater.js';
+import { createUnderwater, UNDERWATER_LAYER } from './underwater.js';
+import { createFishShowcase } from './fish-mesh.js';
 import { feedSitesNear } from './feed-sites.js';
 import { createSeafloor } from './seafloor.js';
 import { createRegionLook } from './region-look.js';
 import { REGION_LOOKS } from './regions.js';
-import { swellRate } from './swell.js';
+import { setSea, swellAt, swellRate } from './swell.js';
 import { TRAVEL_MAX } from './whale-behavior.js';
 import { createWeather, type WeatherState } from './weather.js';
 import { createRoute } from './route.js';
 import { createWake } from './wake.js';
 import { createShipFx } from './ship-fx.js';
 import { createMoverSync, createObstacles } from './obstacles.js';
+import { createWeatherFx } from './weather-fx.js';
+import { createLandLife, HERD_CELL, TOWN_CELL } from './land-life.js';
+import { PACES, type Pace } from './pace.js';
+import { createViewControls } from './view-controls.js';
 
 type CalmReview = {
   time: number;
@@ -43,14 +50,27 @@ type CalmReview = {
   setShipsVisible: (visible: boolean) => void;
   /** Start the long deep dive now (whale holds position while forced). */
   forceDeepDive: (at?: number) => void;
+  /** Play any phase of the whale from normalised time `at` (whale holds position while forced). */
+  forceWhale: (phase: WhalePhase, at?: number) => void;
   /** Debug camera `depth` metres under the surface (negative is above), looking at the whale; null releases it. */
   peekUnderwater: (depth: number | null, site?: boolean) => void;
   /** Where in the day (0 is the preset the seed began in, 1 a full day on), and the weather to hold. */
   setDay: (day: number) => void;
   setWeather: (state: WeatherState) => void;
+  /** Hold the sea at a level, 0 glassy to 1 rough, or null to let the weather drive it. */
+  setSea: (level: number | null) => void;
   setRoute: (on: boolean) => void;
   /** Puts the whale in open water near world (x, z) and loads the sea around it. */
   jumpTo: (x: number, z: number) => void;
+  /**
+   * Towns and herds within `radius` of the whale, nearest first: where, ground height, how many, and a vantage on
+   * open water with a clear sightline to them (null when there is none within 400 m).
+   */
+  life: (radius: number) => Array<{ kind: 'town' | 'herd'; x: number; y: number; z: number; count: number; vantage: [number, number, number] | null }>;
+  /** The highest land between `near` and `far` metres from the whale (world coordinates). */
+  peak: (near: number, far: number) => { x: number; y: number; z: number };
+  /** Review camera at world `from` looking at `to`, the whale and the land streamed around it; null returns to the chase. */
+  view: (from: [number, number, number] | null, to?: [number, number, number]) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
 };
 
@@ -100,6 +120,8 @@ try {
 
 const memory = loadMemory(storage);
 let routeOn = memory?.route ?? false;
+let followDives = memory?.dives ?? true;
+let pace: Pace = memory?.pace ?? 'normal';
 const indicator = createRoute(REGION_LOOKS.map((look) => look.name));
 const resolved = resolveSeed(location.search, memory?.seed, () => {
   const word = new Uint32Array(1);
@@ -136,6 +158,20 @@ const ui = createUI({
     indicator.setEnabled(on, world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
     ui.showRoute(indicator.visible, indicator.text);
     persist();
+  },
+  dives(on) {
+    followDives = on;
+    persist();
+    ui.announce(on ? 'following dives' : 'staying at the surface');
+  },
+  pace(choice) {
+    pace = choice;
+    whale.setPace(PACES[pace]);
+    persist();
+    ui.announce(`${pace} speed`);
+  },
+  resetView() {
+    view.reset();
   },
 });
 
@@ -180,6 +216,14 @@ let shipFx: ReturnType<typeof createShipFx>;
 /** Whale and ships as obstacles, registered where they are each frame. */
 const obstacles = createObstacles();
 const syncMovers = createMoverSync(obstacles);
+let weatherFx: ReturnType<typeof createWeatherFx>;
+/** The swell's own clock: it runs faster as the whale swims faster. */
+let swellClock = 0;
+const swellSample = { height: 0, slopeX: 0, slopeZ: 0 };
+/** Height of the sea at world (x, z) now: what the wakes lie on. */
+const surface = (x: number, z: number) => swellAt(x, z, swellClock, swellSample).height;
+const fishTime = { value: 0 };
+let fishShowcase: ReturnType<typeof createFishShowcase> | null = null;
 
 try {
   const buildStart = performance.now();
@@ -204,10 +248,12 @@ try {
     reflectionGain: 0.8 / renderer.toneMappingExposure,
     waterSize: quality.waterSize,
     landSegments: quality.landSegments,
+    detail: detailFor(quality.tier),
     mobile,
     worker: true,
   });
-  seafloor = createSeafloor(seed, world.land);
+  // Real ocean depth: the shelf, slope and abyssal plain by distance from the coast.
+  seafloor = createSeafloor(seed, world.land, world.land.depthAt);
   regionLook = createRegionLook(world.land.regions);
   // Head along the composed opening view (forward = look direction), so the chase opens on the coast.
   whale = createWhale(seed, layout.whaleHome, {
@@ -216,20 +262,27 @@ try {
     journey: layout.journey,
     floorAt: seafloor.heightAt,
   });
+  whale.setPace(PACES[pace]);
   world.root.add(whale.group);
   weather = createWeather(seed, sky.clearCover);
   // A visitor who asked for the indicator sees it on the first change of region, not at once.
   indicator.setEnabled(routeOn, world.land.regions.dominantAt(layout.whaleHome.x, layout.whaleHome.z), 0, false);
   sky.setEnvironmentRefresh(quality.tier !== 'low');
-  wake = createWake();
+  // The whale's wake: its stern, bow and width follow the whale's size, and a deeper body still marks the water.
+  wake = createWake({ surface, stern: 5 * LENGTH_SCALE, bow: 6 * LENGTH_SCALE, width: 0.8 * DEPTH_SCALE, depths: [-2.6 * DEPTH_SCALE, -0.9 * DEPTH_SCALE] });
   world.root.add(wake.group);
-  shipFx = createShipFx();
+  shipFx = createShipFx(surface);
   world.root.add(shipFx.group);
+  weatherFx = createWeatherFx(seed, quality.tier, world.ocean.waves);
+  scene.add(weatherFx.group);
   birds = createBirds(seed, quality.tier);
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
   world.origin.onRecenter((dx, dz) => rig.shift(dx, dz));
-  underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, origin: world.origin, tier: quality.tier, seed });
+  underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, depthAt: world.land.depthAt, origin: world.origin, tier: quality.tier, seed });
+  // Review only (`?debug=1&fish=1`): every fish species in a small school ahead of the camera.
+  if (debug && params.get('fish') === '1') fishShowcase = createFishShowcase(fishTime, UNDERWATER_LAYER);
+  if (fishShowcase) scene.add(fishShowcase.group);
   buildMs = performance.now() - buildStart;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
@@ -253,48 +306,19 @@ function resize(): void {
 resize();
 window.addEventListener('resize', resize);
 
-// Pointer look-around.
-let dragging = false;
-let lastX = 0;
-let lastY = 0;
-canvas.addEventListener('pointerdown', (event) => {
-  dragging = true;
-  lastX = event.clientX;
-  lastY = event.clientY;
-  canvas.setPointerCapture(event.pointerId);
-});
-canvas.addEventListener('pointermove', (event) => {
-  if (!dragging) return;
-  const dx = event.clientX - lastX;
-  const dy = event.clientY - lastY;
-  lastX = event.clientX;
-  lastY = event.clientY;
-  rig.look(dx, dy);
-});
-canvas.addEventListener('wheel', (event) => rig.zoom(event.deltaY), { passive: true });
-const endDrag = (event: PointerEvent) => {
-  dragging = false;
-  try {
-    canvas.releasePointerCapture(event.pointerId);
-  } catch {
-    /* already released */
-  }
-};
-canvas.addEventListener('pointerup', endDrag);
-canvas.addEventListener('pointercancel', endDrag);
+const view = createViewControls(canvas, rig, (orbiting) => ui.showReset(orbiting));
 
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
-/** The swell's own clock: it runs faster as the whale swims faster. */
-let swellClock = 0;
 let routeClock = performance.now();
 let time = 0;
 let last = performance.now();
+let firstFrame = false;
 let frame: number | null = null;
 let disposed = false;
 let lastSave = 0;
 
 function sync(): void {
-  ui.sync({ seed, sound: audio.enabled, route: routeOn });
+  ui.sync({ seed, sound: audio.enabled, route: routeOn, dives: followDives, pace });
   audio.sync(!document.hidden).catch(() => {});
 }
 
@@ -305,6 +329,8 @@ function persist(): void {
     sound: audio.settings(),
     framing: { ...rig.framing },
     route: routeOn,
+    dives: followDives,
+    pace,
   });
 }
 
@@ -320,8 +346,8 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
   // left, and the small negative offset swings toward the head for a three-quarter view.
   // Debug overrides are clamped to the ranges the camera rig itself allows.
   const yaw = -Math.PI / 2 - 0.22 + clamp(view.yawOffset ?? 0, -Math.PI, Math.PI);
-  // Close enough that a ~12 m whale fills ~35–50% of portrait width.
-  const distance = clamp(view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14), 6, 80);
+  // Close enough that the whale fills ~35–50% of portrait width.
+  const distance = clamp(view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14) * LENGTH_SCALE, 6 * LENGTH_SCALE, 80 * LENGTH_SCALE);
   const pitch = clamp(view.pitch ?? (kind === 'breach' ? 0.12 : 0.02), 0.02, 0.62);
   rig.setReview({ yaw, pitch, distance, minLookY: kind === 'breach' ? 2.5 : 2.4 });
   followWhale();
@@ -332,6 +358,8 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
 
 /** Debug-only camera override for reviewing the underwater view without the follow camera. */
 let peekDepth: number | null = null;
+/** Debug-only review camera in world coordinates. */
+let viewPose: { from: [number, number, number]; to: [number, number, number] } | null = null;
 let peekSite: { x: number; y: number; z: number; radius: number } | null = null;
 
 function peekCamera(depth: number): void {
@@ -340,7 +368,7 @@ function peekCamera(depth: number): void {
   const z = w.z - world.origin.z;
   const side = w.heading + Math.PI / 2;
   const y = -depth;
-  const back = peekSite ? 12 + peekSite.radius * 2 : 16;
+  const back = peekSite ? 12 + peekSite.radius * 2 : 16 * LENGTH_SCALE;
   camera.position.set(x + Math.cos(side) * back, y, z - Math.sin(side) * back);
   // From below the whale, look straight at it so the surface and Snell's window fill the top of the frame.
   camera.lookAt(x, y + (w.y - y) * (y < w.y ? 1 : 0.45), z);
@@ -361,13 +389,17 @@ function tick(now: number): void {
 
   if (updateQuality(quality, raw * 1000)) {
     birds.setTier(quality.tier);
+    weatherFx.setTier(quality.tier);
+    world.setWalkerCap(detailFor(quality.tier).walkers);
     sky.setEnvironmentRefresh(quality.tier !== 'low');
     renderer.setPixelRatio(quality.ratio);
     resize();
   }
 
   regionLook.update(whale.state.x, whale.state.z);
-  const weatherLook = weather.update(dt, time, regionLook.weights);
+  // No lightning under reduced motion.
+  const weatherLook = weather.update(dt, time, regionLook.weights, !motion.matches);
+  setSea(weatherLook.sea, sky.windAngle);
   sky.setWeather(weatherLook);
   sky.setFog(regionLook.fogTint, regionLook.fogMix, regionLook.fogDensity);
   sky.update(dt, motion.matches ? 0.5 : 1);
@@ -383,6 +415,10 @@ function tick(now: number): void {
   world.ocean.update(dt * swell, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
   syncMovers(whale.state, world.ships.active());
+  // Build the ocean's depth ahead of the whale a slice at a time (a couple of milliseconds a frame at most).
+  world.land.prefetchDepth(whale.state.x, whale.state.z, 2);
+  // The whale rides the swell while near the surface; deeper down it is free of it.
+  whale.group.position.y = surface(whale.state.x, whale.state.z) * smoothstep(-7 * DEPTH_SCALE, -1.5 * DEPTH_SCALE, whale.state.y);
   wake.update(whale.state, dt);
   shipFx.update(world.ships.active(), sky.level);
   markJourney();
@@ -396,12 +432,37 @@ function tick(now: number): void {
   birds.update(time, whale.state.x, whale.state.z, dt, { x: camera.position.x + world.origin.x, y: camera.position.y, z: camera.position.z + world.origin.z }, motion.matches);
 
   followWhale();
+  // Reduced motion keeps the eye at the surface, as does the viewer's choice.
+  rig.setStayAtSurface(!followDives || motion.matches);
+  view.update(motion.matches);
   rig.update(dt, time, motion.matches);
   if (peekDepth !== null) peekCamera(peekDepth);
+  if (viewPose) {
+    camera.position.set(viewPose.from[0] - world.origin.x, viewPose.from[1], viewPose.from[2] - world.origin.z);
+    camera.lookAt(viewPose.to[0] - world.origin.x, viewPose.to[1], viewPose.to[2] - world.origin.z);
+  }
 
+  world.ocean.setSea(swellClock, weatherLook.wind, camera.position.y);
+  weatherFx.update({
+    camera,
+    time,
+    rain: weatherLook.rain,
+    wind: weatherLook.wind,
+    sea: weatherLook.sea,
+    windAngle: sky.windAngle,
+    light: sky.level,
+    height: renderer.domElement.height,
+  });
   const signal = underwater.update(dt, time, camera, whale.state);
-  audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin });
+  fishTime.value = time;
+  fishShowcase?.follow(camera);
+  audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin, weather: weatherLook });
   renderer.render(scene, camera);
+  if (!firstFrame) {
+    // The first frame of the sea, for load-time checks.
+    firstFrame = true;
+    performance.mark('calm-first-frame');
+  }
 
   if (now - lastSave > 4000) {
     lastSave = now;
@@ -409,7 +470,25 @@ function tick(now: number): void {
   }
 }
 
+/**
+ * Compiles what the opening frame does not draw yet (the land's full tiles dissolving in over the bare ones, people
+ * and animals) before it, by drawing each once as a single degenerate point, so their first use a few seconds later
+ * does not stall a frame.
+ */
+function warm(): void {
+  const point = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+  const stage = new THREE.Scene();
+  for (const material of world.laterMaterials) {
+    const mesh = new THREE.Mesh(point, material);
+    mesh.frustumCulled = false;
+    stage.add(mesh);
+  }
+  renderer.render(stage, camera);
+  point.dispose();
+}
+
 function start(): void {
+  warm();
   ui.ready();
   sync();
   persist();
@@ -467,6 +546,10 @@ if (debug) {
     forceDeepDive(at?: number) {
       whale.forcePhase('deep', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
     },
+    forceWhale(phase: WhalePhase, at?: number) {
+      if (!Object.hasOwn(PHASE_LEN, phase)) return;
+      whale.forcePhase(phase, typeof at === 'number' && Number.isFinite(at) ? at : undefined);
+    },
     peekUnderwater(depth: number | null, site?: boolean) {
       peekDepth = typeof depth === 'number' && Number.isFinite(depth) ? clamp(depth, -20, 40) : null;
       // Review a swarm: the nearest feed site, viewed from its side at the given depth.
@@ -476,7 +559,7 @@ if (debug) {
       if (![yaw, pitch, distance].every(Number.isFinite)) return;
       yaw = clamp(yaw, -4 * Math.PI, 4 * Math.PI);
       pitch = clamp(pitch, 0.02, 0.62);
-      distance = clamp(distance, 6, 80);
+      distance = clamp(distance, 6 * LENGTH_SCALE, 80 * LENGTH_SCALE);
       rig.setReview({ yaw, pitch, distance });
       rig.snap();
     },
@@ -488,6 +571,9 @@ if (debug) {
     },
     setWeather(state: WeatherState) {
       weather.set(state);
+    },
+    setSea(level: number | null) {
+      weather.setSea(typeof level === 'number' && Number.isFinite(level) ? level : null);
     },
     jumpTo(x: number, z: number) {
       if (![x, z].every(Number.isFinite)) return;
@@ -511,6 +597,78 @@ if (debug) {
       journey.x = journey.z = NaN;
       markJourney();
       rig.snap();
+    },
+    life(radius: number) {
+      const life = createLandLife(world.land);
+      const { x, z } = whale.state;
+      radius = clamp(radius, 0, 12000);
+      const out: ReturnType<CalmReview['life']> = [];
+      const { heightAt, maskAt } = world.land;
+      const EYE = 9;
+      // Open water nearest 150 m out, from where nothing stands between the eye and the subject.
+      const vantage = (px: number, pz: number, py: number): [number, number, number] | null => {
+        let best: [number, number, number] | null = null;
+        let score = Infinity;
+        for (let k = 0; k < 32; k++) {
+          const a = (k / 32) * Math.PI * 2;
+          for (let d = 60; d <= 400; d += 20) {
+            const cx = px + Math.cos(a) * d;
+            const cz = pz + Math.sin(a) * d;
+            if (Math.abs(d - 150) >= score || maskAt(cx, cz) > -0.02 || heightAt(cx, cz) > -1) continue;
+            let clear = true;
+            for (let t = 0.05; t < 0.97 && clear; t += 0.02) clear = heightAt(cx + (px - cx) * t, cz + (pz - cz) * t) < EYE + (py + 3 - EYE) * t - 1;
+            if (clear) {
+              best = [cx, EYE, cz];
+              score = Math.abs(d - 150);
+            }
+          }
+        }
+        return best;
+      };
+      const add = (kind: 'town' | 'herd', px: number, pz: number, count: number) => {
+        if (Math.hypot(px - x, pz - z) > radius) return;
+        const py = heightAt(px, pz);
+        out.push({ kind, x: px, y: py, z: pz, count, vantage: vantage(px, pz, py) });
+      };
+      for (let j = Math.floor((z - radius) / TOWN_CELL); j <= Math.floor((z + radius) / TOWN_CELL); j++) {
+        for (let i = Math.floor((x - radius) / TOWN_CELL); i <= Math.floor((x + radius) / TOWN_CELL); i++) {
+          const town = life.town(i, j);
+          if (town) add('town', town.x, town.z, town.houses.length);
+        }
+      }
+      for (let j = Math.floor((z - radius) / HERD_CELL); j <= Math.floor((z + radius) / HERD_CELL); j++) {
+        for (let i = Math.floor((x - radius) / HERD_CELL); i <= Math.floor((x + radius) / HERD_CELL); i++) {
+          const herd = life.herd(i, j);
+          if (herd.length) add('herd', herd[0]!.x, herd[0]!.z, herd.length);
+        }
+      }
+      return out.sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z));
+    },
+    peak(near: number, far: number) {
+      const { x, z } = whale.state;
+      let best = { x, y: -Infinity, z };
+      for (let k = 0; k < 72; k++) {
+        const a = (k / 72) * Math.PI * 2;
+        for (let d = clamp(near, 0, 12000); d <= clamp(far, 0, 12000); d += 200) {
+          const px = x + Math.cos(a) * d;
+          const pz = z + Math.sin(a) * d;
+          const py = world.land.heightAt(px, pz);
+          if (py > best.y) best = { x: px, y: py, z: pz };
+        }
+      }
+      return best;
+    },
+    view(from, to) {
+      const finite = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
+      if (!finite(from) || !finite(to)) {
+        viewPose = null;
+        return;
+      }
+      viewPose = { from, to };
+      whale.place(from[0], from[2]);
+      world.landStream.prime(from[0], from[2]);
+      journey.x = journey.z = NaN;
+      markJourney();
     },
     setRoute(on: boolean) {
       routeOn = Boolean(on);
@@ -543,6 +701,7 @@ if (debug) {
         birdDraws: flock.draws,
         birdTriangles: flock.triangles,
         ...world.stats(),
+        whaleSkinMs: Math.round(skinMs),
         path: journey.path,
         revisit: journey.fixes.length ? journey.back / (journey.fixes.length / 2) : 0,
         region: world.land.regions.dominantAt(whale.state.x, whale.state.z),
@@ -556,12 +715,19 @@ if (debug) {
         stars: sky.stars,
         day: sky.phase().day,
         sunElevation: (Math.asin(sky.sunDirection.y) * 180) / Math.PI,
+        sun: [sky.sunDirection.x, sky.sunDirection.y, sky.sunDirection.z],
         weather: weather.target(),
         cloudCover: weather.look.coverage,
+        sea: weather.look.sea,
+        rain: weather.look.rain,
+        wind: weather.look.wind,
+        flash: weather.look.flash,
+        glow: sky.glow,
+        weatherDraws: weatherFx.draws(),
         fogDensity: (scene.fog as THREE.FogExp2).density,
         fov: camera.fov,
         wakeDraws: wake.draws(),
-        addedDraws: wake.draws() + (sky.stars > 0.01 ? 1 : 0) + shipFx.draws(),
+        addedDraws: wake.draws() + (sky.stars > 0.01 ? 1 : 0) + shipFx.draws() + weatherFx.draws(),
         wakeLength: wake.length(),
         envMs: sky.environment().ms,
         envRefreshes: sky.environment().count,
@@ -604,12 +770,15 @@ window.addEventListener('pagehide', () => {
   persist();
   audio.dispose();
   ui.dispose();
+  view.dispose();
   sky.dispose();
   whale.dispose();
   wake.dispose();
   shipFx.dispose();
+  weatherFx.dispose();
   world.dispose();
   birds.dispose();
   underwater.dispose();
+  fishShowcase?.dispose();
   renderer.dispose();
 });

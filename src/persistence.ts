@@ -1,3 +1,5 @@
+import { isPace, type Pace } from './pace.js';
+
 export const STORAGE_KEY = 'ejm-calm:v1';
 export const VERSION = 1;
 
@@ -8,6 +10,10 @@ export type CalmMemory = {
   framing?: { yaw: number; pitch: number; distance: number };
   /** Show the region and distance when the whale enters a new region (off unless set). */
   route?: boolean;
+  /** Travel speed choice (normal unless set). */
+  pace?: Pace;
+  /** Follow the whale down on its dives (on unless set to false). */
+  dives?: boolean;
 };
 
 export function validateMemory(value: unknown): value is CalmMemory {
@@ -20,6 +26,8 @@ export function validateMemory(value: unknown): value is CalmMemory {
     if (typeof data.sound.volume !== 'number' || !Number.isFinite(data.sound.volume) || data.sound.volume < 0 || data.sound.volume > 1) return false;
   }
   if (data.route !== undefined && typeof data.route !== 'boolean') return false;
+  if (data.dives !== undefined && typeof data.dives !== 'boolean') return false;
+  if (data.pace !== undefined && !isPace(data.pace)) return false;
   if (data.framing) {
     const { yaw, pitch, distance } = data.framing;
     if (![yaw, pitch, distance].every((n) => typeof n === 'number' && Number.isFinite(n))) return false;
