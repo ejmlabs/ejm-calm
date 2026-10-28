@@ -35,7 +35,8 @@ function softMap(size: number, power: number): THREE.DataTexture {
 }
 
 /** Foam under every ship and a lantern at the masthead and stern: two draws for all of them. */
-export function createShipFx(): ShipFx {
+/** `surface` is the sea's height at world (x, z), which the foam lies on. */
+export function createShipFx(surface: (x: number, z: number) => number = () => 0): ShipFx {
   const foamMap = softMap(32, 1.4);
   const lampMap = softMap(16, 2);
   const flat = new THREE.PlaneGeometry(1, 1);
@@ -88,12 +89,13 @@ export function createShipFx(): ShipFx {
         const length = ship.size.length * size;
         const beam = ship.size.beam * size;
         // A ring of foam at the waterline, and a longer, fainter tail behind.
-        dummy.position.set(p.x, LIFT, p.z);
+        dummy.position.set(p.x, LIFT + surface(p.x, p.z), p.z);
         dummy.rotation.set(0, heading, 0);
         dummy.scale.set(length * 1.5, 1, beam * 2.6);
         dummy.updateMatrix();
         foam.setMatrixAt(i * 2, dummy.matrix);
-        dummy.position.set(p.x - fwd.x * length * 1.1, LIFT, p.z - fwd.z * length * 1.1);
+        dummy.position.set(p.x - fwd.x * length * 1.1, 0, p.z - fwd.z * length * 1.1);
+        dummy.position.y = LIFT + surface(dummy.position.x, dummy.position.z);
         dummy.scale.set(length * 2.2, 1, beam * 1.1);
         dummy.updateMatrix();
         foam.setMatrixAt(i * 2 + 1, dummy.matrix);

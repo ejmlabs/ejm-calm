@@ -8,7 +8,7 @@ import { PHASE_LEN } from './whale-motion.js';
 import { createWorld } from './world.js';
 import { createBirds } from './birds.js';
 import { FOV, FollowCamera } from './camera.js';
-import { clamp } from './math.js';
+import { clamp, smoothstep } from './math.js';
 import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
@@ -18,12 +18,13 @@ import { feedSitesNear } from './feed-sites.js';
 import { createSeafloor } from './seafloor.js';
 import { createRegionLook } from './region-look.js';
 import { REGION_LOOKS } from './regions.js';
-import { swellRate } from './swell.js';
+import { setSea, swellAt, swellRate } from './swell.js';
 import { TRAVEL_MAX } from './whale-behavior.js';
 import { createWeather, type WeatherState } from './weather.js';
 import { createRoute } from './route.js';
 import { createWake } from './wake.js';
 import { createShipFx } from './ship-fx.js';
+import { createWeatherFx } from './weather-fx.js';
 import { createLandLife, HERD_CELL, TOWN_CELL } from './land-life.js';
 import { PACES, type Pace } from './pace.js';
 import { createViewControls } from './view-controls.js';
@@ -54,6 +55,8 @@ type CalmReview = {
   /** Where in the day (0 is the preset the seed began in, 1 a full day on), and the weather to hold. */
   setDay: (day: number) => void;
   setWeather: (state: WeatherState) => void;
+  /** Hold the sea at a level, 0 glassy to 1 rough, or null to let the weather drive it. */
+  setSea: (level: number | null) => void;
   setRoute: (on: boolean) => void;
   /** Puts the whale in open water near world (x, z) and loads the sea around it. */
   jumpTo: (x: number, z: number) => void;
@@ -202,6 +205,12 @@ let regionLook: ReturnType<typeof createRegionLook>;
 let wake: ReturnType<typeof createWake>;
 let weather: ReturnType<typeof createWeather>;
 let shipFx: ReturnType<typeof createShipFx>;
+let weatherFx: ReturnType<typeof createWeatherFx>;
+/** The swell's own clock: it runs faster as the whale swims faster. */
+let swellClock = 0;
+const swellSample = { height: 0, slopeX: 0, slopeZ: 0 };
+/** Height of the sea at world (x, z) now: what the wakes lie on. */
+const surface = (x: number, z: number) => swellAt(x, z, swellClock, swellSample).height;
 const fishTime = { value: 0 };
 let fishShowcase: ReturnType<typeof createFishShowcase> | null = null;
 
@@ -247,10 +256,12 @@ try {
   // A visitor who asked for the indicator sees it on the first change of region, not at once.
   indicator.setEnabled(routeOn, world.land.regions.dominantAt(layout.whaleHome.x, layout.whaleHome.z), 0, false);
   sky.setEnvironmentRefresh(quality.tier !== 'low');
-  wake = createWake();
+  wake = createWake({ surface });
   world.root.add(wake.group);
-  shipFx = createShipFx();
+  shipFx = createShipFx(surface);
   world.root.add(shipFx.group);
+  weatherFx = createWeatherFx(seed, quality.tier, world.ocean.waves);
+  scene.add(weatherFx.group);
   birds = createBirds(seed, quality.tier);
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
@@ -285,8 +296,6 @@ window.addEventListener('resize', resize);
 const view = createViewControls(canvas, rig, (orbiting) => ui.showReset(orbiting));
 
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
-/** The swell's own clock: it runs faster as the whale swims faster. */
-let swellClock = 0;
 let routeClock = performance.now();
 let time = 0;
 let last = performance.now();
@@ -366,6 +375,7 @@ function tick(now: number): void {
 
   if (updateQuality(quality, raw * 1000)) {
     birds.setTier(quality.tier);
+    weatherFx.setTier(quality.tier);
     world.setWalkerCap(detailFor(quality.tier).walkers);
     sky.setEnvironmentRefresh(quality.tier !== 'low');
     renderer.setPixelRatio(quality.ratio);
@@ -373,7 +383,9 @@ function tick(now: number): void {
   }
 
   regionLook.update(whale.state.x, whale.state.z);
-  const weatherLook = weather.update(dt, time, regionLook.weights);
+  // No lightning under reduced motion.
+  const weatherLook = weather.update(dt, time, regionLook.weights, !motion.matches);
+  setSea(weatherLook.sea, sky.windAngle);
   sky.setWeather(weatherLook);
   sky.setFog(regionLook.fogTint, regionLook.fogMix, regionLook.fogDensity);
   sky.update(dt, motion.matches ? 0.5 : 1);
@@ -388,6 +400,8 @@ function tick(now: number): void {
   world.update(whale.state.x, whale.state.z, camera, dt, swellClock);
   world.ocean.update(dt * swell, sky.sunDirection, camera);
   whale.update(dt, time, world.shore);
+  // The whale rides the swell while near the surface; deeper down it is free of it.
+  whale.group.position.y = surface(whale.state.x, whale.state.z) * smoothstep(-7, -1.5, whale.state.y);
   wake.update(whale.state, dt);
   shipFx.update(world.ships.active(), sky.level);
   markJourney();
@@ -409,10 +423,21 @@ function tick(now: number): void {
     camera.lookAt(viewPose.to[0] - world.origin.x, viewPose.to[1], viewPose.to[2] - world.origin.z);
   }
 
+  world.ocean.setSea(swellClock, weatherLook.wind, camera.position.y);
+  weatherFx.update({
+    camera,
+    time,
+    rain: weatherLook.rain,
+    wind: weatherLook.wind,
+    sea: weatherLook.sea,
+    windAngle: sky.windAngle,
+    light: sky.level,
+    height: renderer.domElement.height,
+  });
   const signal = underwater.update(dt, time, camera, whale.state);
   fishTime.value = time;
   fishShowcase?.follow(camera);
-  audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin });
+  audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin, weather: weatherLook });
   renderer.render(scene, camera);
   if (!firstFrame) {
     // The first frame of the sea, for load-time checks.
@@ -527,6 +552,9 @@ if (debug) {
     },
     setWeather(state: WeatherState) {
       weather.set(state);
+    },
+    setSea(level: number | null) {
+      weather.setSea(typeof level === 'number' && Number.isFinite(level) ? level : null);
     },
     jumpTo(x: number, z: number) {
       if (![x, z].every(Number.isFinite)) return;
@@ -666,12 +694,19 @@ if (debug) {
         stars: sky.stars,
         day: sky.phase().day,
         sunElevation: (Math.asin(sky.sunDirection.y) * 180) / Math.PI,
+        sun: [sky.sunDirection.x, sky.sunDirection.y, sky.sunDirection.z],
         weather: weather.target(),
         cloudCover: weather.look.coverage,
+        sea: weather.look.sea,
+        rain: weather.look.rain,
+        wind: weather.look.wind,
+        flash: weather.look.flash,
+        glow: sky.glow,
+        weatherDraws: weatherFx.draws(),
         fogDensity: (scene.fog as THREE.FogExp2).density,
         fov: camera.fov,
         wakeDraws: wake.draws(),
-        addedDraws: wake.draws() + (sky.stars > 0.01 ? 1 : 0) + shipFx.draws(),
+        addedDraws: wake.draws() + (sky.stars > 0.01 ? 1 : 0) + shipFx.draws() + weatherFx.draws(),
         wakeLength: wake.length(),
         envMs: sky.environment().ms,
         envRefreshes: sky.environment().count,
@@ -719,6 +754,7 @@ window.addEventListener('pagehide', () => {
   whale.dispose();
   wake.dispose();
   shipFx.dispose();
+  weatherFx.dispose();
   world.dispose();
   birds.dispose();
   underwater.dispose();

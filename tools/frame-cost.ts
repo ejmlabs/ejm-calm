@@ -3,6 +3,7 @@ import { createBirds } from '../src/birds.js';
 import { createWake } from '../src/wake.js';
 import { createSky } from '../src/sky.js';
 import { createWeather } from '../src/weather.js';
+import { SEA_WAVES, packWaves, setSea, swellAt } from '../src/swell.js';
 import { FollowCamera } from '../src/camera.js';
 import { detailFor, type QualityTier } from '../src/quality.js';
 import { layoutWorld } from '../src/terrain.js';
@@ -49,6 +50,15 @@ time('day, weather and fog', (i) => {
   sky.setWeather(weather.update(DT, i * DT, [1, 0, 0, 0]));
   sky.update(DT);
 });
+
+// A rough sea: the shared swell for the water, and the wake lying on it.
+setSea(1, 0.6);
+const packed = new Float32Array(SEA_WAVES * 4);
+time('sea (water waves)', (i) => packWaves(i * 20, i * 7, i * DT, packed));
+const sea = { height: 0, slopeX: 0, slopeZ: 0 };
+const riding = createWake({ surface: (x, z) => swellAt(x, z, 100, sea).height });
+time('wake on a rough sea', (i) => riding.update(source(i), DT));
+setSea(0);
 
 const camera = new THREE.PerspectiveCamera(48, 1.6, 0.5, 12000);
 const rig = new FollowCamera(camera);

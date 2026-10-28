@@ -57,8 +57,9 @@ cold loads, gzipped, on a throttled normal connection (9 Mbps, 170 ms; phones al
 in a fresh browser and alternating between the builds, and fails if the new build adds a second or more.
 
 Review hooks (`window.__calmReview`) are available only with `?debug=1`, among them
-`setDay`, `setWeather`, `setRoute`, `jumpTo`, `life` (towns and herds nearby), `peak` (the highest land in a ring)
-and `view` (a fixed review camera).
+`setDay`, `setWeather` (clear, hazy, overcast, rain, storm, fog), `setSea`
+(0 glassy to 1 rough, or null to follow the weather), `setRoute`, `jumpTo`, `life` (towns and herds nearby),
+`peak` (the highest land in a ring) and `view` (a fixed review camera).
 
 ## Static deployment
 

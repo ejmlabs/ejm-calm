@@ -3,6 +3,7 @@ import { Water } from 'three/addons/objects/Water.js';
 import { makeNoise4D, fbm4 } from './noise.js';
 import { hash } from './rng.js';
 import type { ShelfMap } from './land.js';
+import { SEA_WAVES, packWaves, seaLevel } from './swell.js';
 
 export type OceanHandle = {
   water: Water;
@@ -19,6 +20,10 @@ export type OceanHandle = {
   setShelves: (shelves: { near?: ShelfMap; far?: ShelfMap }) => void;
   /** The whale's body origin in render coordinates, drawn as a soft silhouette under the surface. */
   setWhale: (x: number, y: number, z: number, heading: number) => void;
+  /** The sea for this frame: the shared swell at its clock (world origin applied), the wind (0 to 1) and the camera's height, which the waves never reach. */
+  setSea: (clock: number, wind: number, eyeY: number) => void;
+  /** The swell as the water draws it, packed by `packWaves`; shared with what rides the crests. */
+  waves: Float32Array;
   setSize: (textureSize: number) => void;
   dispose: () => void;
 };
@@ -106,7 +111,7 @@ export function createOcean(
   const normalSize = textureSize >= 512 ? 512 : 256;
   const normals = buildWaterNormals(seed, normalSize);
 
-  const geometry = new THREE.PlaneGeometry(20000, 20000);
+  const geometry = seaGeometry(textureSize >= 512 ? 192 : 160, textureSize >= 512 ? 150 : 130, 10000);
   const water = new Water(geometry, {
     textureWidth: textureSize,
     textureHeight: textureSize,
@@ -130,6 +135,8 @@ export function createOcean(
   if (material.uniforms?.sunColor) material.uniforms.sunColor.value.set(0xe8dcc0);
 
   const shelfTextures = applyWaterLook(material, options.shelves, options.reflectionHaze, options.reflectionGain ?? 1);
+  const waves = new Float32Array(SEA_WAVES * 4);
+  applySea(material, geometry.userData['growth'] as number, waves);
   const maps = { near: options.shelves?.near, far: options.shelves?.far };
   const origin = { x: 0, z: 0 };
   let light = 1;
@@ -152,6 +159,7 @@ export function createOcean(
   return {
     water,
     mesh: water,
+    waves,
     update(dt: number, sun: THREE.Vector3, camera?: THREE.Camera) {
       time += dt;
       const uniforms = (water.material as THREE.ShaderMaterial).uniforms;
@@ -161,6 +169,22 @@ export function createOcean(
         water.position.x = camera.position.x;
         water.position.z = camera.position.z;
       }
+    },
+    setSea(clock: number, wind: number, eyeY: number) {
+      const uniforms = material.uniforms;
+      if (!uniforms.seaWaves) return;
+      packWaves(origin.x, origin.z, clock, waves);
+      const level = seaLevel();
+      uniforms.seaLevel!.value = level;
+      uniforms.seaEye!.value = eyeY;
+      uniforms.seaChop!.value = 0.8 * level;
+      let top = 0;
+      for (let i = 0; i < SEA_WAVES; i++) top += waves[i * 4 + 2]!;
+      uniforms.seaTop!.value = top;
+      // Wind roughens the ripples and streaks the reflections.
+      uniforms.rippleGain!.value = 1.5 + 1.6 * wind;
+      if (uniforms.distortionScale) uniforms.distortionScale.value = 4.2 + 3.5 * wind;
+      uniforms.foamLight!.value = light;
     },
     setWhale(x: number, y: number, z: number, heading: number) {
       material.uniforms.whaleBody?.value.set(x, z, heading, y);
@@ -229,6 +253,164 @@ export function shelfBounds(shelf: ShelfMap, origin: { x: number; z: number }): 
   const texel = shelf.extent / (shelf.size - 1);
   const span = texel * shelf.size;
   return new THREE.Vector4(shelf.min - texel * 0.5 - origin.x, (shelf.minZ ?? shelf.min) - texel * 0.5 - origin.z, 1 / span, 1 / span);
+}
+
+/**
+ * The water's plane as rings around the camera, decimetres apart at the eye and widening by `growth` of their radius
+ * out to `radius`, so waves near the camera are drawn finely and the far plane costs little. Local XY, as a plane.
+ */
+export function seaGeometry(segments: number, rings: number, radius: number): THREE.BufferGeometry {
+  const first = 0.6;
+  const growth = Math.exp(Math.log(1 + radius / first) / rings);
+  const positions = new Float32Array((rings + 1) * (segments + 1) * 3);
+  const uvs = new Float32Array((rings + 1) * (segments + 1) * 2);
+  for (let i = 0; i <= rings; i++) {
+    const r = first * (growth ** i - 1);
+    for (let j = 0; j <= segments; j++) {
+      const a = (j / segments) * Math.PI * 2;
+      const v = i * (segments + 1) + j;
+      positions.set([Math.cos(a) * r, Math.sin(a) * r, 0], v * 3);
+      uvs.set([0.5 + (Math.cos(a) * r) / (2 * radius), 0.5 + (Math.sin(a) * r) / (2 * radius)], v * 2);
+    }
+  }
+  const index: number[] = [];
+  for (let i = 0; i < rings; i++) {
+    for (let j = 0; j < segments; j++) {
+      const a = i * (segments + 1) + j;
+      const b = a + segments + 1;
+      index.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(positions.length).map((_, k) => (k % 3 === 2 ? 1 : 0)), 3));
+  geometry.setIndex(index);
+  geometry.userData['growth'] = growth - 1;
+  return geometry;
+}
+
+/** The shared swell in GLSL: `seaWaves` as packed by `packWaves`. Height, and slope with short waves faded by distance. */
+export const SEA_GLSL = `
+  uniform vec4 seaWaves[ ${SEA_WAVES} ];
+  float seaHeight( vec2 p, float dist, float near ) {
+    float h = 0.0;
+    for ( int i = 0; i < ${SEA_WAVES}; i++ ) {
+      vec4 w = seaWaves[ i ];
+      float lambda = 6.2832 / length( w.xy );
+      h += w.z * sin( dot( p, w.xy ) + w.w ) * ( 1.0 - smoothstep( lambda * near, lambda * near * 2.0, dist ) );
+    }
+    return h;
+  }
+  vec3 seaSlope( vec2 p, float dist ) {
+    vec3 s = vec3( 0.0 );
+    for ( int i = 0; i < ${SEA_WAVES}; i++ ) {
+      vec4 w = seaWaves[ i ];
+      if ( w.z == 0.0 ) continue;
+      float phase = dot( p, w.xy ) + w.w;
+      float lambda = 6.2832 / length( w.xy );
+      s.xy += w.z * cos( phase ) * w.xy * ( 1.0 - smoothstep( lambda * 8.0, lambda * 40.0, dist ) );
+      s.z += w.z * sin( phase );
+    }
+    return s;
+  }
+`;
+
+/**
+ * The swell on the water: the vertices rise with it while the rings are fine enough to draw a wave (each fades by its
+ * wavelength), the ripples tilt with its slope out to the horizon, and rough crests break white.
+ */
+const seaVertexPatches: ShaderPatch[] = [
+  { find: 'varying vec4 worldPosition;', replace: `varying vec4 worldPosition;
+				uniform float seaEye;
+				uniform float seaGrid;
+				uniform float seaChop;
+				uniform vec4 seaWaves[ ${SEA_WAVES} ];` },
+  {
+    find: 'mirrorCoord = modelMatrix * vec4( position, 1.0 );',
+    replace: `mirrorCoord = modelMatrix * vec4( position, 1.0 );
+					{
+						// Rings are dist * seaGrid apart: a wave is drawn while at least three of them span it. Rough water
+						// also pinches crests and widens troughs, as wind waves do (the riders keep the plain height).
+						float seaDist = length( mirrorCoord.xz - cameraPosition.xz );
+						vec2 seaAt = mirrorCoord.xz;
+						float seaH = 0.0;
+						for ( int i = 0; i < ${SEA_WAVES}; i++ ) {
+							vec4 w = seaWaves[ i ];
+							if ( w.z == 0.0 ) continue;
+							float k = length( w.xy );
+							float fade = 1.0 - smoothstep( 6.2832 / ( k * 6.0 * seaGrid ), 6.2832 / ( k * 3.0 * seaGrid ), seaDist );
+							float phase = dot( seaAt, w.xy ) + w.w;
+							seaH += w.z * sin( phase ) * fade;
+							mirrorCoord.xz += seaChop * w.z * ( w.xy / k ) * cos( phase ) * fade;
+						}
+						// The water never rises into the lens.
+						if ( seaEye > 0.0 ) seaH = min( seaH, seaEye - 0.4 );
+						mirrorCoord.y += seaH;
+					}`,
+  },
+  { find: 'vec4 mvPosition =  modelViewMatrix * vec4( position, 1.0 );', replace: 'vec4 mvPosition = viewMatrix * worldPosition;' },
+];
+
+const seaFragmentPatches: ShaderPatch[] = [
+  {
+    // Rough water breaks the mirror: reflections streak further and melt into the sky's haze.
+    find: 'vec2 distortion = surfaceNormal.xz * ( 0.0016 + min( 1.3 / distance, 0.012 ) ) * distortionScale * vec2( 1.0, 1.7 );',
+    replace: 'vec2 distortion = surfaceNormal.xz * ( 0.0016 + min( 1.3 / distance, 0.012 ) ) * distortionScale * vec2( 1.0, 1.7 ) * ( 1.0 + 2.0 * seaLevel );',
+  },
+  {
+    find: 'reflectionSample = mix( reflectionSample, reflectionHaze * reflectionGain, reflectionLift * reflectionDark );',
+    replace: `reflectionSample = mix( reflectionSample, reflectionHaze * reflectionGain, reflectionLift * reflectionDark );
+      reflectionSample = mix( reflectionSample, reflectionHaze, 0.85 * smoothstep( 0.15, 0.85, seaLevel ) );`,
+  },
+  { find: 'vec4 getNoise( vec2 uv ) {', replace: `uniform float rippleGain;
+				uniform float seaLevel;
+				uniform float foamLight;
+				uniform float seaTop;
+				${SEA_GLSL}
+				vec4 getNoise( vec2 uv ) {` },
+  {
+    find: 'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
+    replace: `vec3 surfaceNormal = normalize( noise.xzy * vec3( rippleGain, 1.0, rippleGain ) );
+					float seaDist = length( worldPosition.xz - eye.xz );
+					vec3 sea = seaSlope( worldPosition.xz, seaDist );
+					surfaceNormal = normalize( vec3( surfaceNormal.x - sea.x, surfaceNormal.y, surfaceNormal.z - sea.y ) );`,
+  },
+  {
+    find: 'vec3 outgoingLight = albedo;',
+    replace: `{
+        // Whitecaps: rough crests break, ragged by the ripples; wind streaks the foam between them in a gale.
+        float crest = sea.z / max( seaTop, 0.05 ) + 0.3 * noise.x;
+        float foam = smoothstep( 0.2, 0.75, crest ) * smoothstep( 0.35, 0.8, seaLevel );
+        foam += 0.3 * smoothstep( 0.75, 1.0, seaLevel ) * smoothstep( 0.4, 1.0, noise.z * 0.5 + crest * 0.5 );
+        foam *= 1.0 - smoothstep( 250.0, 1800.0, seaDist );
+        albedo = mix( albedo, vec3( 0.78, 0.84, 0.86 ) * ( 0.12 + 0.88 * foamLight ), clamp( foam * foam * 1.4, 0.0, 0.7 ) );
+      }
+      vec3 outgoingLight = albedo;`,
+  },
+];
+
+/** Adds the swell to a (possibly already patched) Water material; all or nothing, as `applyWaterLook`. */
+function applySea(material: THREE.ShaderMaterial, growth: number, waves: Float32Array): void {
+  const vertex = patchShader(material.vertexShader, seaVertexPatches);
+  const fragment = patchShader(material.fragmentShader, seaFragmentPatches);
+  if (vertex === null || fragment === null) {
+    const message = 'ejm-calm: Water shader did not match the expected source; the water stays flat.';
+    if (import.meta.env.DEV) throw new Error(message);
+    console.warn(message);
+    return;
+  }
+  material.vertexShader = vertex;
+  material.fragmentShader = fragment;
+  material.uniforms.seaWaves = { value: waves };
+  material.uniforms.seaLevel = { value: 0 };
+  material.uniforms.seaEye = { value: 0 };
+  material.uniforms.seaGrid = { value: growth };
+  material.uniforms.seaChop = { value: 0 };
+  material.uniforms.seaTop = { value: 0 };
+  material.uniforms.rippleGain = { value: 1.5 };
+  material.uniforms.foamLight = { value: 1 };
+  material.needsUpdate = true;
 }
 
 export type ShaderPatch = { find: string; replace: string };
