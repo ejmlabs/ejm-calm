@@ -203,6 +203,39 @@ await withBrowser(async (browser, base) => {
     }
   }
 
+  // View and speed controls: a drag orbits and shows reset, the wheel zooms without scrolling the page, reset follows again,
+  // and the speed choice is saved.
+  {
+    const { page, context, errors } = await openCalm(browser, base, DESKTOP, { query: { debug: '1' } });
+    try {
+      type Review = { stats: () => Record<string, number | number[]> };
+      const stats = () => page.evaluate(() => (window as unknown as { __calmReview: Review }).__calmReview.stats());
+      await page.waitForTimeout(1500);
+      assert.equal(await page.locator('#resetBtn').isVisible(), false, 'no reset until the view is moved');
+      const box = (await page.locator('#space').boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 300, box.y + box.height / 2, { steps: 10 });
+      await page.mouse.up();
+      assert.equal(await page.locator('#resetBtn').isVisible(), true, 'a drag shows reset view');
+      for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 400);
+      await page.waitForTimeout(2500);
+      const far = (await stats())['dist'] as number;
+      assert.ok(far > 45 && far < 62, `zoomed out to ${far} m`);
+      assert.equal(await page.evaluate(() => window.scrollY), 0, 'the page does not scroll');
+      await page.locator('#resetBtn').click();
+      assert.equal(await page.locator('#resetBtn').isVisible(), false, 'reset hides itself');
+      await page.locator('#aboutBtn').click();
+      await page.locator('#pace input[value="fast"]').check();
+      assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ejm-calm:v1')!).pace), 'fast', 'the speed is saved');
+      await page.locator('#pace input[value="normal"]').check();
+      assert.deepEqual(errors, []);
+      console.log(`controls: orbit, zoom to ${Math.round(far)} m, reset and speed choice work`);
+    } finally {
+      await context.close();
+    }
+  }
+
   const { page, context, errors } = await openCalm(browser, base, DESKTOP, { reducedMotion: 'reduce', seed: 0 });
   try {
     await page.waitForTimeout(600);
