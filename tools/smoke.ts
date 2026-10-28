@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import type { Page } from 'playwright-core';
 import { withBrowser, openCalm, DESKTOP, MOBILE } from './browser.js';
 import { detailFor } from '../src/quality.js';
+import { LENGTH_SCALE } from '../src/whale-size.js';
 
 type DrawWindow = Window & { __draws: number; __frameDraws: number[] };
 
@@ -255,7 +256,9 @@ await withBrowser(async (browser, base) => {
       for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 400);
       await page.waitForTimeout(2500);
       const far = (await stats())['dist'] as number;
-      assert.ok(far > 45 && far < 62, `zoomed out to ${far} m`);
+      // The farthest orbit (ORBIT_DISTANCE in view-controls) is 60 m at the 12 m whale it was tuned on.
+      const farthest = 60 * LENGTH_SCALE;
+      assert.ok(far > farthest * 0.75 && far < farthest * 1.04, `zoomed out to ${far} m`);
       assert.equal(await page.evaluate(() => window.scrollY), 0, 'the page does not scroll');
       await page.locator('#resetBtn').click();
       assert.equal(await page.locator('#resetBtn').isVisible(), false, 'reset hides itself');

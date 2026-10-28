@@ -50,9 +50,10 @@ export type WaterLook = { shallow: number; deep: number; density: number; deepDe
 export const WATER_LOOK: WaterLook = {
   shallow: 0x2f8590,
   deep: 0x0c3a4a,
-  // FogExp2: visibility (95 %) is ~1.73 / density, so about 55 m near the top and 45 m deep.
-  density: 0.031,
-  deepDensity: 0.038,
+  // FogExp2: visibility (95 %) is ~1.73 / density: clear open-ocean water, about 80 m near the top and 65 m
+  // deep, so a 25 m whale stays in view from the trailing camera.
+  density: 0.021,
+  deepDensity: 0.026,
 };
 
 const shallowColor = new THREE.Color();

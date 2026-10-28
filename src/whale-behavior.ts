@@ -2,6 +2,7 @@ import type { Shore } from './shore.js';
 import { fork } from './rng.js';
 import { makeNoise2D } from './noise.js';
 import { clamp, damp, lerp, smoothstep } from './math.js';
+import { DEPTH_SCALE } from './whale-size.js';
 import { createSpring, springSet, springStep } from './spring.js';
 import { FEED_CELL, feedSiteInCell, type FeedSite } from './feed-sites.js';
 import { WHALE_ISLAND_MARGIN, WHALE_MAX_TURN_RATE, createWhalePilot, headingToward, shortestAngle, whaleForward, type WhaleCourse } from './whale-course.js';
@@ -38,11 +39,13 @@ export const BLOWS: readonly [number, number] = [2, 5];
 const RISE_LEN: readonly [number, number] = [3.5, 5];
 const ROLL_LEN: readonly [number, number] = [5, 9];
 /** Cruising depth of the long dive (m): slow noise between these, kept clear of the floor. */
-export const DIVE_DEPTH: readonly [number, number] = [-14, -26];
+export const DIVE_DEPTH: readonly [number, number] = [-14 * DEPTH_SCALE, -26 * DEPTH_SCALE];
+/** Share of surfacings that end in a breach. */
+export const BREACH_CHANCE = 0.04;
 /** Fastest the whale sinks or climbs on a long dive, m/s: the descent and the climb are slow and steady. */
 export const VERTICAL_SPEED = 1.2;
 /** Where the floor keeps the whale shallower than this, it stays up and breathes instead of diving. */
-export const SHALLOWEST_DIVE = -5;
+export const SHALLOWEST_DIVE = -5 * DEPTH_SCALE;
 /** A fluke-up dive starts only with room to dive along this many seconds of path ahead. */
 export const DIVE_ROOM = 45;
 /** Vertical spring rate (1/s): the body follows the depth rail with eased starts and stops. */
@@ -50,7 +53,7 @@ const DEPTH_OMEGA = 0.55;
 /** Spring rate (1/s) of the eased floor the body keeps clear of. */
 const FLOOR_OMEGA = 1.5;
 /** Gap kept over the floor by the rail: clear of the floor limit's soft band, so the floor never jolts the body. */
-const RAIL_CLEARANCE = FLOOR_CLEARANCE + 2;
+const RAIL_CLEARANCE = FLOOR_CLEARANCE + 2 * DEPTH_SCALE;
 /** Seconds of path ahead the floor is read over: long enough to climb out of the deepest dive at VERTICAL_SPEED. */
 const FLOOR_AHEAD = 30;
 /** The floor is read along a fan of arcs either side of the course, since the pilot may turn into a rise: turn rates (rad/s), each held until the heading is that far off (rad). */
@@ -277,7 +280,8 @@ export function createWhaleMover(
     queue.push(posed('surface', jitter(RISE_LEN[0], RISE_LEN[1])), posed('spout'));
     const blows = blowCount();
     for (let i = 1; i < blows; i++) queue.push(...blow());
-    if (rng() < 0.2) {
+    // Blue whales rarely breach.
+    if (rng() < BREACH_CHANCE) {
       queue.push(posed('dive'), posed('breach'), posed('splash'), posed('roll', jitter(ROLL_LEN[0], ROLL_LEN[1])));
       queue.push(posed('surface', jitter(RISE_LEN[0], RISE_LEN[1])), posed('spout'));
     }

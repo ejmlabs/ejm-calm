@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { clamp } from './math.js';
 import type { FollowCamera, ReviewView } from './camera.js';
+import { LENGTH_SCALE } from './whale-size.js';
 
-/** Orbit distance from the whale, metres: clear of its 12 m body, never so far it is a speck. */
-export const ORBIT_DISTANCE: readonly [number, number] = [10, 60];
+/** Orbit distance from the whale, metres: clear of its body, never so far it is a speck. */
+export const ORBIT_DISTANCE: readonly [number, number] = [10 * LENGTH_SCALE, 60 * LENGTH_SCALE];
 /** Orbit pitch, radians: just above the horizon to about 75 degrees down. */
 export const ORBIT_PITCH: readonly [number, number] = [0.02, 1.3];
 const KEY_TURN = 0.12;

@@ -3,12 +3,13 @@ import { resolveSeed, seedURL, nextSeed } from './seed.js';
 import { createQuality, detailFor, updateQuality } from './quality.js';
 import { layoutWorld } from './terrain.js';
 import { createSky, HAZE_ANGLES } from './sky.js';
-import { createWhale, type WhalePhase } from './whale.js';
+import { createWhale, skinMs, type WhalePhase } from './whale.js';
 import { PHASE_LEN } from './whale-motion.js';
 import { createWorld } from './world.js';
 import { createBirds } from './birds.js';
 import { FOV, FollowCamera } from './camera.js';
 import { clamp, smoothstep } from './math.js';
+import { DEPTH_SCALE, LENGTH_SCALE } from './whale-size.js';
 import { createUI } from './ui.js';
 import { OceanAudio } from './audio.js';
 import { loadMemory, saveMemory, VERSION } from './persistence.js';
@@ -256,7 +257,8 @@ try {
   // A visitor who asked for the indicator sees it on the first change of region, not at once.
   indicator.setEnabled(routeOn, world.land.regions.dominantAt(layout.whaleHome.x, layout.whaleHome.z), 0, false);
   sky.setEnvironmentRefresh(quality.tier !== 'low');
-  wake = createWake({ surface });
+  // The whale's wake: its stern, bow and width follow the whale's size, and a deeper body still marks the water.
+  wake = createWake({ surface, stern: 5 * LENGTH_SCALE, bow: 6 * LENGTH_SCALE, width: 0.8 * DEPTH_SCALE, depths: [-2.6 * DEPTH_SCALE, -0.9 * DEPTH_SCALE] });
   world.root.add(wake.group);
   shipFx = createShipFx(surface);
   world.root.add(shipFx.group);
@@ -332,8 +334,8 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
   // left, and the small negative offset swings toward the head for a three-quarter view.
   // Debug overrides are clamped to the ranges the camera rig itself allows.
   const yaw = -Math.PI / 2 - 0.22 + clamp(view.yawOffset ?? 0, -Math.PI, Math.PI);
-  // Close enough that a ~12 m whale fills ~35–50% of portrait width.
-  const distance = clamp(view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14), 6, 80);
+  // Close enough that the whale fills ~35–50% of portrait width.
+  const distance = clamp(view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14) * LENGTH_SCALE, 6 * LENGTH_SCALE, 80 * LENGTH_SCALE);
   const pitch = clamp(view.pitch ?? (kind === 'breach' ? 0.12 : 0.02), 0.02, 0.62);
   rig.setReview({ yaw, pitch, distance, minLookY: kind === 'breach' ? 2.5 : 2.4 });
   followWhale();
@@ -354,7 +356,7 @@ function peekCamera(depth: number): void {
   const z = w.z - world.origin.z;
   const side = w.heading + Math.PI / 2;
   const y = -depth;
-  const back = peekSite ? 12 + peekSite.radius * 2 : 16;
+  const back = peekSite ? 12 + peekSite.radius * 2 : 16 * LENGTH_SCALE;
   camera.position.set(x + Math.cos(side) * back, y, z - Math.sin(side) * back);
   // From below the whale, look straight at it so the surface and Snell's window fill the top of the frame.
   camera.lookAt(x, y + (w.y - y) * (y < w.y ? 1 : 0.45), z);
@@ -540,7 +542,7 @@ if (debug) {
       if (![yaw, pitch, distance].every(Number.isFinite)) return;
       yaw = clamp(yaw, -4 * Math.PI, 4 * Math.PI);
       pitch = clamp(pitch, 0.02, 0.62);
-      distance = clamp(distance, 6, 80);
+      distance = clamp(distance, 6 * LENGTH_SCALE, 80 * LENGTH_SCALE);
       rig.setReview({ yaw, pitch, distance });
       rig.snap();
     },
@@ -681,6 +683,7 @@ if (debug) {
         birdDraws: flock.draws,
         birdTriangles: flock.triangles,
         ...world.stats(),
+        whaleSkinMs: Math.round(skinMs),
         path: journey.path,
         revisit: journey.fixes.length ? journey.back / (journey.fixes.length / 2) : 0,
         region: world.land.regions.dominantAt(whale.state.x, whale.state.z),

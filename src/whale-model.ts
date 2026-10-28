@@ -1,23 +1,29 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, smoothstep } from './math.js';
+import { WHALE_LENGTH } from './whale-size.js';
 
 /**
- * Humpback-style whale anatomy in metres, local frame:
+ * Blue whale anatomy in metres, local frame:
  * head on −X, tail on +X, back on +Y, left flank on +Z.
  * The body tube runs from the rostrum (u = 0) to the fluke insertion (u = 1);
  * the flukes reach past it so the whole animal is WHALE_LENGTH long.
+ * Every length is a share of WHALE_LENGTH, so resizing the whale is one constant.
  */
-export const HEAD_X = -6;
-export const TAIL_X = 4.6;
+export { WHALE_LENGTH } from './whale-size.js';
+const L = WHALE_LENGTH;
+export const HEAD_X = -0.48 * L;
+export const TAIL_X = 0.45 * L;
 export const BODY_LENGTH = TAIL_X - HEAD_X;
-export const WHALE_LENGTH = 12;
-/** Humpback flippers are about a third of body length. */
-export const FLIPPER_LENGTH = 4;
-export const FLUKE_HALF_SPAN = 2;
-/** Fluke trailing edge depth from the insertion: centre notch versus the lobes. */
-export const FLUKE_NOTCH_CHORD = 0.55;
-export const FLUKE_LOBE_CHORD = 1.1;
+/** Blue whale flippers are short, slender and pointed: about an eighth of the length. */
+export const FLIPPER_LENGTH = 0.13 * L;
+/** Broad flukes, about a quarter of the length tip to tip. */
+export const FLUKE_HALF_SPAN = 0.13 * L;
+/** Fluke trailing edge depth from the insertion: a small centre notch versus the lobes. */
+export const FLUKE_NOTCH_CHORD = 0.032 * L;
+export const FLUKE_LOBE_CHORD = 0.058 * L;
+/** How far the flipper root sinks into the body. */
+const FLIPPER_SINK = 0.0625 * FLIPPER_LENGTH;
 
 export type WhaleDetail = 'high' | 'medium' | 'low';
 
@@ -28,42 +34,48 @@ export type DetailSpec = {
   flipperLoop: number;
   flukeSpan: number;
   flukeLoop: number;
-  /** Leading-edge knobs need spanwise samples; low detail drops them. */
-  tubercles: number;
 };
 
 export const WHALE_DETAIL: Record<WhaleDetail, DetailSpec> = {
-  high: { rings: 132, radial: 52, flipperSpan: 56, flipperLoop: 14, flukeSpan: 44, flukeLoop: 14, tubercles: 1 },
-  medium: { rings: 76, radial: 32, flipperSpan: 26, flipperLoop: 10, flukeSpan: 26, flukeLoop: 10, tubercles: 0.5 },
-  low: { rings: 40, radial: 18, flipperSpan: 10, flipperLoop: 6, flukeSpan: 14, flukeLoop: 6, tubercles: 0 },
+  high: { rings: 300, radial: 96, flipperSpan: 40, flipperLoop: 14, flukeSpan: 56, flukeLoop: 16 },
+  medium: { rings: 132, radial: 52, flipperSpan: 22, flipperLoop: 10, flukeSpan: 32, flukeLoop: 12 },
+  low: { rings: 40, radial: 18, flipperSpan: 10, flipperLoop: 6, flukeSpan: 14, flukeLoop: 6 },
 };
 
 /** Camera distances where each level takes over, per quality tier. */
 export const WHALE_LOD: Record<'high' | 'medium' | 'low', Array<{ detail: WhaleDetail; distance: number }>> = {
   high: [
     { detail: 'high', distance: 0 },
-    { detail: 'medium', distance: 55 },
-    { detail: 'low', distance: 140 },
+    { detail: 'medium', distance: 4.6 * L },
+    { detail: 'low', distance: 11.7 * L },
   ],
   medium: [
     { detail: 'medium', distance: 0 },
-    { detail: 'low', distance: 90 },
+    { detail: 'low', distance: 7.5 * L },
   ],
   low: [
     { detail: 'medium', distance: 0 },
-    { detail: 'low', distance: 60 },
+    { detail: 'low', distance: 5 * L },
   ],
 };
 
 /* ---------------------------------------------------------------- profile */
 
-// Side and top outline, sampled along u. Dorsal and ventral lines are absolute
-// heights; width is the half-width. The head slopes up to a flat rostrum, the
-// throat is deep, and the tail stock is laterally compressed.
-const PU = [0, 0.02, 0.06, 0.12, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.88, 0.95, 1];
-const PTOP = [0.04, 0.27, 0.5, 0.7, 0.9, 1.12, 1.2, 1.17, 1.06, 0.85, 0.6, 0.41, 0.27, 0.19];
-const PBOT = [-0.1, -0.3, -0.6, -0.92, -1.18, -1.3, -1.27, -1.1, -0.86, -0.61, -0.4, -0.28, -0.2, -0.15];
-const PWID = [0.05, 0.28, 0.54, 0.8, 1.03, 1.2, 1.22, 1.1, 0.86, 0.58, 0.45, 0.28, 0.18, 0.12];
+// Side and top outline, sampled along u, as shares of WHALE_LENGTH. Dorsal and ventral lines are absolute
+// heights; width is the half-width. A blue whale is slender: the body is about an eighth as deep as it is
+// long. The head is broad and flat (U-shaped from above, wider than it is deep), the throat deepens back to
+// the navel, and the long tail stock is laterally compressed.
+const PU = [0, 0.02, 0.05, 0.1, 0.16, 0.22, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.88, 0.95, 1];
+const PTOP = [0.004, 0.012, 0.02, 0.03, 0.04, 0.048, 0.054, 0.056, 0.052, 0.044, 0.034, 0.025, 0.017, 0.011, 0.008];
+const PBOT = [-0.004, -0.014, -0.028, -0.044, -0.056, -0.062, -0.066, -0.064, -0.056, -0.044, -0.032, -0.022, -0.015, -0.01, -0.007];
+const PWID = [0.006, 0.022, 0.034, 0.043, 0.049, 0.053, 0.057, 0.058, 0.054, 0.045, 0.033, 0.022, 0.013, 0.008, 0.006];
+
+/** Splashguard: the raised ridge in front of the blowholes, centred here along u. */
+export const SPLASHGUARD_U = 0.172;
+/** Blowholes just behind the splashguard. */
+export const BLOWHOLE_U = 0.19;
+/** Body x of the blowholes, for placing the blow. */
+export const BLOWHOLE_X = HEAD_X + BLOWHOLE_U * BODY_LENGTH;
 
 function curve(xs: number[], ys: number[], x: number): number {
   // Monotone cubic (Fritsch–Carlson) so the outline never overshoots.
@@ -102,23 +114,26 @@ export type Profile = {
   botExp: number;
   hump: number;
   fin: number;
+  guard: number;
+  ridge: number;
   jawY: number;
   jaw: number;
 };
 
-/** Dorsal fin height along u: gentle front on the hump, steep hooked rear. */
+/** Dorsal fin height along u: small and falcate, about three quarters of the way back. */
 export function dorsalFin(u: number): number {
-  // Rises slowly off the hump to a pointed, swept tip, then drops away steeply behind it.
-  return 0.32 * smoothstep(0.59, 0.668, u) ** 1.8 * (1 - smoothstep(0.669, 0.69, u));
+  // Rises off the back to a small swept tip, then drops away steeply behind it.
+  return 0.014 * L * smoothstep(0.735, 0.775, u) ** 1.8 * (1 - smoothstep(0.776, 0.795, u));
 }
 
 export function sampleProfile(u: number): Profile {
-  const top = curve(PU, PTOP, u);
-  const bot = curve(PU, PBOT, u);
-  const width = curve(PU, PWID, u);
+  const top = curve(PU, PTOP, u) * L;
+  const bot = curve(PU, PBOT, u) * L;
+  const width = curve(PU, PWID, u) * L;
   // Widest line sits below the middle: broad belly, narrower back.
   const mid = bot + (top - bot) * 0.46;
-  const jaw = smoothstep(0, 0.03, u) * (1 - smoothstep(0.185, 0.215, u));
+  // The mouth runs back about a quarter of the body.
+  const jaw = smoothstep(0, 0.03, u) * (1 - smoothstep(0.2, 0.235, u));
   return {
     u,
     x: HEAD_X + u * BODY_LENGTH,
@@ -127,12 +142,16 @@ export function sampleProfile(u: number): Profile {
     width,
     mid,
     // Flat-topped rostrum, rounder body, keeled tail stock.
-    topExp: lerp(2.7, 2.15, smoothstep(0.05, 0.3, u)) - 0.15 * smoothstep(0.75, 0.95, u),
+    topExp: lerp(2.8, 2.15, smoothstep(0.05, 0.3, u)) - 0.15 * smoothstep(0.75, 0.95, u),
     botExp: 2.2 - 0.55 * smoothstep(0.72, 0.92, u),
-    hump: 0.1 * Math.exp(-(((u - 0.64) / 0.06) ** 2)),
+    // A low dorsal keel runs from behind the fin to the flukes.
+    hump: 0.0025 * L * smoothstep(0.79, 0.86, u) * (1 - smoothstep(0.96, 1, u)),
     fin: dorsalFin(u),
+    guard: 0.006 * L * Math.exp(-(((u - SPLASHGUARD_U) / 0.014) ** 2)),
+    // A single median ridge runs from the splashguard down the rostrum.
+    ridge: 0.0016 * L * smoothstep(0.01, 0.05, u) * (1 - smoothstep(0.15, SPLASHGUARD_U, u)),
     // Mouth line drops gently from the rostrum toward the eye.
-    jawY: bot + (top - bot) * lerp(0.55, 0.4, clamp(u / 0.2, 0, 1)),
+    jawY: bot + (top - bot) * lerp(0.55, 0.4, clamp(u / 0.22, 0, 1)),
     jaw,
   };
 }
@@ -152,16 +171,17 @@ export function crossSection(p: Profile, theta: number, out: { y: number; z: num
   let z = p.width * signedPow(s, 2 / exp);
   let y = c >= 0 ? p.mid + (p.top - p.mid) * signedPow(c, 2 / exp) : p.mid + (p.mid - p.bot) * signedPow(c, 2 / exp);
   if (c > 0) {
-    // Dorsal hump and small fin ride on the midline.
+    // Keel, fin, splashguard and rostral ridge ride on the dorsal midline.
     const fromTop = Math.atan2(Math.abs(s), c);
     y += p.hump * c ** 4 + p.fin * Math.exp(-((fromTop / 0.11) ** 2));
+    y += p.guard * Math.exp(-((fromTop / 0.35) ** 2)) + p.ridge * Math.exp(-((fromTop / 0.1) ** 2));
   }
   if (p.jaw > 0) {
     // Lower jaw sits slightly proud of the upper; a soft crease marks the mouth line.
     const d = y - p.jawY;
     const flank = Math.abs(s);
-    z *= 1 + 0.045 * p.jaw * flank * (1 - smoothstep(-0.12, 0.03, d));
-    z *= 1 - 0.035 * p.jaw * flank * Math.exp(-((d / 0.055) ** 2));
+    z *= 1 + 0.045 * p.jaw * flank * (1 - smoothstep(-0.01 * L, 0.0025 * L, d));
+    z *= 1 - 0.035 * p.jaw * flank * Math.exp(-((d / (0.0046 * L)) ** 2));
   }
   out.y = y;
   out.z = z;
@@ -172,15 +192,18 @@ export function crossSection(p: Profile, theta: number, out: { y: number; z: num
 
 export type BoneSpec = { name: string; x: number; parent: number };
 
+/** Spine bone stations along u (shares of the body), head→tail. */
+const SPINE_U = [0.094, 0.245, 0.434, 0.604, 0.745, 0.849, 0.934, 1];
+const spineX = (i: number) => HEAD_X + SPINE_U[i]! * BODY_LENGTH;
 /** Spine bones sorted head→tail; B0 is the root near the centre of mass. */
 export const SPINE: BoneSpec[] = [
-  { name: 'H2', x: -5, parent: 1 },
-  { name: 'H1', x: -3.4, parent: 2 },
-  { name: 'B0', x: -1.4, parent: -1 },
-  { name: 'B1', x: 0.4, parent: 2 },
-  { name: 'B2', x: 1.9, parent: 3 },
-  { name: 'B3', x: 3.0, parent: 4 },
-  { name: 'B4', x: 3.9, parent: 5 },
+  { name: 'H2', x: spineX(0), parent: 1 },
+  { name: 'H1', x: spineX(1), parent: 2 },
+  { name: 'B0', x: spineX(2), parent: -1 },
+  { name: 'B1', x: spineX(3), parent: 2 },
+  { name: 'B2', x: spineX(4), parent: 3 },
+  { name: 'B3', x: spineX(5), parent: 4 },
+  { name: 'B4', x: spineX(6), parent: 5 },
   { name: 'B5', x: TAIL_X, parent: 6 },
 ];
 export const ROOT_BONE = 2;
@@ -194,7 +217,7 @@ export const FLIPPER_TIP_L = 11;
 export const FLIPPER_TIP_R = 12;
 export const BONE_COUNT = 13;
 /** Where the flex bones sit: metres behind the fluke insertion, and the span fraction of the flipper. */
-export const FLUKE_FLEX_X = 0.45;
+export const FLUKE_FLEX_X = 0.04 * L;
 export const FLIPPER_TIP_S = 0.45;
 
 export function spineY(x: number): number {
@@ -203,7 +226,7 @@ export function spineY(x: number): number {
 }
 
 /** Flipper root on the lower flank behind the head, slightly inside the skin. */
-export const FLIPPER_ROOT_U = 0.31;
+export const FLIPPER_ROOT_U = 0.275;
 export function flipperRoot(side: 1 | -1): THREE.Vector3 {
   const p = sampleProfile(FLIPPER_ROOT_U);
   const point = crossSection(p, Math.PI * 0.5 + 0.62, { y: 0, z: 0 });
@@ -250,12 +273,16 @@ function spineWeights(x: number): [number, number, number, number] {
   return [i, i + 1, 1 - t, t];
 }
 
-/** Ring stations packed toward the head, the dorsal fin and the tail. */
+/** Ring stations packed toward the head, the splashguard, the dorsal fin and the tail. */
 export function ringStations(count: number): number[] {
   const samples = 400;
   const cdf: number[] = [0];
   const density = (u: number) =>
-    1 + 1.5 * Math.exp(-((u / 0.12) ** 2)) + 1.1 * Math.exp(-(((u - 0.655) / 0.05) ** 2)) + 0.5 * Math.exp(-(((u - 1) / 0.12) ** 2));
+    1 +
+    1.5 * Math.exp(-((u / 0.12) ** 2)) +
+    0.6 * Math.exp(-(((u - SPLASHGUARD_U) / 0.03) ** 2)) +
+    1.1 * Math.exp(-(((u - 0.775) / 0.04) ** 2)) +
+    0.5 * Math.exp(-(((u - 1) / 0.12) ** 2));
   for (let i = 1; i <= samples; i++) cdf.push(cdf[i - 1]! + density((i - 0.5) / samples));
   const total = cdf[samples]!;
   const out: number[] = [];
@@ -282,8 +309,9 @@ function buildBody(spec: DetailSpec, part: Part): void {
   const ringStart: number[] = [];
   for (let i = 0; i < stations.length; i++) {
     const u = stations[i]!;
-    // Keep a small first ring; the rostrum closes on a tip vertex.
-    const p = sampleProfile(Math.max(u, 0.004));
+    // Keep a small first ring; the rostrum closes on a tip vertex. Remapped rather than clamped, so dense
+    // stations near the tip never collapse onto one ring.
+    const p = sampleProfile(0.004 + u * 0.996);
     const w = spineWeights(p.x);
     ringStart.push(part.positions.length / 3);
     for (let j = 0; j <= R; j++) {
@@ -308,14 +336,14 @@ function buildBody(spec: DetailSpec, part: Part): void {
   }
   // Caps: rostrum tip and a closed tail end hidden inside the fluke root.
   const caps: Array<{ ring: number; x: number; flip: boolean; u: number }> = [
-    { ring: 0, x: HEAD_X - 0.04, flip: false, u: 0 },
-    { ring: stations.length - 1, x: TAIL_X + 0.06, flip: true, u: 1 },
+    { ring: 0, x: HEAD_X - 0.0033 * L, flip: false, u: 0 },
+    { ring: stations.length - 1, x: TAIL_X + 0.005 * L, flip: true, u: 1 },
   ];
   for (const cap of caps) {
     const p = sampleProfile(cap.u);
     const tip = part.positions.length / 3;
     const w = spineWeights(cap.x);
-    part.positions.push(cap.x, cap.u === 0 ? p.mid + 0.02 : (p.top + p.bot) * 0.5, 0);
+    part.positions.push(cap.x, cap.u === 0 ? p.mid + 0.0017 * L : (p.top + p.bot) * 0.5, 0);
     part.uvs.push(cap.u, ATLAS_BODY_V + (1 - ATLAS_BODY_V) * 0.5);
     part.skinIndex.push(w[0], w[1], 0, 0);
     part.skinWeight.push(w[2], w[3], 0, 0);
@@ -335,15 +363,14 @@ function foil(k: number): number {
 
 export type FlipperStation = { le: number; chord: number; thick: number };
 
-/** Flipper planform at span fraction s: long, narrow, swept, scalloped leading edge. */
-export function flipperStation(s: number, tubercles: number): FlipperStation {
-  const chord = 0.92 * (0.78 + 0.22 * Math.sin(Math.PI * clamp(s * 1.3, 0, 1))) * Math.sqrt(Math.max(0, 1 - s ** 2.6)) + 0.025;
-  const sweep = 0.55 * s * s;
-  const knobs = tubercles * 0.05 * Math.max(0, Math.sin(Math.PI * 10 * s)) ** 0.8 * smoothstep(0.1, 0.3, s) * (1 - smoothstep(0.9, 1, s));
+/** Flipper planform at span fraction s: short, slender, lightly swept, pointed, with a smooth leading edge. */
+export function flipperStation(s: number): FlipperStation {
+  const chord = FLIPPER_LENGTH * (0.17 * (0.85 + 0.15 * Math.sin(Math.PI * clamp(s * 1.3, 0, 1))) * Math.sqrt(Math.max(0, 1 - s ** 2.2)) + 0.006);
+  const sweep = 0.12 * FLIPPER_LENGTH * s * s;
   return {
-    le: sweep - chord * 0.3 - knobs,
-    chord: chord + knobs,
-    thick: 0.09 * (1 - 0.75 * s) + 0.01,
+    le: sweep - chord * 0.3,
+    chord,
+    thick: FLIPPER_LENGTH * (0.03 * (1 - 0.7 * s) + 0.004),
   };
 }
 
@@ -356,7 +383,7 @@ function buildFlipper(spec: DetailSpec, side: 1 | -1, bone: number, tipBone: num
   const base = part.positions.length / 3;
   for (let i = 0; i <= S; i++) {
     const s = i / S;
-    const st = flipperStation(s, spec.tubercles);
+    const st = flipperStation(s);
     // Root sinks into the body; blend its weight with the trunk.
     const trunk = 1 - smoothstep(0.02, 0.14, s);
     const tip = smoothstep(0.3, 0.75, s);
@@ -365,7 +392,7 @@ function buildFlipper(spec: DetailSpec, side: 1 | -1, bone: number, tipBone: num
       const phi = (j / C) * Math.PI * 2;
       const k = 0.5 + 0.5 * Math.cos(phi); // 1 at trailing edge, 0 at leading edge
       const t = foil(k) * st.thick * Math.sign(Math.sin(phi) || 1) * (j === 0 || j === C ? 0 : 1);
-      v.set(st.le + k * st.chord, t, (s * FLIPPER_LENGTH - 0.25) * side);
+      v.set(st.le + k * st.chord, t, (s * FLIPPER_LENGTH - FLIPPER_SINK) * side);
       v.applyQuaternion(rest).add(root);
       part.positions.push(v.x, v.y, v.z);
       part.uvs.push(s * 0.5, (j / C) * ATLAS_BODY_V);
@@ -386,15 +413,13 @@ function buildFlipper(spec: DetailSpec, side: 1 | -1, bone: number, tipBone: num
 
 export type FlukeStation = { le: number; chord: number; thick: number };
 
-/** Fluke planform at |z| / half-span a: swept leading edge, notched trailing edge, pointed tips. */
+/** Fluke planform at |z| / half-span a: swept leading edge, nearly straight trailing edge with a small notch, pointed tips. */
 export function flukeStation(a: number): FlukeStation {
   const x = clamp(a, 0, 1);
-  const le = 0.02 + 1.1 * x ** 1.75;
-  const lobe = lerp(FLUKE_NOTCH_CHORD, FLUKE_LOBE_CHORD, smoothstep(0, 0.17, x));
-  const chord = lobe * Math.max(0, 1 - x ** 2.3) ** 0.55 + 0.02;
-  // Slight scalloping of the trailing edge.
-  const scallop = 0.02 * Math.sin(x * 38) * smoothstep(0.2, 0.35, x) * (1 - smoothstep(0.85, 1, x));
-  return { le, chord: chord + scallop, thick: 0.13 * (1 - x) ** 1.3 + 0.012 };
+  const le = 0.001 * L + 0.0585 * L * x ** 1.75;
+  const lobe = lerp(FLUKE_NOTCH_CHORD, FLUKE_LOBE_CHORD, smoothstep(0, 0.12, x));
+  const chord = lobe * Math.max(0, 1 - x ** 2.3) ** 0.55 + 0.0015 * L;
+  return { le, chord, thick: 0.011 * L * (1 - x) ** 1.3 + 0.001 * L };
 }
 
 function buildFluke(spec: DetailSpec, part: Part): void {
@@ -412,11 +437,11 @@ function buildFluke(spec: DetailSpec, part: Part): void {
       const phi = (j / C) * Math.PI * 2;
       const k = 0.5 + 0.5 * Math.cos(phi);
       const t = foil(k) * st.thick * Math.sign(Math.sin(phi) || 1) * (j === 0 || j === C ? 0 : 1);
-      const x = st.le + k * st.chord - 0.06;
+      const x = st.le + k * st.chord - 0.005 * L;
       part.positions.push(TAIL_X + x, y0 + t, zf * FLUKE_HALF_SPAN);
       part.uvs.push(0.5 + 0.25 * (zf + 1), (j / C) * ATLAS_BODY_V);
       // Trailing edges and swept-back tips ride the flex bone; the root stays on the peduncle.
-      const flex = smoothstep(0.25, 1.3, x);
+      const flex = smoothstep(0.02 * L, 0.11 * L, x);
       part.skinIndex.push(FLUKE_BONE, FLUKE_FLEX, 0, 0);
       part.skinWeight.push(1 - flex, flex, 0, 0);
     }
@@ -524,7 +549,7 @@ export function createWhaleBones(): THREE.Bone[] {
     // In the flipper's own frame the span runs along ±Z from the root (see buildFlipper).
     const tip = new THREE.Bone();
     tip.name = side === 1 ? 'FlipperTipL' : 'FlipperTipR';
-    tip.position.set(0, 0, side * (FLIPPER_TIP_S * FLIPPER_LENGTH - 0.25));
+    tip.position.set(0, 0, side * (FLIPPER_TIP_S * FLIPPER_LENGTH - FLIPPER_SINK));
     bones[side === 1 ? FLIPPER_L : FLIPPER_R]!.add(tip);
     bones.push(tip);
   }
