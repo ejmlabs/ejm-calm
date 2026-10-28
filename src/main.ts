@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { resolveSeed, seedURL, nextSeed } from './seed.js';
-import { createQuality, updateQuality } from './quality.js';
+import { createQuality, detailFor, updateQuality } from './quality.js';
 import { layoutWorld } from './terrain.js';
 import { createSky, HAZE_ANGLES } from './sky.js';
-import { createWhale } from './whale.js';
+import { createWhale, type WhalePhase } from './whale.js';
+import { PHASE_LEN } from './whale-motion.js';
 import { createWorld } from './world.js';
 import { createBirds } from './birds.js';
 import { FOV, FollowCamera } from './camera.js';
@@ -23,6 +24,7 @@ import { createWeather, type WeatherState } from './weather.js';
 import { createRoute } from './route.js';
 import { createWake } from './wake.js';
 import { createShipFx } from './ship-fx.js';
+import { createLandLife, HERD_CELL, TOWN_CELL } from './land-life.js';
 import { PACES, type Pace } from './pace.js';
 import { createViewControls } from './view-controls.js';
 
@@ -45,6 +47,8 @@ type CalmReview = {
   setShipsVisible: (visible: boolean) => void;
   /** Start the long deep dive now (whale holds position while forced). */
   forceDeepDive: (at?: number) => void;
+  /** Play any phase of the whale from normalised time `at` (whale holds position while forced). */
+  forceWhale: (phase: WhalePhase, at?: number) => void;
   /** Debug camera `depth` metres under the surface (negative is above), looking at the whale; null releases it. */
   peekUnderwater: (depth: number | null, site?: boolean) => void;
   /** Where in the day (0 is the preset the seed began in, 1 a full day on), and the weather to hold. */
@@ -53,6 +57,15 @@ type CalmReview = {
   setRoute: (on: boolean) => void;
   /** Puts the whale in open water near world (x, z) and loads the sea around it. */
   jumpTo: (x: number, z: number) => void;
+  /**
+   * Towns and herds within `radius` of the whale, nearest first: where, ground height, how many, and a vantage on
+   * open water with a clear sightline to them (null when there is none within 400 m).
+   */
+  life: (radius: number) => Array<{ kind: 'town' | 'herd'; x: number; y: number; z: number; count: number; vantage: [number, number, number] | null }>;
+  /** The highest land between `near` and `far` metres from the whale (world coordinates). */
+  peak: (near: number, far: number) => { x: number; y: number; z: number };
+  /** Review camera at world `from` looking at `to`, the whale and the land streamed around it; null returns to the chase. */
+  view: (from: [number, number, number] | null, to?: [number, number, number]) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
 };
 
@@ -215,6 +228,7 @@ try {
     reflectionGain: 0.8 / renderer.toneMappingExposure,
     waterSize: quality.waterSize,
     landSegments: quality.landSegments,
+    detail: detailFor(quality.tier),
     mobile,
     worker: true,
   });
@@ -276,6 +290,7 @@ let swellClock = 0;
 let routeClock = performance.now();
 let time = 0;
 let last = performance.now();
+let firstFrame = false;
 let frame: number | null = null;
 let disposed = false;
 let lastSave = 0;
@@ -320,6 +335,8 @@ function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; p
 
 /** Debug-only camera override for reviewing the underwater view without the follow camera. */
 let peekDepth: number | null = null;
+/** Debug-only review camera in world coordinates. */
+let viewPose: { from: [number, number, number]; to: [number, number, number] } | null = null;
 let peekSite: { x: number; y: number; z: number; radius: number } | null = null;
 
 function peekCamera(depth: number): void {
@@ -349,6 +366,7 @@ function tick(now: number): void {
 
   if (updateQuality(quality, raw * 1000)) {
     birds.setTier(quality.tier);
+    world.setWalkerCap(detailFor(quality.tier).walkers);
     sky.setEnvironmentRefresh(quality.tier !== 'low');
     renderer.setPixelRatio(quality.ratio);
     resize();
@@ -386,12 +404,21 @@ function tick(now: number): void {
   view.update(motion.matches);
   rig.update(dt, time, motion.matches);
   if (peekDepth !== null) peekCamera(peekDepth);
+  if (viewPose) {
+    camera.position.set(viewPose.from[0] - world.origin.x, viewPose.from[1], viewPose.from[2] - world.origin.z);
+    camera.lookAt(viewPose.to[0] - world.origin.x, viewPose.to[1], viewPose.to[2] - world.origin.z);
+  }
 
   const signal = underwater.update(dt, time, camera, whale.state);
   fishTime.value = time;
   fishShowcase?.follow(camera);
   audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin });
   renderer.render(scene, camera);
+  if (!firstFrame) {
+    // The first frame of the sea, for load-time checks.
+    firstFrame = true;
+    performance.mark('calm-first-frame');
+  }
 
   if (now - lastSave > 4000) {
     lastSave = now;
@@ -399,7 +426,25 @@ function tick(now: number): void {
   }
 }
 
+/**
+ * Compiles what the opening frame does not draw yet (the land's full tiles dissolving in over the bare ones, people
+ * and animals) before it, by drawing each once as a single degenerate point, so their first use a few seconds later
+ * does not stall a frame.
+ */
+function warm(): void {
+  const point = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+  const stage = new THREE.Scene();
+  for (const material of world.laterMaterials) {
+    const mesh = new THREE.Mesh(point, material);
+    mesh.frustumCulled = false;
+    stage.add(mesh);
+  }
+  renderer.render(stage, camera);
+  point.dispose();
+}
+
 function start(): void {
+  warm();
   ui.ready();
   sync();
   persist();
@@ -457,6 +502,10 @@ if (debug) {
     forceDeepDive(at?: number) {
       whale.forcePhase('deep', typeof at === 'number' && Number.isFinite(at) ? at : undefined);
     },
+    forceWhale(phase: WhalePhase, at?: number) {
+      if (!Object.hasOwn(PHASE_LEN, phase)) return;
+      whale.forcePhase(phase, typeof at === 'number' && Number.isFinite(at) ? at : undefined);
+    },
     peekUnderwater(depth: number | null, site?: boolean) {
       peekDepth = typeof depth === 'number' && Number.isFinite(depth) ? clamp(depth, -20, 40) : null;
       // Review a swarm: the nearest feed site, viewed from its side at the given depth.
@@ -501,6 +550,78 @@ if (debug) {
       journey.x = journey.z = NaN;
       markJourney();
       rig.snap();
+    },
+    life(radius: number) {
+      const life = createLandLife(world.land);
+      const { x, z } = whale.state;
+      radius = clamp(radius, 0, 12000);
+      const out: ReturnType<CalmReview['life']> = [];
+      const { heightAt, maskAt } = world.land;
+      const EYE = 9;
+      // Open water nearest 150 m out, from where nothing stands between the eye and the subject.
+      const vantage = (px: number, pz: number, py: number): [number, number, number] | null => {
+        let best: [number, number, number] | null = null;
+        let score = Infinity;
+        for (let k = 0; k < 32; k++) {
+          const a = (k / 32) * Math.PI * 2;
+          for (let d = 60; d <= 400; d += 20) {
+            const cx = px + Math.cos(a) * d;
+            const cz = pz + Math.sin(a) * d;
+            if (Math.abs(d - 150) >= score || maskAt(cx, cz) > -0.02 || heightAt(cx, cz) > -1) continue;
+            let clear = true;
+            for (let t = 0.05; t < 0.97 && clear; t += 0.02) clear = heightAt(cx + (px - cx) * t, cz + (pz - cz) * t) < EYE + (py + 3 - EYE) * t - 1;
+            if (clear) {
+              best = [cx, EYE, cz];
+              score = Math.abs(d - 150);
+            }
+          }
+        }
+        return best;
+      };
+      const add = (kind: 'town' | 'herd', px: number, pz: number, count: number) => {
+        if (Math.hypot(px - x, pz - z) > radius) return;
+        const py = heightAt(px, pz);
+        out.push({ kind, x: px, y: py, z: pz, count, vantage: vantage(px, pz, py) });
+      };
+      for (let j = Math.floor((z - radius) / TOWN_CELL); j <= Math.floor((z + radius) / TOWN_CELL); j++) {
+        for (let i = Math.floor((x - radius) / TOWN_CELL); i <= Math.floor((x + radius) / TOWN_CELL); i++) {
+          const town = life.town(i, j);
+          if (town) add('town', town.x, town.z, town.houses.length);
+        }
+      }
+      for (let j = Math.floor((z - radius) / HERD_CELL); j <= Math.floor((z + radius) / HERD_CELL); j++) {
+        for (let i = Math.floor((x - radius) / HERD_CELL); i <= Math.floor((x + radius) / HERD_CELL); i++) {
+          const herd = life.herd(i, j);
+          if (herd.length) add('herd', herd[0]!.x, herd[0]!.z, herd.length);
+        }
+      }
+      return out.sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z));
+    },
+    peak(near: number, far: number) {
+      const { x, z } = whale.state;
+      let best = { x, y: -Infinity, z };
+      for (let k = 0; k < 72; k++) {
+        const a = (k / 72) * Math.PI * 2;
+        for (let d = clamp(near, 0, 12000); d <= clamp(far, 0, 12000); d += 200) {
+          const px = x + Math.cos(a) * d;
+          const pz = z + Math.sin(a) * d;
+          const py = world.land.heightAt(px, pz);
+          if (py > best.y) best = { x: px, y: py, z: pz };
+        }
+      }
+      return best;
+    },
+    view(from, to) {
+      const finite = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
+      if (!finite(from) || !finite(to)) {
+        viewPose = null;
+        return;
+      }
+      viewPose = { from, to };
+      whale.place(from[0], from[2]);
+      world.landStream.prime(from[0], from[2]);
+      journey.x = journey.z = NaN;
+      markJourney();
     },
     setRoute(on: boolean) {
       routeOn = Boolean(on);

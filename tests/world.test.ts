@@ -14,6 +14,7 @@ import { createNavField } from '../src/world-nav.js';
 import { waterSignal, SURFACE_BAND } from '../src/seams.js';
 import { WHALE_ISLAND_MARGIN, createWhalePilot, shortestAngle, type WhaleCourse } from '../src/whale-course.js';
 import { fork } from '../src/rng.js';
+import { detailFor } from '../src/quality.js';
 
 test('chunk coordinates floor negatives and boundaries; keys round-trip', () => {
   assert.equal(chunkCoord(0, 512), 0);
@@ -432,6 +433,7 @@ test('a fast world update stays within its frame budget and keeps ships and navi
     reflectionGain: 1,
     waterSize: 64,
     landSegments: 48,
+    detail: detailFor('high'),
     mobile: false,
   });
   const camera = new THREE.PerspectiveCamera();

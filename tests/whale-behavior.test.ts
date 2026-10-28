@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { layoutWorld } from '../src/terrain.js';
 import { circleShore, type Shore } from '../src/shore.js';
 import { FEED_CELL, feedSiteInCell, feedSitesNear } from '../src/feed-sites.js';
-import { BREATH_PACE, MAX_ACCEL, MAX_DECEL, TRAVEL_MAX, TRAVEL_MIN, createWhaleMover, type WhaleBehavior } from '../src/whale-behavior.js';
+import { BREATH_PACE, DIVE_MAX, MAX_ACCEL, MAX_DECEL, TRAVEL_MAX, TRAVEL_MIN, createWhaleMover, type WhaleBehavior } from '../src/whale-behavior.js';
 import { WHALE_ISLAND_MARGIN, WHALE_MAX_TURN_RATE, shortestAngle } from '../src/whale-course.js';
 import { BREACH_SURGE, FLOOR_CLEARANCE, floorLimit, type WhalePhase } from '../src/whale-motion.js';
 
@@ -84,14 +84,15 @@ test('speed varies smoothly within bounds, deterministic per seed and close acro
   assert.ok(gap < 10, `30 vs 60 fps gap ${gap.toFixed(2)} m`);
 });
 
-test('the whale breathes regularly at a glide, feeds at a site within ten minutes and resumes travel', () => {
+test('the whale surfaces regularly at a glide, feeds at a site within ten minutes and resumes travel', () => {
   for (const seed of SEEDS) {
     const { samples } = run(seed, OPEN, ROLLING, 900);
-    // Breathing: every surfacing starts within the bound after the previous one.
+    // Surfacing: blows come in strings a roll apart; every string starts within the bound after the previous one
+    // (a surfacing of up to about two and a half minutes, then a long dive of up to DIVE_MAX and its climb).
     const starts = samples.filter((s, i) => i > 0 && s.phase === 'spout' && samples[i - 1]!.phase !== 'spout').map((s) => s.t);
     const breaths = starts.filter((t, i) => i === 0 || t - starts[i - 1]! > 30);
-    assert.ok(breaths.length >= 4, `seed ${seed}: ${breaths.length} breaths in 10 min`);
-    for (let i = 1; i < breaths.length; i++) assert.ok(breaths[i]! - breaths[i - 1]! < 190, `seed ${seed} breath gap ${breaths[i]! - breaths[i - 1]!}`);
+    assert.ok(breaths.length >= 2, `seed ${seed}: ${breaths.length} surfacings in 15 min`);
+    for (let i = 1; i < breaths.length; i++) assert.ok(breaths[i]! - breaths[i - 1]! < DIVE_MAX + 220, `seed ${seed} surfacing gap ${breaths[i]! - breaths[i - 1]!}`);
     const gaps = breaths.slice(1).map((t, i) => t - breaths[i]!);
     assert.ok(Math.max(...gaps) - Math.min(...gaps) > 5, `seed ${seed}: breaths are metronomic ${gaps}`);
 
@@ -143,7 +144,7 @@ test('every transition is continuous in height, pitch and heading, including a f
       }
       prev = { y, pitch: m.pose.pitch, heading: m.heading, phase: m.phase };
     }
-    for (const edge of ['surface>spout', 'spout>surface', 'spout>dive', 'dive>deep', 'swim>surface']) assert.ok(seen.has(edge) || seen.has(edge.replace('deep', 'swim')), `seed ${seed} never ${edge}`);
+    for (const edge of ['surface>spout', 'spout>roll', 'roll>surface', 'spout>dive', 'dive>deep', 'swim>surface']) assert.ok(seen.has(edge) || seen.has(edge.replace('deep', 'swim')), `seed ${seed} never ${edge}`);
   }
 });
 

@@ -21,7 +21,7 @@ Measured on main d93f95d (six seeds, headless run of the real whale mover and la
 - **Streaming**: look-ahead, prefetch and recentre scaled with speed; open-ocean tiles stay empty and cheap.
 - **Stops**: breaths happen at a glide (not a stop) and feeding becomes rare and short.
 - **Route indicator**: optional, off by default: region name and distance travelled, fading in on a region change.
-- **Budgets**: no growth in draw calls beyond +4 on `low`, no new JS beyond 25 KB gzip, streaming CPU stays inside the existing 2.5 ms per frame.
+- **Budgets**: no growth in draw calls beyond +4 on `low`, streaming CPU stays inside the existing 2.5 ms per frame.
 
 Nothing is built until the captain picks the options in `design.md`.
 
@@ -44,4 +44,4 @@ None. The repository has no archived OpenSpec capabilities. The change builds on
 - Code: `src/whale-behavior.ts`, `src/whale-course.ts`, `src/camera.ts` (`SPEED_CAP`), `src/land.ts` (region modulation of the mask), `src/world.ts` and `src/world-origin.ts` (lead, radii, recentre), `src/landmesh.ts` (lead, fade), `src/sky.ts` (cycle, weather, region tint), `src/ocean.ts` (tint), `src/birds.ts` and `src/flock.ts` (passing flocks), `src/world-ships.ts` (density by region), `src/ui.ts` (indicator), `src/persistence.ts` (indicator toggle). New: `src/regions.ts`, `src/current.ts`, `src/wake.ts` (shared with ship wakes in `add-world-detail` phase 2), `src/weather.ts`, `src/landmarks.ts`, `src/route.ts`, `src/ship-fx.ts`.
 - Tests: region determinism and blend continuity, route never backtracks over a one-hour run for a seed set, speed bounds, tile seam and streaming throughput at 28 m/s, budget checks in `tools/smoke.ts`.
 - Saved seeds look different (land layout changes). Same call as the domain warp in `add-world-detail`; no fallback is kept unless the captain asks.
-- No new runtime dependencies, no third-party requests, CSP unchanged.
+- No third-party requests, CSP unchanged. Load time, not bundle bytes, is the performance bar (see `add-land-detail`).
