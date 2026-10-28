@@ -102,3 +102,22 @@ test('along the migration the horizon is open most of the way: a coast now and t
   const mean = total / SEEDS.length;
   assert.ok(mean > 0.15 && mean < 0.4, `mean coast share ${(100 * mean).toFixed(0)} percent`);
 }, 120000);
+
+test('a far lane query neither overflows the stack nor depends on what was asked first', () => {
+  const far = createPlanet(42, 1.1);
+  const near = createPlanet(42, 1.1);
+  // About 20,000 chunks out each way: deep enough to overflow a recursive build.
+  for (const s of [2.6e9, -2.6e9]) {
+    for (let t = 0; t < Math.abs(s); t += Math.abs(s) / 8) near.laneCentre(Math.sign(s) * t);
+    assert.deepEqual(far.laneCentre(s), near.laneCentre(s));
+  }
+});
+
+test('a point that is not a number is open sea, not a crash or a NaN mask', () => {
+  const planet = createPlanet(42, 1.1);
+  for (const [x, z] of [[NaN, 0], [0, Infinity], [-Infinity, NaN]] as const) {
+    assert.equal(planet.macroAt(x, z), -1.6);
+    assert.equal(planet.openAt(x, z), Infinity);
+    assert.ok(Number.isNaN(planet.laneAt(x, z).q));
+  }
+});
