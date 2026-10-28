@@ -102,6 +102,8 @@ export type WhaleMover = {
   motion: WhaleMotion;
   /** The pilot's course, for review and tools. */
   course: WhaleCourse;
+  /** Factor on the travel speed (breaths included); feeding moves are unchanged. */
+  pace: number;
   step: (dt: number, time: number, shore: Shore) => void;
   /** Play `phase` from normalised time `t` for review; the whale holds position (surge aside) and snaps to it. */
   force: (phase: WhalePhase, t: number) => void;
@@ -339,7 +341,7 @@ export function createWhaleMover(
     }
 
     // Goals for speed and depth from the behaviour.
-    let goalSpeed = travelSpeed(time);
+    let goalSpeed = travelSpeed(time) * mover.pace;
     let goalDepth = diveDepth(time);
     course.aim = null;
     if (behavior === 'breathe') {
@@ -477,9 +479,10 @@ export function createWhaleMover(
     motion.turn = turn;
   }
 
-  return {
+  const mover: WhaleMover = {
     motion,
     course,
+    pace: 1,
     step,
     place(x, z) {
       course.x = motion.x = x;
@@ -505,4 +508,5 @@ export function createWhaleMover(
       motion.site = null;
     },
   };
+  return mover;
 }

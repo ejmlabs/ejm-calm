@@ -62,6 +62,8 @@ export type WhaleHandle = {
   forcePhase: (phase: WhalePhase, at?: number) => void;
   /** Review only: put the whale at world (x, z). */
   place: (x: number, z: number) => void;
+  /** Factor on the travel speed (see PACES). */
+  setPace: (pace: number) => void;
   /** World-space size of the posed body (skinned), for debug stats. */
   measure: () => THREE.Vector3;
   /** Detail level currently drawn by the LOD. */
@@ -483,6 +485,9 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       mover.place(x, z);
       state.x = x;
       state.z = z;
+    },
+    setPace(pace: number) {
+      mover.pace = pace;
     },
     forcePhase(phase: WhalePhase, at?: number) {
       const preset = phase === 'breach' ? FORCED_BREACH_T : phase === 'spout' ? 0.5 : phase === 'surface' ? 0.45 : phase === 'deep' ? 0.3 : 0;
