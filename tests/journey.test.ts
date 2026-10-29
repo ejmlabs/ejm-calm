@@ -43,48 +43,44 @@ function revisits(f: Fix[], radius = 200): number {
   return back / f.length;
 }
 
-test('over real coasts the whale leaves the start sea, cruises at the new pace for an hour and never beaches', () => {
-  for (const seed of SEEDS) {
-    const layout = layoutWorld(seed);
-    const land = layout.land;
-    land.nav.prefetch(layout.whaleHome.x, layout.whaleHome.z, 700, Infinity);
-    const fixes = swim(seed, layout.whaleHome, layout.viewYaw - Math.PI / 2, layout.journey, land, createSeafloor(seed, land).heightAt, (x, z) => land.nav.prefetch(x, z, 3400, Infinity));
-    const mean = path(fixes) / (fixes.length - 1);
-    assert.ok(mean > 0.7 * TRAVEL_MIN && mean < TRAVEL_MAX, `seed ${seed} mean speed ${mean.toFixed(1)} m/s`);
-    assert.ok(net(fixes.slice(0, 601)) >= 8000, `seed ${seed} net in 10 min ${net(fixes.slice(0, 601)).toFixed(0)} m`);
-    assert.ok(net(fixes) / path(fixes) >= 0.6, `seed ${seed} net over path ${(net(fixes) / path(fixes)).toFixed(2)}`);
-    assert.ok(revisits(fixes, 500) < 0.05, `seed ${seed} back near an earlier spot ${(100 * revisits(fixes, 500)).toFixed(1)} percent of the time`);
-    for (const f of fixes) assert.ok(f.clear >= WHALE_ISLAND_MARGIN - 1e-3, `seed ${seed} within ${f.clear.toFixed(1)} m of land at ${f.t}`);
-  }
+test.each(SEEDS)('over real coasts the whale leaves the start sea, cruises at the new pace for an hour and never beaches (seed %i)', (seed) => {
+  const layout = layoutWorld(seed);
+  const land = layout.land;
+  land.nav.prefetch(layout.whaleHome.x, layout.whaleHome.z, 700, Infinity);
+  const fixes = swim(seed, layout.whaleHome, layout.viewYaw - Math.PI / 2, layout.journey, land, createSeafloor(seed, land).heightAt, (x, z) => land.nav.prefetch(x, z, 3400, Infinity));
+  const mean = path(fixes) / (fixes.length - 1);
+  assert.ok(mean > 0.7 * TRAVEL_MIN && mean < TRAVEL_MAX, `seed ${seed} mean speed ${mean.toFixed(1)} m/s`);
+  assert.ok(net(fixes.slice(0, 601)) >= 8000, `seed ${seed} net in 10 min ${net(fixes.slice(0, 601)).toFixed(0)} m`);
+  assert.ok(net(fixes) / path(fixes) >= 0.6, `seed ${seed} net over path ${(net(fixes) / path(fixes)).toFixed(2)}`);
+  assert.ok(revisits(fixes, 500) < 0.05, `seed ${seed} back near an earlier spot ${(100 * revisits(fixes, 500)).toFixed(1)} percent of the time`);
+  for (const f of fixes) assert.ok(f.clear >= WHALE_ISLAND_MARGIN - 1e-3, `seed ${seed} within ${f.clear.toFixed(1)} m of land at ${f.t}`);
 }, 240000);
 
-test('over open water the route is a steady heading: straight, never back over its own track', () => {
+test.each(SEEDS)('over open water the route is a steady heading: straight, never back over its own track (seed %i)', (seed) => {
   const cell = 4000;
-  for (const seed of SEEDS) {
-    // One round island of 150 to 700 m per 4 km cell (about 7 percent land), the start left open.
-    const rng = random(seed ^ 0x5eed);
-    const buckets = new Map<string, Circle[]>();
-    for (let i = -40; i <= 40; i++) {
-      for (let j = -40; j <= 40; j++) {
-        const x = (i + rng()) * cell;
-        const z = (j + rng()) * cell;
-        if (Math.hypot(x, z) < 700) continue;
-        const key = `${Math.floor(x / cell)}:${Math.floor(z / cell)}`;
-        const list = buckets.get(key) ?? [];
-        list.push({ x, z, radius: 150 + rng() * 550 });
-        buckets.set(key, list);
-      }
+  // One round island of 150 to 700 m per 4 km cell (about 7 percent land), the start left open.
+  const rng = random(seed ^ 0x5eed);
+  const buckets = new Map<string, Circle[]>();
+  for (let i = -40; i <= 40; i++) {
+    for (let j = -40; j <= 40; j++) {
+      const x = (i + rng()) * cell;
+      const z = (j + rng()) * cell;
+      if (Math.hypot(x, z) < 700) continue;
+      const key = `${Math.floor(x / cell)}:${Math.floor(z / cell)}`;
+      const list = buckets.get(key) ?? [];
+      list.push({ x, z, radius: 150 + rng() * 550 });
+      buckets.set(key, list);
     }
-    const near = (x: number, z: number) => {
-      const out: Circle[] = [];
-      for (let i = Math.floor(x / cell) - 2; i <= Math.floor(x / cell) + 2; i++) for (let j = Math.floor(z / cell) - 2; j <= Math.floor(z / cell) + 2; j++) out.push(...(buckets.get(`${i}:${j}`) ?? []));
-      return out;
-    };
-    const shore: Shore = { clearance: (x, z) => circleShore(near(x, z)).clearance(x, z), away: (x, z) => circleShore(near(x, z)).away(x, z) };
-    const fixes = swim(seed, { x: 0, z: 0 }, 0.4 + (seed % 5), 0.4 + (seed % 5), shore, () => -60);
-    const ten = fixes.slice(0, 601);
-    assert.ok(net(ten) > 8000, `seed ${seed} net in 10 min ${net(ten).toFixed(0)} m`);
-    assert.ok(net(fixes) / path(fixes) > 0.85, `seed ${seed} net over path ${(net(fixes) / path(fixes)).toFixed(2)}`);
-    assert.ok(revisits(fixes) < 0.02, `seed ${seed} back near an earlier spot ${(100 * revisits(fixes)).toFixed(1)} percent of the time`);
   }
+  const near = (x: number, z: number) => {
+    const out: Circle[] = [];
+    for (let i = Math.floor(x / cell) - 2; i <= Math.floor(x / cell) + 2; i++) for (let j = Math.floor(z / cell) - 2; j <= Math.floor(z / cell) + 2; j++) out.push(...(buckets.get(`${i}:${j}`) ?? []));
+    return out;
+  };
+  const shore: Shore = { clearance: (x, z) => circleShore(near(x, z)).clearance(x, z), away: (x, z) => circleShore(near(x, z)).away(x, z) };
+  const fixes = swim(seed, { x: 0, z: 0 }, 0.4 + (seed % 5), 0.4 + (seed % 5), shore, () => -60);
+  const ten = fixes.slice(0, 601);
+  assert.ok(net(ten) > 8000, `seed ${seed} net in 10 min ${net(ten).toFixed(0)} m`);
+  assert.ok(net(fixes) / path(fixes) > 0.85, `seed ${seed} net over path ${(net(fixes) / path(fixes)).toFixed(2)}`);
+  assert.ok(revisits(fixes) < 0.02, `seed ${seed} back near an earlier spot ${(100 * revisits(fixes)).toFixed(1)} percent of the time`);
 }, 240000);
