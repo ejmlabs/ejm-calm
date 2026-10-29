@@ -7,8 +7,8 @@ shots/*.mp4
 dist/
 .wrangler/
 CLAUDE.md
-AGENTS.md
 .orch/
-.claude/
+.claude/*
+!.claude/skills/
 .build/
 feedback/
