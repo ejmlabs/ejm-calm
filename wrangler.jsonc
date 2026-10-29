@@ -1,10 +1,13 @@
 {
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "calm",
+  "account_id": "478a0db3a110d8503c16abbc1db27af4",
   "compatibility_date": "2026-10-18",
   "workers_dev": false,
   "preview_urls": false,
   "assets": {
-    "directory": "./dist"
+    "directory": "./dist",
+    "not_found_handling": "404-page"
   },
   "routes": [
     { "pattern": "calm.ejmlabs.com", "custom_domain": true }
