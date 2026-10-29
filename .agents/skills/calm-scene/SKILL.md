@@ -1,6 +1,6 @@
 ---
 name: calm-scene
-description: Use before you change the calm scene in src/: seeds and random streams, world layout, land streaming and its worker, the floating origin, LOD and quality tiers, the whale, ships, birds, weather, sky, the camera, reduced motion, audio, saved settings, or anything that could reach the network.
+description: Use before you change the calm scene in src/, such as seeds and random streams, world layout, land streaming and its worker, the floating origin, LOD and quality tiers, the whale, ships, birds, weather, sky, the camera, reduced motion, audio, saved settings, or anything that could reach the network.
 ---
 
 # The calm scene

@@ -1,6 +1,6 @@
 ---
 name: calm-verify
-description: Use before you merge or report a calm change: npm test, npm run test:browser, shots, the shot tools, long-journey, seed-sweep, frame-cost, load-time, world-map, the ?debug=1 review hooks, and any figure for frame time, draws, p99 or first frame.
+description: Use before you merge or report a calm change, including npm test, npm run test:browser, shots, the shot tools, long-journey, seed-sweep, frame-cost, load-time, world-map, the ?debug=1 review hooks, and any figure for frame time, draws, p99 or first frame.
 ---
 
 # Verifying calm
