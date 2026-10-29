@@ -44,6 +44,11 @@ builds then captures desktop (1440×900) and mobile (390×844 @3x) screenshots
 in `shots/` for seeds `42`, `7`, and `1234`, plus a mid-breach frame. Browser
 checks use Playwright Core and the system Chrome executable.
 
+The test reliability workflow runs the unit suite twice on pull requests, main,
+and daily. It reports individual tests that pass in one run and fail in the
+other, retains both reports, and fails if either run fails. Run it locally with
+`node tools/flaky.mjs`; it prints the evidence directory.
+
 `npx tsx tools/long-journey.ts 2 42 7` swims
 two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 50 60` swims an hour on each of seeds 1 to 50 (or a list: `42,7,1234 -`) and fails any under 0.5 net over path or with ten minutes under 2 km (it also reports the seeds that dip under 1.5 km in five, how much of the hour a natural coast is within 6 km and the longest open stretch); `npx tsx tools/world-map.ts 42 map.png` draws a seed's world from above (land, regions, the migration lane, optionally the whale's track); `npx tsx tools/frame-cost.ts`
 times what the journey's feel adds per frame in Node; `npx tsx tools/feel-shots.ts <dir>` captures
