@@ -23,7 +23,8 @@
     "tsx": "4.20.5",
     "typescript": "5.9.3",
     "vite": "6.4.5",
-    "vitest": "4.1.12"
+    "vitest": "4.1.12",
+    "wrangler": "4.151.3"
   },
   "dependencies": {
     "simplex-noise": "4.0.3",

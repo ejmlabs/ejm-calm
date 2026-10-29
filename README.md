@@ -63,13 +63,13 @@ Review hooks (`window.__calmReview`) are available only with `?debug=1`, among t
 
 ## Static deployment
 
-`npm run build` emits `dist/` (`index.html`, hashed `assets/*`, `LICENSE`,
-`THIRD_PARTY_NOTICES`, and `public/_headers`). Cloudflare
+`npm run build` emits `dist/` (`index.html`, `404.html`, hashed `assets/*`, the
+icons, `LICENSE`, `THIRD_PARTY_NOTICES`, and `public/_headers`). Cloudflare
 Pages-style `_headers` sets CSP, framing, sniffing, referrer, and immutable
 caching for `/assets/*`. `wrangler.jsonc` serves `dist/` as static assets at
-calm.ejmlabs.com. Its `env.staging` block serves the same build as the Worker
-`calm-staging` at calm-staging.ejmlabs.com, which is publicly reachable and
-serves the latest main.
+calm.ejmlabs.com, with `404.html` for missing paths. Its `env.staging` block
+serves the same build as the Worker `calm-staging` at calm-staging.ejmlabs.com,
+which is publicly reachable and serves the latest main.
 
 A push to main runs `.github/workflows/deploy.yml`, the canonical caller of the
 shared `ejmlabs/.github` workflow `deploy-site.yml`. A build job with no secrets

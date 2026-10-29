@@ -19,9 +19,11 @@ manual `wrangler deploy` with the owner's login, the CI flow below replaces it h
 - Every source is `'self'`, and `font-src` is `'none'`. Never add another origin. The CSP
   blocks the zone's injected Cloudflare Web Analytics beacon, which shows console errors.
   Turning injection off for this host is the owner's call (`FOLLOWUP.md`). Never allow it.
-- `/assets/*` is hashed and immutable. The build ships only `index.html`, `assets/`,
-  `LICENSE`, `THIRD_PARTY_NOTICES`, `_headers` and the icons; `tests/deploy.test.ts` fails on
-  anything else, on source maps or TypeScript, and on inline scripts.
+- `/assets/*` is hashed and immutable. Pages get Cloudflare's own
+  `public, max-age=0, must-revalidate`; a `/*` Cache-Control rule would join the immutable one.
+- The build ships only `index.html`, `404.html`, `assets/`, `LICENSE`, `THIRD_PARTY_NOTICES`,
+  `_headers` and the icons; `tests/deploy.test.ts` fails on anything else, on source maps or
+  TypeScript, and on inline scripts.
 
 ## Deploy
 
@@ -56,12 +58,12 @@ npm ci --ignore-scripts
 npm test
 npm run test:browser        # typechecks, builds dist, runs the browser smoke
 find dist -type f | sort    # read the list the deploy publishes
-WRANGLER_SEND_METRICS=false wrangler deploy --config wrangler.jsonc --dry-run
-WRANGLER_SEND_METRICS=false wrangler deploy --config wrangler.jsonc --env staging --dry-run
+WRANGLER_SEND_METRICS=false npx wrangler deploy --config wrangler.jsonc --dry-run
+WRANGLER_SEND_METRICS=false npx wrangler deploy --config wrangler.jsonc --env staging --dry-run
 ```
 
-Stop at the first failure. wrangler is not pinned in `package.json`; for a local dry run use
-wrangler 4 from PATH.
+Stop at the first failure. `package.json` pins wrangler, so `npx wrangler` runs the same
+version as the deploy jobs.
 
 ## Verify live
 
@@ -73,6 +75,7 @@ approval.
 - Open `/?seed=42` on the host at phone and desktop sizes: the scene draws, the
   seed stays in the URL, New seed, Share, Sound and About work, and the console shows nothing
   but the known beacon CSP errors.
+- A missing path such as `/nope` returns `404.html` with status 404.
 - Compare live headers with `dist/_headers`, for the page and one file under `/assets/`.
   In the headed page:
   `Object.fromEntries((await fetch(location.pathname, { cache: 'no-store' })).headers)`.
@@ -84,10 +87,3 @@ approval.
 Redeploy the last verified Worker version in Cloudflare, or approve an earlier run's
 production job while it is still available. Then land a revert on main and approve its
 production job, so main matches live.
-
-## Known gaps against ejmlabs-cloudflare
-
-Fix each in its own reviewed change, never inside a deploy: no `account_id` in
-`wrangler.jsonc`, no `not_found_handling` or 404 page, wrangler not pinned as a devDependency,
-and `public/_headers` sets no page `Cache-Control`, `upgrade-insecure-requests` or
-`includeSubDomains` from the shared baseline.
