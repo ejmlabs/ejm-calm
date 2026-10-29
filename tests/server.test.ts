@@ -1,11 +1,21 @@
-import { test } from 'vitest';
+import { afterAll, beforeAll, test } from 'vitest';
 import assert from 'node:assert/strict';
-import { readdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { request } from 'node:http';
 import { gunzipSync } from 'node:zlib';
 import { startServer, ICON_FILES } from '../tools/serve.js';
+
+const root = resolve(import.meta.dirname, '..');
+// Its own outDir: deploy.test.ts builds dist in a parallel worker, and a build empties dist first.
+let dist: string;
+beforeAll(async () => {
+  dist = await mkdtemp(join(tmpdir(), 'calm-server-'));
+  execFileSync('npx', ['vite', 'build', '--outDir', dist], { cwd: root, stdio: 'ignore' });
+});
+afterAll(() => rm(dist, { recursive: true, force: true }));
 
 type FetchResult = { status: number | undefined; headers: import('node:http').IncomingHttpHeaders; body: string };
 
@@ -20,9 +30,6 @@ function fetchRaw(base: string, path: string, method = 'GET', headers: Record<st
 }
 
 test('static server provides module MIME types and rejects traversal and unsupported methods', async () => {
-  const root = resolve(import.meta.dirname, '..');
-  const dist = resolve(root, 'dist');
-  execFileSync('npx', ['vite', 'build'], { cwd: root, stdio: 'ignore' });
   const assets = await readdir(resolve(dist, 'assets'));
   const scriptName = assets.find((name) => name.endsWith('.js') && name.startsWith('index-'));
   assert.ok(scriptName, 'dist/assets must contain a built JavaScript bundle');
@@ -66,9 +73,6 @@ test('static server provides module MIME types and rejects traversal and unsuppo
 });
 
 test('static server serves exactly the shipped icons with image types', async () => {
-  const root = resolve(import.meta.dirname, '..');
-  const dist = resolve(root, 'dist');
-  execFileSync('npx', ['vite', 'build'], { cwd: root, stdio: 'ignore' });
   const app = await startServer({ port: 0, root: dist });
   try {
     for (const name of ICON_FILES) {
