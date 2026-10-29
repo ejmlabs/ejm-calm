@@ -20,7 +20,7 @@ export function mixedTests(first, second, inventory) {
         continue;
       }
       for (const test of file.assertionResults) {
-        if (typeof test?.fullName !== 'string' || typeof test.status !== 'string') {
+        if (typeof test?.fullName !== 'string') {
           incomplete = true;
           continue;
         }
@@ -43,12 +43,13 @@ export function mixedTests(first, second, inventory) {
     incomplete = true;
   } else {
     for (const item of inventory) {
-      if (typeof item?.file !== 'string' || typeof item?.name !== 'string' || typeof item?.skipped !== 'boolean') {
+      if (typeof item?.file !== 'string' || typeof item?.name !== 'string') {
         incomplete = true;
         continue;
       }
       const id = JSON.stringify([item.file, item.name]);
-      if (item.skipped || expected.has(id)) {
+      if (typeof item.skipped !== 'boolean' || item.skipped) incomplete = true;
+      if (expected.has(id)) {
         incomplete = true;
         ineligible.add(id);
       }
@@ -93,9 +94,11 @@ function main() {
     const result = spawnSync(process.execPath, [
       'node_modules/vitest/vitest.mjs', 'run', '--reporter=default', '--reporter=json', `--outputFile.json=${report}`,
     ], { stdio: 'inherit' });
+    const attempt = { status: result.status, signal: result.signal, error: result.error?.message };
+    writeFileSync(join(output, `attempt-${n}-status.json`), JSON.stringify(attempt, null, 2) + '\n');
     let data = null;
     try { data = JSON.parse(readFileSync(report, 'utf8')); } catch (error) { console.error(`Cannot read attempt ${n} report:`, error.message); }
-    attempts.push({ status: result.status, signal: result.signal, error: result.error?.message, report: data });
+    attempts.push({ ...attempt, report: data });
   }
   const { mixed, incomplete } = mixedTests(attempts[0].report, attempts[1].report, inventory);
   if (incomplete) console.error('Cannot fully compare test reports');

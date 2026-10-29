@@ -33,6 +33,47 @@ test('finds identifiable flakes even when other evidence is incomplete', () => {
   assert.deepEqual(mixedTests(null, first), { mixed: [], incomplete: true });
 });
 
+test('skipped inventory permits only unique comparable actual outcomes', () => {
+  const listed = [{ file: 'tests/sea.test.ts', name: 'waves', skipped: true }];
+  const failed = report(['waves', 'failed']);
+  const passed = report(['waves', 'passed']);
+  for (const [a, b] of [[failed, passed], [passed, failed]]) {
+    assert.deepEqual(mixedTests(a, b, listed), { mixed: [['tests/sea.test.ts', 'waves']], incomplete: true });
+    assert.deepEqual(mixedTests(a, b, [...listed, { ...listed[0], skipped: undefined }]), { mixed: [], incomplete: true });
+    const malformedDuplicate = report(['waves', b.testResults[0].assertionResults[0].status], ['waves', undefined]);
+    assert.deepEqual(mixedTests(a, malformedDuplicate, listed), { mixed: [], incomplete: true });
+  }
+  for (const other of [report(['waves', 'skipped']), report()]) {
+    for (const [a, b] of [[failed, other], [other, failed]]) {
+      assert.deepEqual(mixedTests(a, b, listed), { mixed: [], incomplete: true });
+    }
+  }
+});
+
+test('saves an attempt signal before a later interruption', () => {
+  const root = mkdtempSync(join(tmpdir(), 'calm-flaky-status-'));
+  try {
+    mkdirSync(join(root, 'node_modules/vitest'), { recursive: true });
+    writeFileSync(join(root, 'node_modules/vitest/vitest.mjs'), `
+      import { existsSync, writeFileSync } from 'node:fs';
+      if (!existsSync('attempted')) {
+        writeFileSync('attempted', 'yes');
+        process.kill(process.pid, 'SIGTERM');
+      } else {
+        process.kill(process.ppid, 'SIGTERM');
+      }
+    `);
+    const output = join(root, 'evidence');
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./flaky.mjs', import.meta.url))], {
+      cwd: root, env: { ...process.env, FLAKE_OUTPUT: output }, encoding: 'utf8', timeout: 30000,
+    });
+    assert.equal(result.signal, 'SIGTERM');
+    assert.deepEqual(JSON.parse(readFileSync(join(output, 'attempt-1-status.json'), 'utf8')), { status: null, signal: 'SIGTERM' });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a passing second run never hides the first failure', () => {
   const root = mkdtempSync(join(tmpdir(), 'calm-flaky-test-'));
   try {
