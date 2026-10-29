@@ -8,5 +8,18 @@
   },
   "routes": [
     { "pattern": "calm.ejmlabs.com", "custom_domain": true }
-  ]
+  ],
+  "env": {
+    "staging": {
+      "name": "calm-staging",
+      "workers_dev": false,
+      "preview_urls": false,
+      "assets": {
+        "directory": "./dist"
+      },
+      "routes": [
+        { "pattern": "calm-staging.ejmlabs.com", "custom_domain": true }
+      ]
+    }
+  }
 }
