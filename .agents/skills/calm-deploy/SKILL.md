@@ -18,9 +18,11 @@ read it and its deploy and verify references first.
 - Every source is `'self'`, and `font-src` is `'none'`. Never add another origin. The CSP
   blocks the zone's injected Cloudflare Web Analytics beacon, which shows console errors.
   Turning injection off for this host is the owner's call (`FOLLOWUP.md`). Never allow it.
-- `/assets/*` is hashed and immutable. The build ships only `index.html`, `assets/`,
-  `LICENSE`, `THIRD_PARTY_NOTICES`, `_headers` and the icons; `tests/deploy.test.ts` fails on
-  anything else, on source maps or TypeScript, and on inline scripts.
+- `/assets/*` is hashed and immutable. Pages get Cloudflare's own
+  `public, max-age=0, must-revalidate`; a `/*` Cache-Control rule would join the immutable one.
+- The build ships only `index.html`, `404.html`, `assets/`, `LICENSE`, `THIRD_PARTY_NOTICES`,
+  `_headers` and the icons; `tests/deploy.test.ts` fails on anything else, on source maps or
+  TypeScript, and on inline scripts.
 
 ## Build in a scratch directory
 
@@ -48,16 +50,14 @@ From the scratch clone's root, where `wrangler.jsonc` is:
 
 ```sh
 export WRANGLER_SEND_METRICS=false
-wrangler whoami                                   # the account that serves calm
-wrangler deployments list --config wrangler.jsonc # record the live version id
-wrangler deploy --config wrangler.jsonc --dry-run
-wrangler deploy --config wrangler.jsonc
+npx wrangler --version                                # the pinned wrangler
+npx wrangler deployments list --config wrangler.jsonc # record the live version id
+npx wrangler deploy --config wrangler.jsonc --dry-run
+npx wrangler deploy --config wrangler.jsonc
 ```
 
-- wrangler is not pinned in `package.json` yet. Use wrangler 4 from PATH and record
-  `wrangler --version`.
-- The config sets no `account_id` yet. If `deployments list` does not show the live `calm`
-  Worker, or wrangler asks which account to use, stop and ask the user.
+- `package.json` pins wrangler and `wrangler.jsonc` names the account. If `deployments list`
+  does not show the live `calm` Worker, stop and ask the user.
 - Record the `Current Version ID` wrangler prints. If wrangler asks to replace a DNS record or
   is not logged in, stop and hand the user the command (see `ejmlabs-cloudflare`).
 
@@ -68,6 +68,7 @@ wrangler deploy --config wrangler.jsonc
 - Open `https://calm.ejmlabs.com/?seed=42` at phone and desktop sizes: the scene draws, the
   seed stays in the URL, New seed, Share, Sound and About work, and the console shows nothing
   but the known beacon CSP errors.
+- A missing path such as `/nope` returns `404.html` with status 404.
 - Compare live headers with `dist/_headers`, for the page and one file under `/assets/`.
   In the headed page:
   `Object.fromEntries((await fetch(location.pathname, { cache: 'no-store' })).headers)`.
@@ -76,12 +77,5 @@ wrangler deploy --config wrangler.jsonc
 
 ## Roll back
 
-`wrangler rollback VERSION_ID --config wrangler.jsonc --message "..."` restores the last
+`npx wrangler rollback VERSION_ID --config wrangler.jsonc --message "..."` restores the last
 verified version. Then land a revert on main and deploy it, so main matches live.
-
-## Known gaps against ejmlabs-cloudflare
-
-Fix each in its own reviewed change, never inside a deploy: no `account_id` in
-`wrangler.jsonc`, no `not_found_handling` or 404 page, wrangler not pinned as a devDependency,
-and `public/_headers` sets no page `Cache-Control`, `upgrade-insecure-requests` or
-`includeSubDomains` from the shared baseline.

@@ -7,7 +7,7 @@ import { CSP, CSP_HEADER, ICON_FILES } from '../tools/serve.js';
 
 const root = resolve(import.meta.dirname, '..');
 const ALLOWED_TOP = new Set([
-  'LICENSE', 'THIRD_PARTY_NOTICES', '_headers', 'index.html', 'assets',
+  'LICENSE', 'THIRD_PARTY_NOTICES', '_headers', 'index.html', '404.html', 'assets',
   ...ICON_FILES,
 ]);
 

@@ -23,7 +23,7 @@ const MIME: Record<string, string> = {
 };
 
 // Shared with index.html meta CSP. Header adds frame-ancestors (meta cannot set it).
-export const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+export const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; worker-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests";
 export const CSP_HEADER = `${CSP}; frame-ancestors 'none'`;
 
 const HEADERS: Record<string, string> = {
