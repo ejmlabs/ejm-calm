@@ -67,7 +67,19 @@ Review hooks (`window.__calmReview`) are available only with `?debug=1`, among t
 `THIRD_PARTY_NOTICES`, and `public/_headers`). Cloudflare
 Pages-style `_headers` sets CSP, framing, sniffing, referrer, and immutable
 caching for `/assets/*`. `wrangler.jsonc` serves `dist/` as static assets at
-calm.ejmlabs.com.
+calm.ejmlabs.com. Its `env.staging` block serves the same build as the Worker
+`calm-staging` at calm-staging.ejmlabs.com, which is publicly reachable and
+serves the latest main.
+
+A push to main runs `.github/workflows/deploy.yml`, the canonical caller of the
+shared `ejmlabs/.github` workflow `deploy-site.yml`. A build job with no secrets
+and `contents: read` builds `dist/` from that main commit. A staging job then
+runs `wrangler deploy --env staging` automatically. A production job deploys
+the same built files with the top-level config, but only after the required
+reviewer (@everettmorgan) approves the run in the GitHub `production`
+environment. Deploy jobs run Wrangler 4.151.3, pinned in the shared repository,
+with the `CLOUDFLARE_API_TOKEN` secret of the `staging` and `production` GitHub
+environments.
 
 Serve the `dist/` tree as produced. No server functions, external assets,
 import maps, or runtime package resolution are required.
