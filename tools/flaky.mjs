@@ -6,15 +6,31 @@ import { fileURLToPath } from 'node:url';
 
 // Compare individual tests, not just the exit status of the whole suite.
 export function mixedTests(first, second) {
+  let incomplete = false;
   const results = (report) => {
-    if (!Array.isArray(report.testResults)) throw new Error('invalid Vitest report');
     const tests = new Map();
+    const duplicates = new Set();
+    if (!Array.isArray(report?.testResults)) {
+      incomplete = true;
+      return tests;
+    }
     for (const file of report.testResults) {
-      if (typeof file.name !== 'string' || !Array.isArray(file.assertionResults)) throw new Error('invalid Vitest file result');
+      if (typeof file?.name !== 'string' || !Array.isArray(file.assertionResults)) {
+        incomplete = true;
+        continue;
+      }
       for (const test of file.assertionResults) {
-        if (typeof test.fullName !== 'string' || typeof test.status !== 'string') throw new Error('invalid Vitest test result');
+        if (typeof test?.fullName !== 'string' || typeof test.status !== 'string') {
+          incomplete = true;
+          continue;
+        }
         const id = JSON.stringify([file.name, test.fullName]);
-        if (tests.has(id)) throw new Error(`duplicate test name: ${id}`);
+        if (tests.has(id) || duplicates.has(id)) {
+          incomplete = true;
+          tests.delete(id);
+          duplicates.add(id);
+          continue;
+        }
         tests.set(id, test.status);
       }
     }
@@ -22,17 +38,18 @@ export function mixedTests(first, second) {
   };
   const a = results(first);
   const b = results(second);
-  if (a.size !== b.size || [...a.keys()].some((id) => !b.has(id))) throw new Error('test sets differ between runs');
+  if (a.size !== b.size || [...a.keys()].some((id) => !b.has(id))) incomplete = true;
   for (const [id, status] of a) {
     const next = b.get(id);
     if ((status === 'passed' || status === 'failed') !== (next === 'passed' || next === 'failed')) {
-      throw new Error(`test did not execute in both runs: ${id}`);
+      incomplete = true;
     }
   }
-  return [...a].filter(([id, status]) =>
+  const mixed = [...a].filter(([id, status]) =>
     (status === 'passed' && b.get(id) === 'failed') ||
     (status === 'failed' && b.get(id) === 'passed'),
   ).map(([id]) => JSON.parse(id));
+  return { mixed, incomplete };
 }
 
 function main() {
@@ -48,14 +65,8 @@ function main() {
     try { data = JSON.parse(readFileSync(report, 'utf8')); } catch (error) { console.error(`Cannot read attempt ${n} report:`, error.message); }
     attempts.push({ status: result.status, signal: result.signal, error: result.error?.message, report: data });
   }
-  let mixed = [];
-  let incomplete = false;
-  try {
-    mixed = mixedTests(attempts[0].report, attempts[1].report);
-  } catch (error) {
-    incomplete = true;
-    console.error('Cannot compare test reports:', error.message);
-  }
+  const { mixed, incomplete } = mixedTests(attempts[0].report, attempts[1].report);
+  if (incomplete) console.error('Cannot fully compare test reports');
   writeFileSync(join(output, 'summary.json'), JSON.stringify({
     attempts: attempts.map(({ report, ...attempt }) => attempt), mixed, incomplete,
   }, null, 2) + '\n');
