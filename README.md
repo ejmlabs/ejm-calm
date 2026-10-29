@@ -46,8 +46,10 @@ checks use Playwright Core and the system Chrome executable.
 
 The test reliability workflow runs the unit suite twice on pull requests, main,
 and daily. It reports identifiable tests that pass in one run and fail in the
-other, even when other evidence is incomplete. It preserves available reports
-and fails if either run fails or the evidence is incomplete. Run it locally with
+other, even when other evidence is incomplete. It compares both reports with a
+separately collected test inventory, and fails if either run fails or a case is
+skipped or omitted. It preserves available reports and logs if a comparison
+times out. Run it locally with
 `node tools/flaky.mjs`; it prints the evidence directory.
 
 `npx tsx tools/long-journey.ts 2 42 7` swims

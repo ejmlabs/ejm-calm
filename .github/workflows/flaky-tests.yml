@@ -21,7 +21,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: node --test tools/flaky.test.mjs
       - name: Compare two independent test runs
-        run: node tools/flaky.mjs
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          node tools/flaky.mjs 2>&1 | tee "$RUNNER_TEMP/calm-flaky.log"
         env:
           FLAKE_OUTPUT: ${{ runner.temp }}/calm-flaky-tests
       - name: Preserve test reports
@@ -29,5 +32,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: calm-test-reliability
-          path: ${{ runner.temp }}/calm-flaky-tests/
+          path: |
+            ${{ runner.temp }}/calm-flaky-tests/
+            ${{ runner.temp }}/calm-flaky.log
           if-no-files-found: warn

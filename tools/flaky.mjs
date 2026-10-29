@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // Compare individual tests, not just the exit status of the whole suite.
-export function mixedTests(first, second) {
+export function mixedTests(first, second, inventory) {
   let incomplete = false;
   const results = (report) => {
     const tests = new Map();
@@ -31,13 +31,35 @@ export function mixedTests(first, second) {
           duplicates.add(id);
           continue;
         }
+        if (test.status !== 'passed' && test.status !== 'failed') incomplete = true;
         tests.set(id, test.status);
       }
     }
     return tests;
   };
+  const expected = new Set();
+  const ineligible = new Set();
+  if (!Array.isArray(inventory) || inventory.length === 0) {
+    incomplete = true;
+  } else {
+    for (const item of inventory) {
+      if (typeof item?.file !== 'string' || typeof item?.name !== 'string' || typeof item?.skipped !== 'boolean') {
+        incomplete = true;
+        continue;
+      }
+      const id = JSON.stringify([item.file, item.name]);
+      if (item.skipped || expected.has(id)) {
+        incomplete = true;
+        ineligible.add(id);
+      }
+      expected.add(id);
+    }
+  }
   const a = results(first);
   const b = results(second);
+  for (const tests of [a, b]) {
+    if (tests.size !== expected.size || [...expected].some((id) => !tests.has(id))) incomplete = true;
+  }
   if (a.size !== b.size || [...a.keys()].some((id) => !b.has(id))) incomplete = true;
   for (const [id, status] of a) {
     const next = b.get(id);
@@ -46,8 +68,8 @@ export function mixedTests(first, second) {
     }
   }
   const mixed = [...a].filter(([id, status]) =>
-    (status === 'passed' && b.get(id) === 'failed') ||
-    (status === 'failed' && b.get(id) === 'passed'),
+    !ineligible.has(id) && ((status === 'passed' && b.get(id) === 'failed') ||
+    (status === 'failed' && b.get(id) === 'passed')),
   ).map(([id]) => JSON.parse(id));
   return { mixed, incomplete };
 }
@@ -55,6 +77,16 @@ export function mixedTests(first, second) {
 function main() {
   const output = resolve(process.env.FLAKE_OUTPUT ?? join(tmpdir(), `calm-flakes-${Date.now()}-${process.pid}`));
   mkdirSync(output);
+  const inventoryPath = join(output, 'inventory.json');
+  const listed = spawnSync(process.execPath, [fileURLToPath(new URL('./flaky-inventory.mjs', import.meta.url)), inventoryPath], {
+    stdio: 'inherit', timeout: 120_000,
+  });
+  let inventory = null;
+  if (listed.status === 0) {
+    try { inventory = JSON.parse(readFileSync(inventoryPath, 'utf8')); } catch (error) { console.error('Cannot read test inventory:', error.message); }
+  } else {
+    console.error('Cannot collect test inventory:', listed.error?.message ?? `exit ${listed.status}, signal ${listed.signal}`);
+  }
   const attempts = [];
   for (let n = 1; n <= 2; n++) {
     const report = join(output, `attempt-${n}.json`);
@@ -65,9 +97,10 @@ function main() {
     try { data = JSON.parse(readFileSync(report, 'utf8')); } catch (error) { console.error(`Cannot read attempt ${n} report:`, error.message); }
     attempts.push({ status: result.status, signal: result.signal, error: result.error?.message, report: data });
   }
-  const { mixed, incomplete } = mixedTests(attempts[0].report, attempts[1].report);
+  const { mixed, incomplete } = mixedTests(attempts[0].report, attempts[1].report, inventory);
   if (incomplete) console.error('Cannot fully compare test reports');
   writeFileSync(join(output, 'summary.json'), JSON.stringify({
+    inventory: { status: listed.status, signal: listed.signal, error: listed.error?.message },
     attempts: attempts.map(({ report, ...attempt }) => attempt), mixed, incomplete,
   }, null, 2) + '\n');
   for (const [file, name] of mixed) console.error(`Flaky test: ${file} :: ${name}`);
