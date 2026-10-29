@@ -45,8 +45,9 @@ in `shots/` for seeds `42`, `7`, and `1234`, plus a mid-breach frame. Browser
 checks use Playwright Core and the system Chrome executable.
 
 The test reliability workflow runs the unit suite twice on pull requests, main,
-and daily. It reports individual tests that pass in one run and fail in the
-other, retains both reports, and fails if either run fails. Run it locally with
+and daily. It reports identifiable tests that pass in one run and fail in the
+other, even when other evidence is incomplete. It preserves available reports
+and fails if either run fails or the evidence is incomplete. Run it locally with
 `node tools/flaky.mjs`; it prints the evidence directory.
 
 `npx tsx tools/long-journey.ts 2 42 7` swims

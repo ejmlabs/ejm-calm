@@ -5,7 +5,7 @@ Intermittent test failures need to be detected and traced before they are forgot
 ## What Changes
 
 - Run the unit suite twice in a dedicated reliability workflow.
-- Preserve both test reports and fail the check when either run fails.
+- Preserve available test reports and fail the check when either run fails.
 
 ## Capabilities
 
