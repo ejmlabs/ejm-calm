@@ -5,7 +5,8 @@ description: Use before you merge or report a calm change, including npm test, n
 
 # Verifying calm
 
-There is no CI here, so these checks are the gate. A change is verified when the gate passed
+The reliability workflow compares repeated unit tests. These local checks remain the gate.
+A change is verified when the gate passed
 on the PR's head commit, the tools for the changed area ran, and every figure names the machine
 it came from. Software GL and plain Node numbers are never device numbers.
 
@@ -23,7 +24,7 @@ it came from. Software GL and plain Node numbers are never device numbers.
   tile 3 s ahead built, at most 5 recentres, and under 10 percent of stream steps over 3 ms.
 - Set `BROWSER_PATH` when Chrome is not at the default path in `tools/browser.ts`;
   `BROWSER_NO_SANDBOX=1` opts out of the sandbox. Without Chrome the smoke did not run: say so.
-- Put each command and its result in the PR body. That is the only record.
+- Put each command and its result in the PR body.
 
 ## Focused checks
 
