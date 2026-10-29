@@ -46,7 +46,7 @@ there. A rule below or a repository skill may add to them, never relax them.
   commit in a clean clone, run the gate below and
   the focused checks [calm-verify](.agents/skills/calm-verify/SKILL.md) names for the change.
   Merge only when all pass (`gh pr merge N --squash --match-head-commit FULL_SHA`), and list
-  each command and its result in the PR body, since no CI keeps a record.
+  each command and its result in the PR body, since CI does not run the full gate.
 - `openspec/` holds the plans, but there are no generated `openspec-*` skills yet. Follow the
   OpenSpec steps in ejmlabs-workflow by hand: `openspec/changes/NAME/` with `proposal.md`,
   `design.md`, `tasks.md` and delta specs, like the existing changes.

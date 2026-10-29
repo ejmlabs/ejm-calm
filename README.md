@@ -48,9 +48,9 @@ The test reliability workflow runs the unit suite twice on pull requests, main,
 and daily. It reports identifiable tests that pass in one run and fail in the
 other, even when other evidence is incomplete. It compares both reports with a
 separately collected test inventory, and fails if either run fails or a case is
-skipped or omitted. It preserves available reports and logs if a comparison
-times out. Run it locally with
-`node tools/flaky.mjs`; it prints the evidence directory.
+skipped, omitted, duplicated, or otherwise incomplete. It preserves available
+reports and logs if a comparison times out. Run it locally with
+`node tools/flaky.mjs`; it prints the evidence directory on completion.
 
 `npx tsx tools/long-journey.ts 2 42 7` swims
 two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 50 60` swims an hour on each of seeds 1 to 50 (or a list: `42,7,1234 -`) and fails any under 0.5 net over path or with ten minutes under 2 km (it also reports the seeds that dip under 1.5 km in five, how much of the hour a natural coast is within 6 km and the longest open stretch); `npx tsx tools/world-map.ts 42 map.png` draws a seed's world from above (land, regions, the migration lane, optionally the whale's track); `npx tsx tools/frame-cost.ts`
