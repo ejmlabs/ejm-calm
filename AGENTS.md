@@ -50,7 +50,7 @@ there. A rule below or a repository skill may add to them, never relax them.
 
 ## Rules
 
-- No shared `/ready` and `/approve` gate: there is no CI, main is unprotected and PRs merge
+- No shared `/ready` and `/approve` gate: there is no PR CI, main is unprotected and PRs merge
   directly. The gate is local. On the PR's head commit in a clean clone, run the gate below and
   the focused checks [calm-verify](.agents/skills/calm-verify/SKILL.md) names for the change.
   Merge only when all pass (`gh pr merge N --squash --match-head-commit FULL_SHA`), and list
