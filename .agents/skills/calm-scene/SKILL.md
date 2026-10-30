@@ -8,6 +8,12 @@ description: Use before you change the calm scene in src/, such as seeds and ran
 One seed makes one sea, the same on every device and at every frame rate. The page streams an
 endless world around the whale without stalling a frame, and fetches nothing but its own files.
 
+## Principles
+
+KISS, YAGNI, DRY and Clean Code: the simplest code that solves the whole problem, only what a
+task needs now, one authoritative home for each rule, and clear names, small functions and
+structure.
+
 ## Seeded determinism
 
 - Everything a visitor sees is a pure function of the seed, and for streamed parts of the seed
