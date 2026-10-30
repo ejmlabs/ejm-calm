@@ -1,0 +1,43 @@
+name: Test reliability
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 11 * * *'
+permissions:
+  contents: read
+jobs:
+  test-reliability:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - timeout-minutes: 3
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - timeout-minutes: 3
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+        timeout-minutes: 5
+      - run: node --test tools/flaky.test.mjs
+        timeout-minutes: 3
+      - name: Compare two independent test runs
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          node tools/flaky.mjs 2>&1 | tee "$RUNNER_TEMP/calm-flaky.log"
+        env:
+          FLAKE_OUTPUT: ${{ runner.temp }}/calm-flaky-tests
+      - name: Preserve test reports
+        timeout-minutes: 5
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: calm-test-reliability
+          path: |
+            ${{ runner.temp }}/calm-flaky-tests/
+            ${{ runner.temp }}/calm-flaky.log
+          if-no-files-found: warn
