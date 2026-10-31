@@ -11,6 +11,7 @@
 - [x] 2.3 Land: palette, sky-hued shade, sun-coloured light, a stronger key, softer cliff bands
 - [x] 2.4 Land tiles dissolve by coverage wherever the frame multisamples
 - [x] 2.5 Sky: a warm horizon belt at low sun, clearer golden and dusk presets, their haze re-measured by `tools/haze-measure.ts`
+- [x] 2.6 Storm foam: a world-anchored lattice in the wind's frame, octaves fading by footprint; swell faces tinted by tilt
 
 ## 3. Checks
 
