@@ -34,10 +34,13 @@
     "typescript-eslint": "8.71.2",
     "vite": "6.4.5",
     "vitest": "4.1.12",
-    "wrangler": "4.151.3"
+    "wrangler": "4.153.0"
   },
   "dependencies": {
     "simplex-noise": "4.0.3",
     "three": "0.186.1"
+  },
+  "overrides": {
+    "minimatch": "11.0.3"
   }
 }
