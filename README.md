@@ -43,7 +43,8 @@ runs `vite build`, then previews `dist/` on loopback (choose another port with
 
 `npm run typecheck` runs `tsc --noEmit` with `@tsconfig/strictest`. `npm run lint` runs ESLint with no
 warnings allowed: `eslint.strict.mjs` is the shared strict layer synced from ejmlabs/.github (edit it there),
-and `eslint.config.mjs` adds this repository's globals. `npm run build` typechecks then
+and `eslint.config.mjs` adds this repository's globals; it then checks the code's formatting with Prettier
+(two spaces, 100 columns, `.prettierrc.json`), which `npm run format` writes. `npm run build` typechecks then
 produces `dist/` via Vite. `npm test` runs unit tests with Vitest. `npm run
 test:browser` builds then checks desktop and mobile rendering. `npm run shots`
 builds then captures desktop (1440×900) and mobile (390×844 @3x) screenshots
