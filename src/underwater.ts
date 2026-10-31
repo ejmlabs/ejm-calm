@@ -91,6 +91,12 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   let adapted = 1;
   /** Seconds for the eye to adapt most of the way. */
   const ADAPT_SECONDS = 4;
+  /**
+   * Share of the sky's reflection environment that still lights things in deep water: the surface passes the sky only
+   * through Snell's window, and the water's own light comes from the lights, which this view tints by depth. Near the
+   * surface the scattered light is close to the sky's, so the share falls with depth, as the lights' tint does.
+   */
+  const SKY_IN_DEEP_WATER = 0.3;
 
   // three applies scene fog after tone mapping, so `scene.fog.color` is a display colour (as the
   // sky sets it); these shaders fog before tone mapping and take the matching radiance instead.
@@ -522,6 +528,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     depthTint.multiplyScalar(1 / Math.max(depthTint.r, depthTint.g, depthTint.b));
     const light = lerp(1, adapted * 0.9, s);
     const deepen = s * smoothstep01(depth / 40);
+    scene.environmentIntensity = sky.environmentLevel * light * lerp(1, SKY_IN_DEEP_WATER, deepen);
     for (const l of lights) {
       l.light.intensity = l.base.intensity * light;
       l.light.color.copy(l.base.color).lerp(lightTint, s * 0.55).lerp(tinted.copy(l.base.color).multiply(depthTint), deepen);

@@ -43,6 +43,8 @@ export interface SkyHandle {
   level: number;
   /** How strongly the stars show now, 0 (day, thick cloud) to 1. */
   stars: number;
+  /** Strength of the reflection environment above water now, as `scene.environmentIntensity` (the underwater view dims it). */
+  environmentLevel: number;
   /** The seed's own cloud cover under a clear sky. */
   clearCover: number;
   /** Direction the wind blows toward (radians, as the clouds drift): waves and rain follow it. */
@@ -521,7 +523,8 @@ export function createSky(
 
   /** A followed environment carries the sky's own light; a kept one is dimmed to it, never brightened past how it was built. */
   function lightEnvironment(): void {
-    scene.environmentIntensity = envEnabled ? 1 : Math.min(1, handle.level / Math.max(1e-3, envLevel));
+    handle.environmentLevel = envEnabled ? 1 : Math.min(1, handle.level / Math.max(1e-3, envLevel));
+    scene.environmentIntensity = handle.environmentLevel;
   }
 
   const handle: SkyHandle = {
@@ -541,6 +544,7 @@ export function createSky(
     shallowLight: presets[timeOfDay].shallow,
     level: 1,
     stars: 0,
+    environmentLevel: 1,
     clearCover: baseCover,
     windAngle,
     glow: 0,

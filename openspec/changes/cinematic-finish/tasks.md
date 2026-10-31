@@ -12,7 +12,7 @@
 - [x] 2.4 Land tiles dissolve by coverage wherever the frame multisamples
 - [x] 2.5 Sky: a warm horizon belt at low sun, clearer golden and dusk presets, their haze re-measured by `tools/haze-measure.ts`; the belt kept off the environment's underside, and out of the environment phones keep, which dims at night
 - [x] 2.6 Storm foam: a world-anchored lattice in the wind's frame, octaves fading by footprint; swell faces tinted by tilt
-- [x] 2.7 Whale: slate skin, no clear coat, reflection held down, rougher on phones; review `setDay` refreshes the reflections
+- [x] 2.7 Whale: slate skin, no clear coat, reflection held down, rougher on phones; review `setDay` refreshes the reflections; the sky's environment fades with depth under water
 - [x] 2.8 Land grid: twice the cells from 512 m tiles up, unused vertices dropped, land triangles budgeted per tier in the smoke
 - [x] 2.9 Streaming: sails sway only within 400 m; the prefetch and the bakes stop before a slice that would pass the budget (`SliceCost`). The smoke's 300 s cruise on an idle four-core machine in software GL, three alternating runs: 7.6, 7.3 and 6.9 percent of steps over 3 ms, against 12.5, 11.2 and 12.0 at 513a04e (bar: under 10). Not device figures
 
