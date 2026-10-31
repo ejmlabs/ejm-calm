@@ -22,3 +22,5 @@
 - [x] 3.2 `tools/smoke.ts`: software GL draws a plain canvas by default; asked for, the finish (desktop and mobile) and the multisampled canvas (desktop) show the scene and stay under 200 draws
 - [x] 3.3 Shots refreshed and reviewed at desktop and mobile, by day, dusk, night, storm, breach and under water
 - [ ] 3.4 Frame time of the finish on a real phone and desktop GPU (software GL only here)
+- [x] 3.5 Load time against main (981938a), software GL, `tools/load-time.ts`: five alternating cold loads each gave a first sea frame of 6,016 to 6,006 ms on desktop and 11,457 to 12,508 ms (+1,051, over the 1 s bar) on the mobile profile; nine each gave 6,186 to 6,305 (+119) and 11,885 to 12,426 (+540). A CPU profile of the mobile boot found no new hotspot: main's own runs differ by up to 270 ms. Transfer 262 to 269 KB
+- [x] 3.6 Frame cost against main, plain Node, two runs each (`tools/frame-cost.ts`, whose stand-in renderer now has a pixel ratio): birds, wake and the day under 0.01 ms more a step; a near tile build 3.4 to 4.6 ms against 3.8 to 4.1; a far tile with shading maps, in the worker, 58 and 62 ms against 49 and 49 (the finer grid)
