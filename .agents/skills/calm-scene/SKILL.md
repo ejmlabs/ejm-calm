@@ -14,6 +14,19 @@ KISS, YAGNI, DRY and Clean Code: the simplest code that solves the whole problem
 task needs now, one authoritative home for each rule, and clear names, small functions and
 structure.
 
+## Code
+
+- Types extend `@tsconfig/strictest` and lint is the synced strict layer (`eslint.strict.mjs`)
+  with zero warnings. No `any`, no `!`, and no `as` that quiets the checker; an `as` that widens
+  a library's too-narrow type (three's `mergeGeometries` can return null) says why beside it.
+- Reading arrays: a numeric array read inside its own loop bounds uses `values[i] ?? 0`, which
+  keeps hot loops free of calls. Any other list or keyed lookup uses `item(list, index)` or
+  `last(list)` from `src/item.ts`, which throw on a miss.
+- Every cache drops its oldest entries with `trimOldest` (`src/bounded.ts`); a 2D canvas comes
+  from `context2d` (`src/canvas.ts`).
+- Shader uniforms the code sets each frame are typed objects the module keeps and assigns into
+  the material (as `src/ocean.ts` and `src/sky.ts` do), never `material.uniforms['x'].value`.
+
 ## Seeded determinism
 
 - Everything a visitor sees is a pure function of the seed, and for streamed parts of the seed

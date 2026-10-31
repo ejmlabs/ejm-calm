@@ -1,4 +1,4 @@
-import { test } from 'vitest';
+import { test, expect } from 'vitest';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { DAY, DAY_SECONDS, ENV_REFRESH, createSky, pickTimeOfDay, type SkyHandle } from '../src/sky.js';
@@ -9,7 +9,7 @@ import { loadMemory, saveMemory, validateMemory, STORAGE_KEY, VERSION } from '..
 
 /** A sky with no GPU: the environment refresh fails quietly, as it would without WebGL, but is counted. */
 function makeSky(seed: number): { sky: SkyHandle; renderer: THREE.WebGLRenderer; scene: THREE.Scene } {
-  const renderer = { toneMapping: THREE.NoToneMapping, toneMappingExposure: 1 } as unknown as THREE.WebGLRenderer;
+  const renderer = { toneMapping: THREE.NoToneMapping, toneMappingExposure: 1, getPixelRatio: () => 1 } as unknown as THREE.WebGLRenderer;
   const scene = new THREE.Scene();
   return { sky: createSky(seed, renderer, scene), renderer, scene };
 }
@@ -31,7 +31,7 @@ test('the day starts at the seed\'s own time, runs through all five presets in 4
       lowest = Math.min(lowest, sky.sunDirection.y);
       highest = Math.max(highest, sky.sunDirection.y);
     }
-    assert.equal(seen.size, DAY.length, `seed ${seed} saw ${[...seen].join(', ')}`);
+    assert.equal(seen.size, DAY.length, `seed ${String(seed)} saw ${[...seen].join(', ')}`);
     assert.ok(lowest < -0.1, `the sun sets (lowest ${lowest.toFixed(2)})`);
     assert.ok(highest > 0.3);
     // A whole period on, the sun is where it began (the wobble aside).
@@ -62,9 +62,9 @@ test('exposure and fog colour change by at most 1 percent a second through a who
       fog.copy(fogColor(scene));
       density = now;
     }
-    assert.ok(worst <= 0.01, `seed ${seed}: exposure moved ${(100 * worst).toFixed(2)} percent in a second`);
-    assert.ok(worstFog <= 0.01, `seed ${seed}: fog colour moved ${(100 * worstFog).toFixed(2)} percent in a second`);
-    assert.ok(worstDensity <= 0.01, `seed ${seed}: fog density moved ${(100 * worstDensity).toFixed(2)} percent in a second`);
+    assert.ok(worst <= 0.01, `seed ${String(seed)}: exposure moved ${(100 * worst).toFixed(2)} percent in a second`);
+    assert.ok(worstFog <= 0.01, `seed ${String(seed)}: fog colour moved ${(100 * worstFog).toFixed(2)} percent in a second`);
+    assert.ok(worstDensity <= 0.01, `seed ${String(seed)}: fog density moved ${(100 * worstDensity).toFixed(2)} percent in a second`);
     sky.dispose();
   }
 });
@@ -79,7 +79,7 @@ test('the night is dark and quiet: the sun gives no light, the sea and land dim,
   // Four presets on from any start lies the night.
   sky.setDay(((DAY.indexOf('night') - DAY.indexOf(day) + DAY.length) % DAY.length) / DAY.length);
   assert.equal(sky.phase().name, 'night');
-  assert.ok(sky.level < 0.2);
+  expect(sky.level).toBeLessThan(0.2);
   assert.equal(sky.lightBase.sun.intensity, 0);
   assert.ok(sky.daylight < 0.2);
   assert.ok(luma(sky.hazeColor) < noon.haze * 0.2, 'the haze darkens');
@@ -126,7 +126,7 @@ test('reduced motion halves the cloud drift and slows the day', () => {
     full.sky.update(1, 1);
     calm.sky.update(1, 0.5);
   }
-  const time = (s: SkyHandle) => (s.sky.material as THREE.ShaderMaterial).uniforms['time']!.value as number;
+  const time = (s: SkyHandle) => item((s.sky.material).uniforms, 'time').value as number;
   assert.equal(time(calm.sky), time(full.sky) / 2);
   const advance = (s: SkyHandle) => {
     const p = s.phase();
@@ -153,7 +153,7 @@ test('overcast keeps the horizon calm: the fog is no brighter than in clear weat
       assert.ok(luma(sky.hazeColor) <= clearHaze * 1.001 + 1e-9, 'overcast haze is brighter than clear');
       // The sea fog (FogExp2) and the land's haze (its shader's own form): how much of a coast 2 km away shows through.
       const density = (scene.fog as THREE.FogExp2).density;
-      assert.ok(Math.exp(-((density * 2000) ** 2)) > 0.3, `the sea fog hides a coast at 2 km (${density})`);
+      assert.ok(Math.exp(-((density * 2000) ** 2)) > 0.3, `the sea fog hides a coast at 2 km (${String(density)})`);
       for (const look of REGION_LOOKS) {
         const seen = (factor: number) => Math.exp(-2000 / 9000 - (2000 * sky.hazeDensity * look.hazeDensity * factor) ** 2);
         assert.ok(seen(WEATHER.overcast.haze) >= 0.75 * seen(1), `overcast thickens the haze too far in ${look.name}`);
@@ -203,6 +203,7 @@ test('the route indicator: off by default, in on a region change, out after six 
 });
 
 import { STARS_FROM, STARS_FULL } from '../src/sky.js';
+import { item } from '../src/item.js';
 
 test('stars fade in as the sun sets, fade out as it rises, and thick cloud hides them', () => {
   const { sky } = makeSky(42);
@@ -233,7 +234,7 @@ test('stars fade in as the sun sets, fade out as it rises, and thick cloud hides
   weather.set('overcast');
   sky.setWeather(weather.look);
   sky.update(0);
-  assert.ok(sky.stars < 0.2, `${sky.stars} under overcast`);
+  assert.ok(sky.stars < 0.2, `${String(sky.stars)} under overcast`);
   weather.set('clear');
   sky.setWeather(weather.look);
   sky.update(0);

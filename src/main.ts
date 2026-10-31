@@ -30,8 +30,9 @@ import { createWeatherFx } from './weather-fx.js';
 import { createLandLife, HERD_CELL, TOWN_CELL } from './land-life.js';
 import { PACES, type Pace } from './pace.js';
 import { createViewControls } from './view-controls.js';
+import { item } from './item.js';
 
-type CalmReview = {
+interface CalmReview {
   time: number;
   advance: (seconds: number) => void;
   /** Swims the whale on for this many seconds of simulation (30 Hz steps), streaming the world as it goes. */
@@ -66,13 +67,13 @@ type CalmReview = {
    * Towns and herds within `radius` of the whale, nearest first: where, ground height, how many, and a vantage on
    * open water with a clear sightline to them (null when there is none within 400 m).
    */
-  life: (radius: number) => Array<{ kind: 'town' | 'herd'; x: number; y: number; z: number; count: number; vantage: [number, number, number] | null }>;
+  life: (radius: number) => { kind: 'town' | 'herd'; x: number; y: number; z: number; count: number; vantage: [number, number, number] | null }[];
   /** The highest land between `near` and `far` metres from the whale (world coordinates). */
   peak: (near: number, far: number) => { x: number; y: number; z: number };
   /** Review camera at world `from` looking at `to`, the whale and the land streamed around it; null returns to the chase. */
   view: (from: [number, number, number] | null, to?: [number, number, number]) => void;
   stats: () => Record<string, number | string | boolean | number[]>;
-};
+}
 
 const params = new URLSearchParams(location.search);
 const debug = params.get('debug') === '1';
@@ -92,7 +93,7 @@ function markJourney(): void {
   journey.fixAt = time;
   const fixes = journey.fixes;
   for (let i = 0; i + 2 * REVISIT_AFTER < fixes.length; i += 2) {
-    if (Math.hypot(x - fixes[i]!, z - fixes[i + 1]!) < REVISIT_RADIUS) {
+    if (Math.hypot(x - (fixes[i] ?? 0), z - (fixes[i + 1] ?? 0)) < REVISIT_RADIUS) {
       journey.back++;
       break;
     }
@@ -126,9 +127,9 @@ const indicator = createRoute(REGION_LOOKS.map((look) => look.name));
 const resolved = resolveSeed(location.search, memory?.seed, () => {
   const word = new Uint32Array(1);
   crypto.getRandomValues(word);
-  return word[0]! / 0x100000000;
+  return (word[0] ?? 0) / 0x100000000;
 });
-let seed = resolved.seed;
+const seed = resolved.seed;
 history.replaceState(null, '', seedURL(location.href, seed));
 
 const mobile = matchMedia('(pointer: coarse)').matches || window.innerWidth < 700;
@@ -137,12 +138,12 @@ const quality = createQuality({
   dpr: window.devicePixelRatio || 1,
   maxDpr: mobile ? 2 : 2,
   cores: navigator.hardwareConcurrency || 8,
-  memory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory || 8,
+  memory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8,
 });
 
 const audio = new OceanAudio(memory?.sound ?? { enabled: false, volume: 0.35 }, seed);
 const ui = createUI({
-  share: () => `${location.origin}${location.pathname}?seed=${seed >>> 0}`,
+  share: () => `${location.origin}${location.pathname}?seed=${String(seed >>> 0)}`,
   newSeed() {
     const next = nextSeed(seed);
     location.href = seedURL(location.href, next).href;
@@ -278,7 +279,7 @@ try {
   birds = createBirds(seed, quality.tier);
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
-  world.origin.onRecenter((dx, dz) => rig.shift(dx, dz));
+  world.origin.onRecenter((dx, dz) => { rig.shift(dx, dz); });
   underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, depthAt: world.land.depthAt, origin: world.origin, tier: quality.tier, seed });
   // Review only (`?debug=1&fish=1`): every fish species in a small school ahead of the camera.
   if (debug && params.get('fish') === '1') fishShowcase = createFishShowcase(fishTime, UNDERWATER_LAYER);
@@ -306,7 +307,7 @@ function resize(): void {
 resize();
 window.addEventListener('resize', resize);
 
-const view = createViewControls(canvas, rig, (orbiting) => ui.showReset(orbiting));
+const view = createViewControls(canvas, rig, (orbiting) => { ui.showReset(orbiting); });
 
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
 let routeClock = performance.now();
@@ -319,7 +320,9 @@ let lastSave = 0;
 
 function sync(): void {
   ui.sync({ seed, sound: audio.enabled, route: routeOn, dives: followDives, pace });
-  audio.sync(!document.hidden).catch(() => {});
+  audio.sync(!document.hidden).catch(() => {
+    // Sound stays off when the context cannot start; the button still reflects the choice.
+  });
 }
 
 function persist(): void {
@@ -341,7 +344,7 @@ function followWhale(): void {
 }
 
 /** Side-on, close framing so the whale fills ~35–50% of screen width. */
-function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number; pitch?: number; distance?: number } = {}): void {
+function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number | undefined; pitch?: number | undefined; distance?: number | undefined } = {}): void {
   // Review yaw is relative to the heading (0 = behind); −π/2 is a broadside on the whale's
   // left, and the small negative offset swings toward the head for a three-quarter view.
   // Debug overrides are clamped to the ranges the camera rig itself allows.
@@ -639,7 +642,7 @@ if (debug) {
       for (let j = Math.floor((z - radius) / HERD_CELL); j <= Math.floor((z + radius) / HERD_CELL); j++) {
         for (let i = Math.floor((x - radius) / HERD_CELL); i <= Math.floor((x + radius) / HERD_CELL); i++) {
           const herd = life.herd(i, j);
-          if (herd.length) add('herd', herd[0]!.x, herd[0]!.z, herd.length);
+          if (herd.length) add('herd', item(herd, 0).x, item(herd, 0).z, herd.length);
         }
       }
       return out.sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z));
@@ -671,7 +674,7 @@ if (debug) {
       markJourney();
     },
     setRoute(on: boolean) {
-      routeOn = Boolean(on);
+      routeOn = on;
       indicator.setEnabled(routeOn, world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
       ui.showRoute(indicator.visible, indicator.text);
       sync();
@@ -705,7 +708,7 @@ if (debug) {
         path: journey.path,
         revisit: journey.fixes.length ? journey.back / (journey.fixes.length / 2) : 0,
         region: world.land.regions.dominantAt(whale.state.x, whale.state.z),
-        regionName: REGION_LOOKS[world.land.regions.dominantAt(whale.state.x, whale.state.z)]!.name,
+        regionName: item(REGION_LOOKS, world.land.regions.dominantAt(whale.state.x, whale.state.z)).name,
         landNear: landWithin(whale.state.x, whale.state.z, 4500),
         net: Math.hypot(journey.x - journey.fromX, journey.z - journey.fromZ) || 0,
         speed: whale.state.speed,

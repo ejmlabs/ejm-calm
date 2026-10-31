@@ -1,10 +1,11 @@
-import * as THREE from 'three';
+import type * as THREE from 'three';
 import { hash, random } from './rng.js';
 import { SHIP_CELL, cellDistance, chunksAround, createChunkStreamer, parseChunkKey } from './chunks.js';
 import { createShip, createShips, type ShipHandle } from './ships.js';
 import type { ShipSpec } from './terrain.js';
 import type { Shore } from './shore.js';
 import { damp, smoothstep } from './math.js';
+import { item } from './item.js';
 
 /** Cells are loaded within this distance of the whale, so a new ship always appears beyond the fade. */
 const LOAD = 1800;
@@ -61,9 +62,9 @@ export function shipSpecsForCell(seed: number, cx: number, cz: number, maskAt: (
   return specs;
 }
 
-type Ship = { handle: ShipHandle; vis: number };
+interface Ship { handle: ShipHandle; vis: number }
 
-export type ShipStream = {
+export interface ShipStream {
   /** Ships currently afloat and at least partly visible (same array every call). */
   active: () => readonly ShipHandle[];
   /** Every loaded ship, visible or not. */
@@ -73,7 +74,7 @@ export type ShipStream = {
   setVisible: (visible: boolean) => void;
   stats: () => { cells: number; ships: number; visible: number };
   dispose: () => void;
-};
+}
 
 export function createShipStream(options: {
   seed: number;
@@ -133,7 +134,7 @@ export function createShipStream(options: {
     maxBuildsPerFrame: 1,
   });
 
-  const order: Array<{ ship: Ship; d: number }> = [];
+  const order: { ship: Ship; d: number }[] = [];
   const streamedAt = { x: Infinity, z: Infinity };
   let filling = true;
 
@@ -158,7 +159,7 @@ export function createShipStream(options: {
       active.length = 0;
       handles.length = 0;
       for (let i = 0; i < order.length; i++) {
-        const { ship, d } = order[i]!;
+        const { ship, d } = item(order, i);
         handles.push(ship.handle);
         const target = i < options.cap ? 1 - smoothstep(SHOW, HIDE, d) : 0;
         ship.vis = primed ? damp(ship.vis, target, 0.9, dt) : target;

@@ -5,6 +5,7 @@ import { clamp, smoothstep } from './math.js';
 import { HERD_CELL, latticeUnit, OBJECT_LEVELS, TOWN_CELL, TREE, TREE_CELL, WALKER_LEVELS, type Biome, type House, type LandLife, type Walker } from './land-life.js';
 import type { BufferGeometry } from 'three';
 import { cone, house as houseShape, lump, placed, shape, trunk, type Rgb } from './land-objects.js';
+import { item } from './item.js';
 
 /**
  * Land tile geometry, a pure function of (land, level, ix, iz, cells). Runs in
@@ -21,7 +22,7 @@ export function tileSize(level: number): number {
   return CHUNK_SIZE * 2 ** level;
 }
 
-export type TileData = {
+export interface TileData {
   /** Local to the tile's (x0, z0) corner. */
   positions: Float32Array;
   normals: Float32Array;
@@ -37,14 +38,14 @@ export type TileData = {
   walkers: Float32Array | null;
   /** Shading maps of a coarse tile (see `MAP_LEVEL`), or null. */
   maps: ShadingMaps | null;
-};
+}
 
 /**
  * A coarse tile's surface at four times its vertex density, so far ranges show their spurs, gullies, rock and snow
  * lines instead of the facets of their mesh: `size`² texels over the tile, texel centres at (t + 0.5) / size,
  * colour as sRGB, and the normal (xyz from 0 to 255) with a cavity term in alpha (dark in gullies, light on ridges).
  */
-export type ShadingMaps = { size: number; color: Uint8Array; normal: Uint8Array };
+export interface ShadingMaps { size: number; color: Uint8Array; normal: Uint8Array }
 
 /** Tiles from this level up (512 m and more, with vertices 21 m or more apart) carry shading maps. */
 export const MAP_LEVEL = 2;
@@ -55,7 +56,7 @@ const MAP_DENSITY = 4;
 export const WALKER_STRIDE = 8;
 
 /** What a tile needs to carry life: the placement rules and the tier's object cap. */
-export type TileLife = { life: LandLife; objects: number };
+export interface TileLife { life: LandLife; objects: number }
 
 
 type Color = [number, number, number];
@@ -164,7 +165,7 @@ export function buildTile(
       const k = j * S + i;
       raw[k] = land.surfaceAt(x0 + (i - B) * step, z0 + (j - B) * step, ring, surface);
       cliffs[k] = surface.cliff;
-      if (raw[k]! > highest) highest = raw[k]!;
+      if (raw[k] > highest) highest = raw[k] ?? 0;
     }
   }
   if (highest < DEEP) return null;
@@ -176,15 +177,16 @@ export function buildTile(
     for (let j = 1; j < S - 1; j++) {
       for (let i = 1; i < S - 1; i++) {
         const k = j * S + i;
-        const around = (raw[k - 1]! + raw[k + 1]! + raw[k - S]! + raw[k + S]!) * 0.25;
+        const around = ((raw[k - 1] ?? 0) + (raw[k + 1] ?? 0) + (raw[k - S] ?? 0) + (raw[k + S] ?? 0)) * 0.25;
         const limit = around + step * 0.8;
-        if (raw[k]! > limit) heights[k] = limit;
+        if ((raw[k] ?? 0) > limit) heights[k] = limit;
       }
     }
   }
 
   const life = extras && level < OBJECT_LEVELS ? extras : null;
   const biome = extras ? extras.life.biome(land.regions.weightsAt(x0 + size / 2, z0 + size / 2)) : null;
+  const forestAt = extras && biome ? (x: number, z: number, h: number, slopeY: number, cliff: number) => extras.life.forestAt(x, z, h, slopeY, cliff, biome) : undefined;
   const count = N + 1;
   const at = (i: number, j: number) => (j + B) * S + (i + B);
   // Grid vertices, then up to 4N skirt vertices.
@@ -198,12 +200,12 @@ export function buildTile(
     for (let i = 0; i < count; i++) {
       const v = j * count + i;
       const k = at(i, j);
-      const h = heights[k]!;
+      const h = heights[k] ?? 0;
       positions[v * 3] = i * step;
       positions[v * 3 + 1] = h - SINK;
       positions[v * 3 + 2] = j * step;
-      let nx = (heights[k - 1]! - heights[k + 1]!) / (2 * step);
-      let nz = (heights[k - S]! - heights[k + S]!) / (2 * step);
+      let nx = ((heights[k - 1] ?? 0) - (heights[k + 1] ?? 0)) / (2 * step);
+      let nz = ((heights[k - S] ?? 0) - (heights[k + S] ?? 0)) / (2 * step);
       let ny = 1;
       const len = Math.hypot(nx, ny, nz);
       nx /= len;
@@ -218,14 +220,14 @@ export function buildTile(
       // Coarse cells smear a cliff face over one cell: colour it as a cliff from the land's own cliff map.
       // Far levels are too coarse for per-face rock and snow: colour from a gentler slope
       // so a range reads as one mass with snowy tops, not stripes.
-      const slopeY = Math.min(ring >= 3 ? ny + (1 - ny) * 0.6 : ny, 1 - cliffs[k]! * 0.75);
-      const forest = biome ? extras!.life.forestAt(wx, wz, h, slopeY, cliffs[k]!, biome) : undefined;
+      const slopeY = Math.min(ring >= 3 ? ny + (1 - ny) * 0.6 : ny, 1 - (cliffs[k] ?? 0) * 0.75);
+      const forest = forestAt?.(wx, wz, h, slopeY, cliffs[k] ?? 0);
       biomeColor(h, slopeY, patch, rgb, forest);
       colors[v * 3] = rgb[0];
       colors[v * 3 + 1] = rgb[1];
       colors[v * 3 + 2] = rgb[2];
       // Rock detail on cliffs and real faces only: hillsides stay grass.
-      detail[v * 4] = Math.round(255 * Math.max(cliffs[k]!, 1 - smoothstep(0.35, 0.6, slopeY)));
+      detail[v * 4] = Math.round(255 * Math.max(cliffs[k] ?? 0, 1 - smoothstep(0.35, 0.6, slopeY)));
       detail[v * 4 + 1] = Math.round(255 * sandAt(h, slopeY, patch));
       detail[v * 4 + 2] = Math.round(255 * (forest ?? 0));
     }
@@ -239,7 +241,7 @@ export function buildTile(
       const b = a + 1;
       const c = a + count;
       const d = c + 1;
-      const y = Math.max(positions[a * 3 + 1]!, positions[b * 3 + 1]!, positions[c * 3 + 1]!, positions[d * 3 + 1]!) + SINK;
+      const y = Math.max(positions[a * 3 + 1] ?? 0, positions[b * 3 + 1] ?? 0, positions[c * 3 + 1] ?? 0, positions[d * 3 + 1] ?? 0) + SINK;
       if (y < DEEP) continue;
       emitted[j * N + i] = 1;
       index.push(a, c, b, b, c, d);
@@ -259,14 +261,14 @@ export function buildTile(
     if (s === undefined) {
       s = next++;
       skirtOf.set(v, s);
-      positions[s * 3] = positions[v * 3]!;
-      positions[s * 3 + 1] = skirtBottom(positions[v * 3 + 1]!);
-      positions[s * 3 + 2] = positions[v * 3 + 2]!;
+      positions[s * 3] = positions[v * 3] ?? 0;
+      positions[s * 3 + 1] = skirtBottom(positions[v * 3 + 1] ?? 0);
+      positions[s * 3 + 2] = positions[v * 3 + 2] ?? 0;
       for (let c = 0; c < 3; c++) {
-        normals[s * 3 + c] = normals[v * 3 + c]!;
-        colors[s * 3 + c] = colors[v * 3 + c]!;
+        normals[s * 3 + c] = normals[v * 3 + c] ?? 0;
+        colors[s * 3 + c] = colors[v * 3 + c] ?? 0;
       }
-      for (let c = 0; c < 4; c++) detail[s * 4 + c] = detail[v * 4 + c]!;
+      for (let c = 0; c < 4; c++) detail[s * 4 + c] = detail[v * 4 + c] ?? 0;
     }
     return s;
   };
@@ -298,10 +300,10 @@ export function buildTile(
       const j = Math.floor(fz);
       const u = fx - i;
       const w = fz - j;
-      const ha = heights[at(i, j)]!;
-      const hb = heights[at(i + 1, j)]!;
-      const hc = heights[at(i, j + 1)]!;
-      const hd = heights[at(i + 1, j + 1)]!;
+      const ha = heights[at(i, j)] ?? 0;
+      const hb = heights[at(i + 1, j)] ?? 0;
+      const hc = heights[at(i, j + 1)] ?? 0;
+      const hd = heights[at(i + 1, j + 1)] ?? 0;
       return u + w <= 1 ? ha + (hb - ha) * u + (hc - ha) * w : hd + (hc - hd) * (1 - u) + (hb - hd) * (1 - w);
     };
     const vertexAt = (lx: number, lz: number) => at(clamp(Math.round(lx / step), 0, N), clamp(Math.round(lz / step), 0, N));
@@ -315,7 +317,7 @@ export function buildTile(
     }
     const trees = treesIn(life.life, biome, level, x0, z0, size, houses, (lx, lz) => {
       const k = vertexAt(lx, lz);
-      return { h: groundAt(lx, lz), ny: Math.min(normals[(Math.round(lz / step) * count + Math.round(lx / step)) * 3 + 1]!, 1 - cliffs[k]! * 0.75), cliff: cliffs[k]! };
+      return { h: groundAt(lx, lz), ny: Math.min(normals[(Math.round(lz / step) * count + Math.round(lx / step)) * 3 + 1] ?? 0, 1 - (cliffs[k] ?? 0) * 0.75), cliff: cliffs[k] ?? 0 };
     });
     // Tiles from about a kilometre out carry half as many: their trees are a pixel or two.
     const room = Math.max(0, (level >= 3 ? life.objects >> 1 : life.objects) - houses.length);
@@ -331,8 +333,9 @@ export function buildTile(
     if (level < WALKER_LEVELS) {
       const list = walkersIn(life.life, x0, z0, size);
       if (list.length) {
-        walkers = new Float32Array(list.length * WALKER_STRIDE);
-        list.forEach((w, n) => walkers!.set([w.kind, w.x - x0, groundAt(w.x - x0, w.z - z0) - SINK, w.z - z0, w.yaw, w.range, w.phase, w.tint], n * WALKER_STRIDE));
+        const packed = new Float32Array(list.length * WALKER_STRIDE);
+        walkers = packed;
+        list.forEach((w, n) => { packed.set([w.kind, w.x - x0, groundAt(w.x - x0, w.z - z0) - SINK, w.z - z0, w.yaw, w.range, w.phase, w.tint], n * WALKER_STRIDE); });
       }
     }
   }
@@ -344,7 +347,7 @@ export function buildTile(
     objects,
     objectTriangles: (index.length - ground) / 3,
     walkers,
-    maps: maps && level >= MAP_LEVEL ? shadingMaps(land, patchNoise, x0, z0, size, N * MAP_DENSITY, biome ? (x, z, h, slopeY, cliff) => extras!.life.forestAt(x, z, h, slopeY, cliff, biome) : undefined) : null,
+    maps: maps && level >= MAP_LEVEL ? shadingMaps(land, patchNoise, x0, z0, size, N * MAP_DENSITY, forestAt) : null,
   };
 }
 
@@ -379,9 +382,9 @@ function shadingMaps(
   for (let j = 0; j < M; j++) {
     for (let i = 0; i < M; i++) {
       const k = (j + 2) * S + (i + 2);
-      const h = heights[k]!;
-      let nx = (heights[k - 1]! - heights[k + 1]!) / (2 * step);
-      let nz = (heights[k - S]! - heights[k + S]!) / (2 * step);
+      const h = heights[k] ?? 0;
+      let nx = ((heights[k - 1] ?? 0) - (heights[k + 1] ?? 0)) / (2 * step);
+      let nz = ((heights[k - S] ?? 0) - (heights[k + S] ?? 0)) / (2 * step);
       const len = Math.hypot(nx, 1, nz);
       nx /= len;
       nz /= len;
@@ -389,15 +392,15 @@ function shadingMaps(
       const wx = x0 + (i + 0.5) * step;
       const wz = z0 + (j + 0.5) * step;
       const patch = patchNoise(wx / 140, wz / 140) * 0.7 + patchNoise(wx / 37, wz / 37) * 0.3;
-      const slopeY = Math.min(ny, 1 - cliffs[k]! * 0.75);
-      biomeColor(h, slopeY, patch, rgb, forestAt?.(wx, wz, h, slopeY, cliffs[k]!));
+      const slopeY = Math.min(ny, 1 - (cliffs[k] ?? 0) * 0.75);
+      biomeColor(h, slopeY, patch, rgb, forestAt?.(wx, wz, h, slopeY, cliffs[k] ?? 0));
       const t = (j * M + i) * 4;
       color[t] = toSrgb(rgb[0]);
       color[t + 1] = toSrgb(rgb[1]);
       color[t + 2] = toSrgb(rgb[2]);
       color[t + 3] = 255;
       // Height against the ring two texels out, as a slope: positive on ridges and spurs, negative in gullies.
-      const around = (heights[k - 2]! + heights[k + 2]! + heights[k - 2 * S]! + heights[k + 2 * S]!) * 0.25;
+      const around = ((heights[k - 2] ?? 0) + (heights[k + 2] ?? 0) + (heights[k - 2 * S] ?? 0) + (heights[k + 2 * S] ?? 0)) * 0.25;
       normal[t] = Math.round(127.5 + 127.5 * nx);
       normal[t + 1] = Math.round(127.5 + 127.5 * ny);
       normal[t + 2] = Math.round(127.5 + 127.5 * nz);
@@ -407,7 +410,7 @@ function shadingMaps(
   return { size: M, color, normal };
 }
 
-type Arrays = { positions: Float32Array; normals: Float32Array; colors: Float32Array; detail: Uint8Array };
+interface Arrays { positions: Float32Array; normals: Float32Array; colors: Float32Array; detail: Uint8Array }
 
 /** Unindexed object geometry appended after the `vertices` ground vertices, flagged as objects for the shader. */
 function appendObjects(ground: Arrays, vertices: number, objects: BufferGeometry, index: number[]): Arrays {
@@ -459,7 +462,7 @@ function walkersIn(life: LandLife, x0: number, z0: number, size: number): Walker
   return out;
 }
 
-type Tree = { kind: number; x: number; z: number; h: number; yaw: number; scale: number; shade: number; rank: number };
+interface Tree { kind: number; x: number; z: number; h: number; yaw: number; scale: number; shade: number; rank: number }
 
 /** Lattice salts. */
 const SALT_RANK = 0x7472;
@@ -535,13 +538,13 @@ const scaled = (c: Rgb, k: number): Rgb => [c[0] * k, c[1] * k, c[2] * k];
 const trees = new Map<string, BufferGeometry>();
 
 function treeShape(kind: number, shade: number, biome: Biome): BufferGeometry {
-  const palette = LEAVES[kind]!;
+  const palette = item(LEAVES, kind);
   const pick = Math.floor(shade * palette.length) % palette.length;
   const polar = biome.polar > 0.5;
-  const key = `${kind}:${pick}:${polar}`;
+  const key = `${String(kind)}:${String(pick)}:${String(polar)}`;
   const known = trees.get(key);
   if (known) return known;
-  const leaf = palette[pick]!;
+  const leaf = item(palette, pick);
   // Polar woods are darker and bluer.
   const tone: Rgb = polar ? [leaf[0] * 0.85, leaf[1] * 0.9, leaf[2] * 1.05] : leaf;
   const under = scaled(tone, 0.78);

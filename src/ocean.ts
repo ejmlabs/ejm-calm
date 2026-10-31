@@ -5,7 +5,7 @@ import { hash } from './rng.js';
 import type { ShelfMap } from './land.js';
 import { SEA_WAVES, packWaves, seaLevel } from './swell.js';
 
-export type OceanHandle = {
+export interface OceanHandle {
   water: Water;
   mesh: THREE.Mesh;
   /** With a camera, the plane follows it (render space) while ripples stay fixed to the world. */
@@ -24,9 +24,8 @@ export type OceanHandle = {
   setSea: (clock: number, wind: number, eyeY: number) => void;
   /** The swell as the water draws it, packed by `packWaves`; shared with what rides the crests. */
   waves: Float32Array;
-  setSize: (textureSize: number) => void;
   dispose: () => void;
-};
+}
 
 /** Seamless tiling normals via 4D simplex on a torus; heights first, then wrapped central differences. */
 function buildWaterNormals(seed: number, size = 256): THREE.DataTexture {
@@ -60,10 +59,10 @@ function buildWaterNormals(seed: number, size = 256): THREE.DataTexture {
   const slope = 1.2;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const hL = heights[y * size + ((x - 1 + size) % size)]!;
-      const hR = heights[y * size + ((x + 1) % size)]!;
-      const hD = heights[((y - 1 + size) % size) * size + x]!;
-      const hU = heights[((y + 1) % size) * size + x]!;
+      const hL = heights[y * size + ((x - 1 + size) % size)] ?? 0;
+      const hR = heights[y * size + ((x + 1) % size)] ?? 0;
+      const hD = heights[((y - 1 + size) % size) * size + x] ?? 0;
+      const hU = heights[((y + 1) % size) * size + x] ?? 0;
       let nx = (hL - hR) * slope;
       let ny = (hD - hU) * slope;
       let nz = 1;
@@ -126,32 +125,38 @@ export function createOcean(
   water.rotation.x = -Math.PI / 2;
   water.position.y = 0;
 
-  const material = water.material as THREE.ShaderMaterial;
-  if (material.uniforms?.size) material.uniforms.size.value = 1.2;
-  if (material.uniforms?.distortionScale) material.uniforms.distortionScale.value = 4.2;
-  // Slightly muted water so the far plane fades into fog without a bright seam.
-  if (material.uniforms?.waterColor) material.uniforms.waterColor.value.set(0x1a4e68);
-  if (material.uniforms?.alpha) material.uniforms.alpha.value = 1.0;
-  if (material.uniforms?.sunColor) material.uniforms.sunColor.value.set(0xe8dcc0);
+  const material = water.material;
+  // three's own water uniforms, replaced by typed objects this module keeps. Slightly muted water so the far plane
+  // fades into fog without a bright seam.
+  const base = {
+    size: { value: 1.2 },
+    distortionScale: { value: 4.2 },
+    waterColor: { value: new THREE.Color(0x1a4e68) },
+    alpha: { value: 1 },
+    sunColor: { value: new THREE.Color(0xe8dcc0) },
+    sunDirection: { value: sunDirection.clone() },
+    time: { value: 0 },
+  };
+  Object.assign(material.uniforms, base);
 
-  const shelfTextures = applyWaterLook(material, options.shelves, options.reflectionHaze, options.reflectionGain ?? 1);
+  const look = applyWaterLook(material, options.shelves, options.reflectionHaze, options.reflectionGain ?? 1);
   const waves = new Float32Array(SEA_WAVES * 4);
-  applySea(material, geometry.userData['growth'] as number, waves);
+  const sea = applySea(material, typeof geometry.userData['growth'] === 'number' ? geometry.userData['growth'] : 0, waves);
   const maps = { near: options.shelves?.near, far: options.shelves?.far };
   const origin = { x: 0, z: 0 };
   let light = 1;
 
   function place(): void {
-    const uniforms = material.uniforms;
+    if (!look) return;
     // Ripple texture offsets for the origin, reduced to their period in float64 so the GPU never sees large numbers.
-    const size = uniforms.size?.value ?? 1;
     const fract = (v: number) => v - Math.floor(v);
-    const ox = origin.x * size;
-    const oz = origin.z * size;
-    uniforms.rippleShiftA?.value.set(fract(ox / 103), fract(oz / 103), fract(ox / 107), fract(oz / 107));
-    uniforms.rippleShiftB?.value.set(fract(ox / 8907), fract(oz / 9803), fract(ox / 1091), fract(oz / 1027));
-    if (maps.near && uniforms.shelfNearBounds) uniforms.shelfNearBounds.value.copy(shelfBounds(maps.near, origin));
-    if (maps.far && uniforms.shelfFarBounds) uniforms.shelfFarBounds.value.copy(shelfBounds(maps.far, origin));
+    const ox = origin.x * base.size.value;
+    const oz = origin.z * base.size.value;
+    look.rippleShiftA.value.set(fract(ox / 103), fract(oz / 103), fract(ox / 107), fract(oz / 107));
+    look.rippleShiftB.value.set(fract(ox / 8907), fract(oz / 9803), fract(ox / 1091), fract(oz / 1027));
+    if (!look.shelf) return;
+    if (maps.near) look.shelf.shelfNearBounds.value.copy(shelfBounds(maps.near, origin));
+    if (maps.far) look.shelf.shelfFarBounds.value.copy(shelfBounds(maps.far, origin));
   }
   place();
 
@@ -162,42 +167,39 @@ export function createOcean(
     waves,
     update(dt: number, sun: THREE.Vector3, camera?: THREE.Camera) {
       time += dt;
-      const uniforms = (water.material as THREE.ShaderMaterial).uniforms;
-      if (uniforms.time) uniforms.time.value = time * 0.35;
-      if (uniforms.sunDirection) uniforms.sunDirection.value.copy(sun).normalize();
+      base.time.value = time * 0.35;
+      base.sunDirection.value.copy(sun).normalize();
       if (camera) {
         water.position.x = camera.position.x;
         water.position.z = camera.position.z;
       }
     },
     setSea(clock: number, wind: number, eyeY: number) {
-      const uniforms = material.uniforms;
-      if (!uniforms.seaWaves) return;
+      if (!sea) return;
       packWaves(origin.x, origin.z, clock, waves);
       const level = seaLevel();
-      uniforms.seaLevel!.value = level;
-      uniforms.seaEye!.value = eyeY;
-      uniforms.seaChop!.value = 0.8 * level;
+      sea.seaLevel.value = level;
+      sea.seaEye.value = eyeY;
+      sea.seaChop.value = 0.8 * level;
       let top = 0;
-      for (let i = 0; i < SEA_WAVES; i++) top += waves[i * 4 + 2]!;
-      uniforms.seaTop!.value = top;
+      for (let i = 0; i < SEA_WAVES; i++) top += waves[i * 4 + 2] ?? 0;
+      sea.seaTop.value = top;
       // Wind roughens the ripples and streaks the reflections.
-      uniforms.rippleGain!.value = 1.5 + 1.6 * wind;
-      if (uniforms.distortionScale) uniforms.distortionScale.value = 4.2 + 3.5 * wind;
-      uniforms.foamLight!.value = light;
+      sea.rippleGain.value = 1.5 + 1.6 * wind;
+      base.distortionScale.value = 4.2 + 3.5 * wind;
+      sea.foamLight.value = light;
     },
     setWhale(x: number, y: number, z: number, heading: number) {
-      material.uniforms.whaleBody?.value.set(x, z, heading, y);
+      look?.whaleBody.value.set(x, z, heading, y);
     },
     setWaterColor(color: THREE.Color) {
-      material.uniforms.waterColor?.value.copy(color).multiplyScalar(light);
+      base.waterColor.value.copy(color).multiplyScalar(light);
     },
     setSky(haze: THREE.Color, level: number, shallowLight: number) {
-      const uniforms = material.uniforms;
       light = level;
-      uniforms.reflectionHaze?.value.copy(haze);
-      if (uniforms.shallowLight) uniforms.shallowLight.value = (options.shelves?.light ?? 1) * shallowLight;
-      if (uniforms.sunColor) uniforms.sunColor.value.set(0xe8dcc0).multiplyScalar(level);
+      look?.reflectionHaze.value.copy(haze);
+      if (look?.shelf) look.shelf.shallowLight.value = (options.shelves?.light ?? 1) * shallowLight;
+      base.sunColor.value.set(0xe8dcc0).multiplyScalar(level);
     },
     setOrigin(x: number, z: number) {
       origin.x = x;
@@ -205,34 +207,29 @@ export function createOcean(
       place();
     },
     setShelves(next: { near?: ShelfMap; far?: ShelfMap }) {
-      const uniforms = material.uniforms;
-      for (const which of ['near', 'far'] as const) {
-        const shelf = next[which];
-        const name = which === 'near' ? 'shelfNear' : 'shelfFar';
-        if (!shelf || !uniforms[name]) continue;
-        const old = uniforms[name].value as THREE.DataTexture;
-        const texture = shelfTexture(shelf);
-        uniforms[name].value = texture;
-        const at = shelfTextures.indexOf(old);
-        if (at >= 0) shelfTextures[at] = texture;
-        old.dispose();
-        maps[which] = shelf;
+      const shelf = look?.shelf;
+      if (!shelf) return;
+      if (next.near) {
+        shelf.shelfNear.value.dispose();
+        shelf.shelfNear.value = shelfTexture(next.near);
+        maps.near = next.near;
+      }
+      if (next.far) {
+        shelf.shelfFar.value.dispose();
+        shelf.shelfFar.value = shelfTexture(next.far);
+        maps.far = next.far;
       }
       place();
-    },
-    setSize(_textureSize: number) {
-      // Water render target size is fixed at construction; quality changes adjust DPR instead.
     },
     dispose() {
       geometry.dispose();
       normals.dispose();
-      for (const texture of shelfTextures) texture.dispose();
-      (water.material as THREE.Material).dispose();
-      const mirror = (water as unknown as { mirror?: THREE.WebGLRenderTarget }).mirror
-        ?? (water.material as THREE.ShaderMaterial).uniforms?.mirrorSampler?.value;
-      if (mirror && typeof (mirror as THREE.WebGLRenderTarget).dispose === 'function') {
-        (mirror as THREE.WebGLRenderTarget).dispose();
-      }
+      look?.shelf?.shelfNear.value.dispose();
+      look?.shelf?.shelfFar.value.dispose();
+      material.dispose();
+      // three's water keeps its mirror target to itself; its texture is reachable through the sampler.
+      const mirror: unknown = material.uniforms['mirrorSampler']?.value;
+      if (mirror instanceof THREE.Texture) mirror.dispose();
     },
   };
 }
@@ -292,10 +289,10 @@ export function seaGeometry(segments: number, rings: number, radius: number): TH
 
 /** The shared swell in GLSL: `seaWaves` as packed by `packWaves`. Height, and slope with short waves faded by distance. */
 export const SEA_GLSL = `
-  uniform vec4 seaWaves[ ${SEA_WAVES} ];
+  uniform vec4 seaWaves[ ${String(SEA_WAVES)} ];
   float seaHeight( vec2 p, float dist, float near ) {
     float h = 0.0;
-    for ( int i = 0; i < ${SEA_WAVES}; i++ ) {
+    for ( int i = 0; i < ${String(SEA_WAVES)}; i++ ) {
       vec4 w = seaWaves[ i ];
       float lambda = 6.2832 / length( w.xy );
       h += w.z * sin( dot( p, w.xy ) + w.w ) * ( 1.0 - smoothstep( lambda * near, lambda * near * 2.0, dist ) );
@@ -304,7 +301,7 @@ export const SEA_GLSL = `
   }
   vec3 seaSlope( vec2 p, float dist ) {
     vec3 s = vec3( 0.0 );
-    for ( int i = 0; i < ${SEA_WAVES}; i++ ) {
+    for ( int i = 0; i < ${String(SEA_WAVES)}; i++ ) {
       vec4 w = seaWaves[ i ];
       if ( w.z == 0.0 ) continue;
       float phase = dot( p, w.xy ) + w.w;
@@ -325,7 +322,7 @@ const seaVertexPatches: ShaderPatch[] = [
 				uniform float seaEye;
 				uniform float seaGrid;
 				uniform float seaChop;
-				uniform vec4 seaWaves[ ${SEA_WAVES} ];` },
+				uniform vec4 seaWaves[ ${String(SEA_WAVES)} ];` },
   {
     find: 'mirrorCoord = modelMatrix * vec4( position, 1.0 );',
     replace: `mirrorCoord = modelMatrix * vec4( position, 1.0 );
@@ -335,7 +332,7 @@ const seaVertexPatches: ShaderPatch[] = [
 						float seaDist = length( mirrorCoord.xz - cameraPosition.xz );
 						vec2 seaAt = mirrorCoord.xz;
 						float seaH = 0.0;
-						for ( int i = 0; i < ${SEA_WAVES}; i++ ) {
+						for ( int i = 0; i < ${String(SEA_WAVES)}; i++ ) {
 							vec4 w = seaWaves[ i ];
 							if ( w.z == 0.0 ) continue;
 							float k = length( w.xy );
@@ -391,29 +388,33 @@ const seaFragmentPatches: ShaderPatch[] = [
 ];
 
 /** Adds the swell to a (possibly already patched) Water material; all or nothing, as `applyWaterLook`. */
-function applySea(material: THREE.ShaderMaterial, growth: number, waves: Float32Array): void {
+function applySea(material: THREE.ShaderMaterial, growth: number, waves: Float32Array) {
   const vertex = patchShader(material.vertexShader, seaVertexPatches);
   const fragment = patchShader(material.fragmentShader, seaFragmentPatches);
   if (vertex === null || fragment === null) {
     const message = 'ejm-calm: Water shader did not match the expected source; the water stays flat.';
     if (import.meta.env.DEV) throw new Error(message);
     console.warn(message);
-    return;
+    return null;
   }
+  const sea = {
+    seaWaves: { value: waves },
+    seaLevel: { value: 0 },
+    seaEye: { value: 0 },
+    seaGrid: { value: growth },
+    seaChop: { value: 0 },
+    seaTop: { value: 0 },
+    rippleGain: { value: 1.5 },
+    foamLight: { value: 1 },
+  };
   material.vertexShader = vertex;
   material.fragmentShader = fragment;
-  material.uniforms.seaWaves = { value: waves };
-  material.uniforms.seaLevel = { value: 0 };
-  material.uniforms.seaEye = { value: 0 };
-  material.uniforms.seaGrid = { value: growth };
-  material.uniforms.seaChop = { value: 0 };
-  material.uniforms.seaTop = { value: 0 };
-  material.uniforms.rippleGain = { value: 1.5 };
-  material.uniforms.foamLight = { value: 1 };
+  Object.assign(material.uniforms, sea);
   material.needsUpdate = true;
+  return sea;
 }
 
-export type ShaderPatch = { find: string; replace: string };
+export interface ShaderPatch { find: string; replace: string }
 
 /**
  * Applies every patch to a shader source, or returns null if any target text is
@@ -554,33 +555,37 @@ function applyWaterLook(
   shelves: { near: ShelfMap; far: ShelfMap; light?: number } | undefined,
   haze: THREE.Color | undefined,
   gain: number,
-): THREE.DataTexture[] {
+) {
   const patched = patchShader(material.fragmentShader, [...reflectionPatches, ...(shelves ? shelfPatches() : []), ...whalePatches]);
   if (patched === null) {
     const message = 'ejm-calm: Water shader did not match the expected source; using the stock water.';
     if (import.meta.env.DEV) throw new Error(message);
     console.warn(message);
-    return [];
+    return null;
   }
+  const look = {
+    rippleShiftA: { value: new THREE.Vector4() },
+    rippleShiftB: { value: new THREE.Vector4() },
+    // Far below the floor until the first setWhale, so nothing shows.
+    whaleBody: { value: new THREE.Vector4(0, 0, 0, -1e4) },
+    reflectionHaze: { value: (haze ?? new THREE.Color(0x8a9aa4)).clone() },
+    reflectionLift: { value: 0.25 },
+    reflectionGain: { value: Number.isFinite(gain) ? Math.min(3, Math.max(1, gain)) : 1 },
+    shelf: shelves
+      ? {
+          shelfNear: { value: shelfTexture(shelves.near) },
+          shelfFar: { value: shelfTexture(shelves.far) },
+          shelfNearBounds: { value: shelfBounds(shelves.near, { x: 0, z: 0 }) },
+          shelfFarBounds: { value: shelfBounds(shelves.far, { x: 0, z: 0 }) },
+          shallowColor: { value: new THREE.Color(0x58aaa0) },
+          shelfColor: { value: new THREE.Color(0x1d6f7c) },
+          shallowLight: { value: shelves.light ?? 1 },
+        }
+      : null,
+  };
   material.fragmentShader = patched;
-  material.uniforms.rippleShiftA = { value: new THREE.Vector4() };
-  material.uniforms.rippleShiftB = { value: new THREE.Vector4() };
-  // Far below the floor until the first setWhale, so nothing shows.
-  material.uniforms.whaleBody = { value: new THREE.Vector4(0, 0, 0, -1e4) };
-  material.uniforms.reflectionHaze = { value: (haze ?? new THREE.Color(0x8a9aa4)).clone() };
-  material.uniforms.reflectionLift = { value: 0.25 };
-  material.uniforms.reflectionGain = { value: Number.isFinite(gain) ? Math.min(3, Math.max(1, gain)) : 1 };
+  const { shelf, ...uniforms } = look;
+  Object.assign(material.uniforms, uniforms, shelf);
   material.needsUpdate = true;
-  if (!shelves) return [];
-
-  const near = shelfTexture(shelves.near);
-  const far = shelfTexture(shelves.far);
-  material.uniforms.shelfNear = { value: near };
-  material.uniforms.shelfFar = { value: far };
-  material.uniforms.shelfNearBounds = { value: shelfBounds(shelves.near, { x: 0, z: 0 }) };
-  material.uniforms.shelfFarBounds = { value: shelfBounds(shelves.far, { x: 0, z: 0 }) };
-  material.uniforms.shallowColor = { value: new THREE.Color(0x58aaa0) };
-  material.uniforms.shelfColor = { value: new THREE.Color(0x1d6f7c) };
-  material.uniforms.shallowLight = { value: shelves.light ?? 1 };
-  return [near, far];
+  return look;
 }

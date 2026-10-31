@@ -11,6 +11,7 @@ import { createUnderwaterLife } from './underwater-life.js';
 import { createSwarms } from './underwater-swarm.js';
 import type { FeedSite } from './feed-sites.js';
 import { GLSL_WATER_COMMON } from './underwater-glsl.js';
+import { item } from './item.js';
 
 /**
  * The view from under the surface: absorption fog, the surface seen from below
@@ -28,7 +29,7 @@ export const UNDERWATER_LAYER = 2;
 /** Every procedural pattern repeats over this many metres; the origin always snaps to a multiple of it. */
 export const PATTERN_PERIOD = 256;
 
-export type UnderwaterOptions = {
+export interface UnderwaterOptions {
   sky: SkyHandle;
   /** Ground height at world X/Z (negative under the sea). */
   heightAt: (x: number, z: number, lod?: number) => number;
@@ -37,9 +38,9 @@ export type UnderwaterOptions = {
   origin: FloatingOrigin;
   tier: QualityTier;
   seed?: number;
-};
+}
 
-export type UnderwaterHandle = {
+export interface UnderwaterHandle {
   /** `whale` (world metres) keeps scenery out of the camera's line to it and makes swarms part around it. */
   update: (dt: number, time: number, camera: THREE.PerspectiveCamera, whale?: { x: number; y: number; z: number }) => WaterSignal;
   readonly signal: WaterSignal;
@@ -49,7 +50,7 @@ export type UnderwaterHandle = {
   readonly sites: readonly FeedSite[];
   stats: () => { lifeCells: number; lifeInstances: number; schools: number; swarms: number };
   dispose: () => void;
-};
+}
 
 // The seafloor patch reaches past the underwater visibility on every tier (about 175 m across), so a coast's
 // underwater flanks carry on into the haze instead of stopping where the patch ends.
@@ -419,10 +420,10 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   const overlay = layered(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), overlayMaterial));
   overlay.renderOrder = 1000;
   const nearCorner = new THREE.Vector3();
-  const nearMatrix = overlayMaterial.uniforms['uNearToWorld']!.value as THREE.Matrix4;
+  const nearMatrix = item(overlayMaterial.uniforms, 'uNearToWorld').value as THREE.Matrix4;
 
   /** Height range the near plane spans; the overlay only runs while it straddles the water. */
-  function nearSpan(camera: THREE.PerspectiveCamera): [number, number] {
+  function nearSpan(): [number, number] {
     let lo = Infinity;
     let hi = -Infinity;
     for (const [x, y] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
@@ -546,25 +547,25 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     snow.visible = below0;
     if (below0) {
       surface.position.set(camera.position.x, WATER_LEVEL, camera.position.z);
-      const reflect = surfaceMaterial.uniforms['uReflect']!.value as THREE.Color;
+      const reflect = item(surfaceMaterial.uniforms, 'uReflect').value as THREE.Color;
       reflect.copy(below.color).multiplyScalar(0.8);
-      rayMaterial.uniforms['uIntensity']!.value = 0.22 * smoothstep01(depth / 0.8) * daylight * (0.35 + 0.65 * clamp(sky.sunDirection.y * 2.5, 0, 1));
+      item(rayMaterial.uniforms, 'uIntensity').value = 0.22 * smoothstep01(depth / 0.8) * daylight * (0.35 + 0.65 * clamp(sky.sunDirection.y * 2.5, 0, 1));
       pointScale = (renderer.getDrawingBufferSize(tmpSize).y * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5);
-      snowMaterial.uniforms['uScale']!.value = pointScale;
+      item(snowMaterial.uniforms, 'uScale').value = pointScale;
     }
     floor.update(camWorldX, camWorldZ, origin, below0);
 
     // Waterline across the lens while the near plane straddles the surface.
     camera.updateMatrixWorld();
     nearMatrix.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
-    const [lo, hi] = nearSpan(camera);
+    const [lo, hi] = nearSpan();
     overlay.visible = lo < WATER_LEVEL + 0.08 && hi > WATER_LEVEL - 0.08;
     if (overlay.visible) {
       const u = overlayMaterial.uniforms;
-      (u['uWater']!.value as THREE.Color).copy(tint.color);
-      (u['uAir']!.value as THREE.Color).copy(sky.hazeColor);
-      u['uWaterAlpha']!.value = below0 ? 0 : 0.82;
-      u['uAirAlpha']!.value = below0 ? 0.55 : 0;
+      (item(u, 'uWater').value as THREE.Color).copy(tint.color);
+      (item(u, 'uAir').value as THREE.Color).copy(sky.hazeColor);
+      item(u, 'uWaterAlpha').value = below0 ? 0 : 0.82;
+      item(u, 'uAirAlpha').value = below0 ? 0.55 : 0;
     }
     return signal;
   }

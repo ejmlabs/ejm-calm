@@ -23,7 +23,7 @@ export function airAngle(angle: number, n = WATER_IOR): number | null {
   return s >= 1 ? null : Math.asin(s);
 }
 
-export type FogState = { color: THREE.Color; density: number };
+export interface FogState { color: THREE.Color; density: number }
 
 /**
  * Fog at submersion `s`: colour lerps linearly, density geometrically, because
@@ -66,7 +66,7 @@ export function seenLight(depth: number): number {
 }
 
 /** Underwater look keyed by daylight: shallow and deep display colours (sRGB hex) and fog densities. */
-export type WaterLook = { shallow: number; deep: number; density: number; deepDensity: number };
+export interface WaterLook { shallow: number; deep: number; density: number; deepDensity: number }
 
 export const WATER_LOOK: WaterLook = {
   shallow: 0x2f8590,
@@ -101,9 +101,9 @@ const ACES_IN = [0.59719, 0.076, 0.0284, 0.35458, 0.90834, 0.13383, 0.04823, 0.0
 const ACES_OUT = [1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602];
 
 function mul(m: readonly number[], x: number, y: number, z: number, out: number[]): void {
-  out[0] = m[0]! * x + m[3]! * y + m[6]! * z;
-  out[1] = m[1]! * x + m[4]! * y + m[7]! * z;
-  out[2] = m[2]! * x + m[5]! * y + m[8]! * z;
+  out[0] = (m[0] ?? 0) * x + (m[3] ?? 0) * y + (m[6] ?? 0) * z;
+  out[1] = (m[1] ?? 0) * x + (m[4] ?? 0) * y + (m[7] ?? 0) * z;
+  out[2] = (m[2] ?? 0) * x + (m[5] ?? 0) * y + (m[8] ?? 0) * z;
 }
 
 function fit(v: number): number {
@@ -119,13 +119,13 @@ const vb = [0, 0, 0];
 function acesRaw(r: number, g: number, b: number, exposure: number): void {
   const e = exposure / 0.6;
   mul(ACES_IN, r * e, g * e, b * e, va);
-  mul(ACES_OUT, fit(va[0]!), fit(va[1]!), fit(va[2]!), vb);
+  mul(ACES_OUT, fit(va[0] ?? 0), fit(va[1] ?? 0), fit(va[2] ?? 0), vb);
 }
 
 /** Linear display colour that three's ACES filmic curve produces for scene radiance `c`. */
 export function acesFilmic(c: THREE.Color, exposure: number, out = new THREE.Color()): THREE.Color {
   acesRaw(c.r, c.g, c.b, exposure);
-  return out.setRGB(clamp(vb[0]!, 0, 1), clamp(vb[1]!, 0, 1), clamp(vb[2]!, 0, 1));
+  return out.setRGB(clamp(vb[0] ?? 0, 0, 1), clamp(vb[1] ?? 0, 0, 1), clamp(vb[2] ?? 0, 0, 1));
 }
 
 const x3 = [0, 0, 0];
@@ -144,9 +144,9 @@ export function radianceFor(target: THREE.Color, exposure: number, toneMapping: 
   goal[0] = clamp(target.r, 0, 0.98);
   goal[1] = clamp(target.g, 0, 0.98);
   goal[2] = clamp(target.b, 0, 0.98);
-  x3[0] = goal[0]! / exposure;
-  x3[1] = goal[1]! / exposure;
-  x3[2] = goal[2]! / exposure;
+  x3[0] = goal[0] / exposure;
+  x3[1] = goal[1] / exposure;
+  x3[2] = goal[2] / exposure;
   for (let sweep = 0; sweep < 6; sweep++) {
     for (let c = 0; c < 3; c++) {
       let lo = 0;
@@ -154,12 +154,12 @@ export function radianceFor(target: THREE.Color, exposure: number, toneMapping: 
       for (let i = 0; i < 26; i++) {
         const mid = (lo + hi) * 0.5;
         x3[c] = mid;
-        acesRaw(x3[0]!, x3[1]!, x3[2]!, exposure);
-        if (vb[c]! < goal[c]!) lo = mid;
+        acesRaw(x3[0], x3[1], x3[2], exposure);
+        if ((vb[c] ?? 0) < (goal[c] ?? 0)) lo = mid;
         else hi = mid;
       }
       x3[c] = (lo + hi) * 0.5;
     }
   }
-  return out.setRGB(x3[0]!, x3[1]!, x3[2]!);
+  return out.setRGB(x3[0], x3[1], x3[2]);
 }

@@ -7,7 +7,7 @@ const directory = fileURLToPath(new URL('../shots/', import.meta.url));
 const seeds = [42, 7, 1234];
 await mkdir(directory, { recursive: true });
 
-type CalmReview = {
+interface CalmReview {
   time?: number;
   advance?: (seconds: number) => void;
   forceBreach?: () => void;
@@ -16,14 +16,16 @@ type CalmReview = {
   frameWhale?: (kind?: 'breach' | 'spout') => void;
   frame?: (yaw: number, pitch: number, distance: number) => void;
   stats?: () => Record<string, unknown>;
-};
+}
 
 async function settle(page: Page, seconds = 3) {
   await page.waitForFunction(
     () => (window as unknown as { __calmReview?: CalmReview }).__calmReview?.stats,
     null,
     { timeout: 20000 },
-  ).catch(() => {});
+  ).catch(() => {
+    // Settling is best effort: the shot is taken either way.
+  });
   await page.waitForTimeout(seconds * 1000);
 }
 
@@ -42,7 +44,7 @@ async function capture(
     if (afterOpen) await afterOpen(page);
     await page.screenshot({ path, type: 'png' });
     if (errors.length) throw new Error(errors.join('\n'));
-    console.log(`Saved ${path.split('/').pop()}`);
+    console.log(`Saved ${String(path.split('/').pop())}`);
   } finally {
     await context.close();
   }
@@ -51,7 +53,7 @@ async function capture(
 await withBrowser(async (browser, base) => {
   for (const seed of seeds) {
     for (const device of [MOBILE, DESKTOP]) {
-      await capture(browser, base, device, seed, `${directory}${device.name}-seed${seed}.png`);
+      await capture(browser, base, device, seed, `${directory}${device.name}-seed${String(seed)}.png`);
     }
   }
 

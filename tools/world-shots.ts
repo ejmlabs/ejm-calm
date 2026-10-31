@@ -13,13 +13,13 @@ import { DAY, createSky, pickTimeOfDay } from '../src/sky.js';
  *
  * usage: npx tsx tools/world-shots.ts <output directory> [seed ...]    (default seed 42)
  */
-type CalmReview = {
+interface CalmReview {
   travel: (seconds: number) => void;
   jumpTo: (x: number, z: number) => void;
   setDay: (fraction: number) => void;
   setWeather: (state: 'clear' | 'hazy' | 'overcast') => void;
   stats: () => Record<string, number | string | boolean | number[]>;
-};
+}
 
 const target = process.argv[2];
 if (!target) {
@@ -49,7 +49,7 @@ function landShare(land: Land, x: number, z: number, radius: number): number {
   return hit / n;
 }
 
-type Spot = { name: string; x: number; z: number };
+interface Spot { name: string; x: number; z: number }
 
 /** Points along the lane, a few kilometres before each kind of place, so the whale swims toward it. */
 function spots(seed: number): Spot[] {
@@ -88,13 +88,13 @@ function spots(seed: number): Spot[] {
   return found;
 }
 
-const log: Array<Record<string, unknown>> = [];
+const log: Record<string, unknown>[] = [];
 const problems: string[] = [];
 
 await withBrowser(async (browser, base) => {
   for (const seed of seeds) {
     const places = spots(seed);
-    console.log(`seed ${seed}: ${places.map((p) => `${p.name} at ${Math.round(p.x)}, ${Math.round(p.z)}`).join('; ')}`);
+    console.log(`seed ${String(seed)}: ${places.map((p) => `${p.name} at ${String(Math.round(p.x))}, ${String(Math.round(p.z))}`).join('; ')}`);
     const start = DAY.indexOf(pickTimeOfDay(seed));
     const afternoon = ((DAY.indexOf('afternoon') - start + DAY.length) % DAY.length) / DAY.length;
     for (const device of [DESKTOP, MOBILE] as DeviceProfile[]) {
@@ -109,19 +109,21 @@ await withBrowser(async (browser, base) => {
           await call(page, 'travel', 20);
           for (let i = 0; i < 40; i++) {
             const s = await stats(page);
-            if (s['behavior'] === 'travel' && (s['whale'] as number[])[1]! > -1.5) break;
+            if (s['behavior'] === 'travel' && ((s['whale'] as number[])[1] ?? 0) > -1.5) break;
             await call(page, 'travel', 4);
           }
-          await page.waitForFunction(() => (window as unknown as { __calmReview: CalmReview }).__calmReview.stats().chunksPending === 0, undefined, { timeout: 60000 }).catch(() => {});
+          await page.waitForFunction(() => (window as unknown as { __calmReview: CalmReview }).__calmReview.stats()['chunksPending'] === 0, undefined, { timeout: 60000 }).catch(() => {
+    // Settling is best effort: the shot is taken either way.
+  });
           await page.waitForTimeout(4000);
           const s = await stats(page);
-          const file = `world-${device.name}-${seed}-${place.name}.jpg`;
+          const file = `world-${device.name}-${String(seed)}-${place.name}.jpg`;
           await page.screenshot({ path: resolve(directory, file), type: 'jpeg', quality: 80, scale: 'css' });
           const entry = { file, seed, place: place.name, region: s['regionName'], landNear: s['landNear'], draws: s['draws'], triangles: s['triangles'] };
           log.push(entry);
           console.log(JSON.stringify(entry));
         }
-        if (errors.length) problems.push(`${device.name} seed ${seed}: ${errors.join(' | ')}`);
+        if (errors.length) problems.push(`${device.name} seed ${String(seed)}: ${errors.join(' | ')}`);
       } finally {
         await context.close();
       }

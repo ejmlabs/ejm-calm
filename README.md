@@ -32,12 +32,14 @@ Open `?seed=42` for that sea. Seeds are decimal integers from `0` to
 
 ## Run locally
 
-Use a current Node.js release. Dependencies are locked in `package-lock.json`. For day-to-day work, `npm run dev` starts the
+Use Node.js 24 (`package.json` `engines`; `.npmrc` makes npm refuse another). Dependencies are pinned and locked in `package-lock.json`. For day-to-day work, `npm run dev` starts the
 Vite development server on <http://127.0.0.1:8080>. `npm run serve` typechecks,
 runs `vite build`, then previews `dist/` on loopback (choose another port with
 `npm run serve -- 8081`). The browser needs WebGL 2.
 
-`npm run typecheck` runs `tsc --noEmit`. `npm run build` typechecks then
+`npm run typecheck` runs `tsc --noEmit` with `@tsconfig/strictest`. `npm run lint` runs ESLint with no
+warnings allowed: `eslint.strict.mjs` is the shared strict layer synced from ejmlabs/.github (edit it there),
+and `eslint.config.mjs` adds this repository's globals. `npm run build` typechecks then
 produces `dist/` via Vite. `npm test` runs unit tests with Vitest. `npm run
 test:browser` builds then checks desktop and mobile rendering. `npm run shots`
 builds then captures desktop (1440×900) and mobile (390×844 @3x) screenshots

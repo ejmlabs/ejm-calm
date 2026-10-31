@@ -4,15 +4,16 @@ import { fork } from './rng.js';
 import { clamp, lerp, smoothstep } from './math.js';
 import { patchShader, type ShaderPatch } from './ocean.js';
 import type { WeatherLook } from './weather.js';
+import { item } from './item.js';
 
 export type TimeOfDay = 'golden' | 'morning' | 'afternoon' | 'dusk';
 /** The day runs through these in order; night comes after dusk and gives way to morning. */
 export type DayPhase = TimeOfDay | 'night';
 
 /** Light that survives the weather and the time of day: what the lights are set to, before the underwater view dims them. */
-export type LightBase = { intensity: number; color: THREE.Color };
+export interface LightBase { intensity: number; color: THREE.Color }
 
-export type SkyHandle = {
+export interface SkyHandle {
   sky: Sky;
   sun: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
@@ -63,9 +64,9 @@ export type SkyHandle = {
   /** Turns the timed refresh on (medium and high) or off (low). */
   setEnvironmentRefresh: (on: boolean) => void;
   dispose: () => void;
-};
+}
 
-type Preset = {
+interface Preset {
   elevation: number;
   azimuth: number;
   turbidity: number;
@@ -86,7 +87,7 @@ type Preset = {
   shallow: number;
   /** Brightness of the land and water. */
   level: number;
-};
+}
 
 const SUN = { color: 0xfff1d6, intensity: 2.0 };
 const HEMI = { sky: 0xc0d4e8, ground: 0x2a3e4e, intensity: 0.75 };
@@ -148,7 +149,7 @@ export const ENV_REFRESH = 90;
 export function pickTimeOfDay(seed: number): TimeOfDay {
   const rng = fork(seed, 'tod');
   const names: TimeOfDay[] = ['golden', 'morning', 'afternoon', 'dusk'];
-  return names[Math.floor(rng() * names.length)]!;
+  return item(names, Math.floor(rng() * names.length));
 }
 
 function sunVector(elevationDeg: number, azimuthDeg: number, target: THREE.Vector3): THREE.Vector3 {
@@ -198,7 +199,7 @@ function greyen(color: THREE.Color, amount: number): THREE.Color {
   return color;
 }
 
-type Blend = {
+interface Blend {
   elevation: number;
   azimuth: number;
   turbidity: number;
@@ -213,7 +214,7 @@ type Blend = {
   sun: number;
   hemi: number;
   ambient: number;
-};
+}
 
 export function createSky(
   seed: number,
@@ -240,6 +241,9 @@ export function createSky(
     sky.material.needsUpdate = true;
   }
   const uniforms = sky.material.uniforms;
+  // The sun's position as a typed uniform this module keeps, in place of the sky's own.
+  const sunPosition = { value: new THREE.Vector3() };
+  uniforms['sunPosition'] = sunPosition;
   if (uniforms['cloudCoverage']) uniforms['cloudCoverage'].value = baseCover;
   if (uniforms['cloudDensity']) uniforms['cloudDensity'].value = 0.15;
   if (uniforms['cloudSpeed']) uniforms['cloudSpeed'].value = patched !== null ? CLOUD_SPEED : 0.00002;
@@ -277,7 +281,7 @@ export function createSky(
   starMap.minFilter = THREE.LinearFilter;
   starMap.needsUpdate = true;
   const starMaterial = new THREE.PointsMaterial({
-    size: 1.7 * (renderer.getPixelRatio?.() ?? 1),
+    size: 1.7 * renderer.getPixelRatio(),
     alphaMap: starMap,
     sizeAttenuation: false,
     vertexColors: true,
@@ -325,7 +329,7 @@ export function createSky(
 
   const horizonColor = new THREE.Color();
   const hazeGradient = HAZE_ANGLES.map(() => new THREE.Color());
-  const hazeColor = hazeGradient[0]!;
+  const hazeColor = item(hazeGradient, 0);
   const lightBase = {
     sun: { intensity: SUN.intensity, color: new THREE.Color(SUN.color) },
     hemi: { intensity: HEMI.intensity, color: new THREE.Color(HEMI.sky) },
@@ -353,11 +357,11 @@ export function createSky(
     const index = Math.floor(wrapped);
     const next = (index + 1) % count;
     const t = smoothstep(0, 1, wrapped - index);
-    const a = presets[DAY[index]!];
-    const b = presets[DAY[next]!];
-    const ca = colors[index]!;
-    const cb = colors[next]!;
-    blend.elevation = lerp(elevationOf(DAY[index]!), elevationOf(DAY[next]!), t);
+    const a = presets[item(DAY, index)];
+    const b = presets[item(DAY, next)];
+    const ca = item(colors, index);
+    const cb = item(colors, next);
+    blend.elevation = lerp(elevationOf(item(DAY, index)), elevationOf(item(DAY, next)), t);
     // The sun keeps moving the same way round: past the last preset the morning's azimuth is a turn further on.
     blend.azimuth = lerp(a.azimuth, b.azimuth + (next === 0 ? 360 : 0), t) + jitterAzimuth;
     blend.turbidity = lerp(a.turbidity, b.turbidity, t);
@@ -378,16 +382,16 @@ export function createSky(
     // A low sun colours the sky when the cloud lets it: vivid under a broken sky, grey under overcast.
     const glow = (1 - smoothstep(2, GLOW_FROM, elevation)) * smoothstep(GLOW_UNDER, 0, elevation) * (1 - smoothstep(0.1, 0.6, weather.grey));
     handle.glow = glow;
-    uniforms['turbidity']!.value = blend.turbidity + 2 * glow;
-    uniforms['rayleigh']!.value = blend.rayleigh + 1 * glow;
-    uniforms['mieCoefficient']!.value = blend.mie + 0.001 * glow;
+    item(uniforms, 'turbidity').value = blend.turbidity + 2 * glow;
+    item(uniforms, 'rayleigh').value = blend.rayleigh + 1 * glow;
+    item(uniforms, 'mieCoefficient').value = blend.mie + 0.001 * glow;
     if (uniforms['skyDim']) uniforms['skyDim'].value = (1 - 0.9 * weather.dark) * (1 + FLASH_LIFT * weather.flash);
     if (uniforms['skyGrey']) uniforms['skyGrey'].value = 0.85 * weather.grey;
-    uniforms['mieDirectionalG']!.value = blend.mieG;
+    item(uniforms, 'mieDirectionalG').value = blend.mieG;
     if (uniforms['cloudCoverage']) uniforms['cloudCoverage'].value = weather.coverage;
     if (uniforms['cloudDensity']) uniforms['cloudDensity'].value = weather.density;
     sunVector(elevation, blend.azimuth, sunDirection);
-    uniforms['sunPosition']!.value.copy(sunDirection);
+    sunPosition.value.copy(sunDirection);
     sun.position.copy(sunDirection).multiplyScalar(200);
     // A storm darkens the whole view; lightning lifts it a little, softly.
     renderer.toneMappingExposure = blend.exposure * 0.88 * (1 - 0.45 * weather.dark) * (1 + 0.12 * weather.flash);
@@ -414,7 +418,7 @@ export function createSky(
     // Haze: the sky's own colours, greyer under cloud, darker in a storm, warmer low down at sunset.
     const shade = 1 - 0.5 * weather.dark;
     for (let k = 0; k < hazeGradient.length; k++) {
-      const color = greyen(hazeGradient[k]!.copy(ca.haze[k]!).lerp(cb.haze[k]!, t), weather.grey).multiplyScalar(shade);
+      const color = greyen(item(hazeGradient, k).copy(item(ca.haze, k)).lerp(item(cb.haze, k), t), weather.grey).multiplyScalar(shade);
       warm(color, glow * (1 - k / hazeGradient.length));
     }
     horizonColor.copy(ca.horizon).lerp(cb.horizon, t);
@@ -464,7 +468,7 @@ export function createSky(
       const skyWasVisible = sky.visible;
       sky.visible = true;
       if (uniforms['showSunDisc']) uniforms['showSunDisc'].value = 0;
-      const next = pmrem.fromScene(scene as unknown as THREE.Scene, 0.04);
+      const next = pmrem.fromScene(scene, 0.04);
       if (uniforms['showSunDisc']) uniforms['showSunDisc'].value = 1;
       sky.visible = skyWasVisible;
       const previous = envTarget;
@@ -507,7 +511,7 @@ export function createSky(
     phase() {
       const count = DAY.length;
       const wrapped = ((cycle % count) + count) % count;
-      return { name: DAY[Math.round(wrapped) % count]!, day: wrapped / count };
+      return { name: item(DAY, Math.round(wrapped) % count), day: wrapped / count };
     },
     setFog(tint, mix, density) {
       regionFog.tint.copy(tint);
