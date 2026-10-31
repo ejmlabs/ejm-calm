@@ -8,9 +8,9 @@ import { item } from './item.js';
 /**
  * The frame's finish, on three's HDR output (`outputBufferType` with `setEffects`): the scene draws into a 4x
  * multisampled half-float target, light past the white point blooms, a grade sets the film look, and the output
- * applies the tone curve (`src/tone.ts`) once. A browser that cannot render multisampled half floats, or renders on
- * the CPU, draws straight to the canvas with the same curve per material, without the bloom, the grade or the
- * antialiasing.
+ * applies the tone curve (`src/tone.ts`) once. A GPU without multisampled half-float targets draws straight to a
+ * multisampled canvas with the same curve per material, without the bloom and the grade; a CPU renderer draws to a
+ * plain canvas, where multisampling alone would slow it badly.
  */
 
 /** Display brightness (linear, 0 to 1) from which light blooms: the sun, its glitter on the water, sunlit spray. */
@@ -23,23 +23,39 @@ export const BLOOM_LEVELS = [1, 0.55, 0.3, 0.15, 0.06];
 /** How far the corners darken, as a share of the centre's light. */
 export const VIGNETTE = 0.24;
 
-/** Renderers that run on the CPU: the finish would cut their frame rate to about a third. */
+/** Renderers that run on the CPU: the finish cut their frame rate to about a third. */
 const SOFTWARE_GL = /swiftshader|llvmpipe|softpipe|software/i;
 
+/** How the frame is drawn: finished, straight to a multisampled canvas, or straight to a plain one. */
+export type FrameMode = 'finish' | 'multisampled' | 'plain';
+
+export function isFrameMode(value: string | null): value is FrameMode {
+  return value === 'finish' || value === 'multisampled' || value === 'plain';
+}
+
 /**
- * Whether this browser draws to multisampled half-float targets on a GPU, which the finish needs. `onCpu` allows a
- * CPU renderer as well (review shots and the browser smoke run on one).
+ * The frame this browser draws well: the finish on a GPU with multisampled half-float targets, a multisampled canvas
+ * on any other GPU, and a plain canvas on a CPU renderer. Review may ask for a mode (`?debug=1&frame=`), which it gets
+ * wherever the browser can draw it at all (review shots and the browser smoke run on a CPU renderer).
  */
-export function finishSupported(onCpu: boolean): boolean {
+export function frameMode(asked: FrameMode | null): FrameMode {
   const gl = document.createElement('canvas').getContext('webgl2');
-  if (!gl) return false;
+  if (!gl) return 'plain';
   try {
-    if (!gl.getExtension('EXT_color_buffer_float') && !gl.getExtension('EXT_color_buffer_half_float')) return false;
-    const samples: unknown = gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES);
-    if (!(samples instanceof Int32Array) || (samples[0] ?? 0) < 4) return false;
     const info = gl.getExtension('WEBGL_debug_renderer_info');
     const renderer: unknown = gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
-    return onCpu || !(typeof renderer === 'string' && SOFTWARE_GL.test(renderer));
+    const cpu = typeof renderer === 'string' && SOFTWARE_GL.test(renderer);
+    const halfFloats = gl.getExtension('EXT_color_buffer_float') !== null || gl.getExtension('EXT_color_buffer_half_float') !== null;
+    const floatSamples: unknown = halfFloats ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES) : null;
+    const canFinish = floatSamples instanceof Int32Array && (floatSamples[0] ?? 0) >= 4;
+    // The probe's own canvas asks for antialiasing by default, so its sample count is the canvas's.
+    const canvasSamples: unknown = gl.getParameter(gl.SAMPLES);
+    const canMultisample = typeof canvasSamples === 'number' && canvasSamples >= 2;
+    if (asked === 'finish' && canFinish) return 'finish';
+    if (asked === 'multisampled' && canMultisample) return 'multisampled';
+    if (asked === 'plain' || cpu) return 'plain';
+    if (canFinish) return 'finish';
+    return canMultisample ? 'multisampled' : 'plain';
   } finally {
     gl.getExtension('WEBGL_lose_context')?.loseContext();
   }

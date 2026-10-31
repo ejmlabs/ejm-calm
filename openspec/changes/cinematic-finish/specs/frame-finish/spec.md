@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: Finished frame
-Where the browser can render multisampled half-float targets on a GPU, the scene SHALL draw into a 4x multisampled half-float target, light brighter than the display can show SHALL bloom, a grade SHALL apply (a touch more colour, warm light and cool shade, a soft vignette, a dither of about half an output step), and the output SHALL apply the tone curve once. Elsewhere, and on a CPU renderer unless review asks for it, the scene SHALL draw straight to the canvas with the same curve per material.
+Where the browser can render multisampled half-float targets on a GPU, the scene SHALL draw into a 4x multisampled half-float target, light brighter than the display can show SHALL bloom, a grade SHALL apply (a touch more colour, warm light and cool shade, a soft vignette, a dither of about half an output step), and the output SHALL apply the tone curve once. On any other GPU the scene SHALL draw straight to a multisampled canvas, and on a CPU renderer to a plain canvas unless review asks for another mode, with the same curve per material.
 
 #### Scenario: Finish on
-- **WHEN** the page opens with `?debug=1&finish=1` at the desktop and mobile profiles in the browser smoke (software GL)
-- **THEN** `stats().finish` is true, the frame shows the scene without errors, and peak draws stay under 200
+- **WHEN** the page opens with `?debug=1&frame=finish` at the desktop and mobile profiles, and with `?debug=1&frame=multisampled` at desktop, in the browser smoke (software GL)
+- **THEN** `stats().frame` is the mode asked for, the frame shows the scene without errors, and peak draws stay under 200
 
 #### Scenario: CPU renderer
 - **WHEN** the page opens on software GL without the override
-- **THEN** `stats().finish` is false and the scene draws directly
+- **THEN** `stats().frame` is `plain` and the scene draws directly
 
 #### Scenario: Bloom follows the exposure
 - **WHEN** the output's exposure changes through the day or a lightning flash
@@ -37,7 +37,7 @@ The water SHALL reflect land in scene light with no exposure-based gain, SHALL g
 The land SHALL take a natural palette, shade tinted by the sky's own hue at the same brightness, and sunlight in the sun's own hue, so a low sun lights the slopes warm.
 
 #### Scenario: Smooth dissolve
-- **WHEN** the finish is on and a land tile fades in
+- **WHEN** the frame multisamples (`finish` or `multisampled`) and a land tile fades in
 - **THEN** it fades by sample coverage, not by a screen-space dither
 
 #### Scenario: Palette roles

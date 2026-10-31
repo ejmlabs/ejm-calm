@@ -118,7 +118,7 @@ await withBrowser(async (browser, base) => {
       const stats = await page.evaluate(() => (window as unknown as { __calmReview: { stats: () => Record<string, number> } }).__calmReview.stats());
       assert.ok((stats['birds'] ?? 0) > 0 && (stats['birds'] ?? 0) <= 24, `birds ${String(stats['birds'])}`);
       assert.ok((stats['birdDraws'] ?? 0) <= 9 && (stats['birdTriangles'] ?? 0) <= 5000, `bird draws ${String(stats['birdDraws'])}, triangles ${String(stats['birdTriangles'])}`);
-      assert.equal(stats['finish'], false, 'a CPU renderer draws without the finish');
+      assert.equal(stats['frame'], 'plain', 'a CPU renderer draws to a plain canvas');
       assert.deepEqual(errors, []);
       console.log(`budget: ${String(stats['birds'])} birds, ${String(stats['birdDraws'])} draws, ${String(stats['birdTriangles'])} triangles`);
     } finally {
@@ -126,22 +126,23 @@ await withBrowser(async (browser, base) => {
     }
   }
 
-  // The finish (multisampled half-float scene, bloom, grade), asked for on this CPU renderer as on a GPU.
-  for (const device of [DESKTOP, MOBILE]) {
-    const { page, context, errors } = await openCalm(browser, base, device, { query: { debug: '1', finish: '1' }, instrument: true });
+  // The GPU frames, asked for on this CPU renderer: the finish (multisampled half-float scene, bloom, grade) at both
+  // profiles, and the multisampled canvas a GPU without half-float targets draws.
+  for (const [device, frame] of [[DESKTOP, 'finish'], [MOBILE, 'finish'], [DESKTOP, 'multisampled']] as const) {
+    const { page, context, errors } = await openCalm(browser, base, device, { query: { debug: '1', frame }, instrument: true });
     try {
       await page.waitForTimeout(2500);
-      const stats = await page.evaluate(() => (window as unknown as { __calmReview: { stats: () => Record<string, number | boolean> } }).__calmReview.stats());
-      assert.equal(stats['finish'], true, 'the finish is on');
+      const stats = await page.evaluate(() => (window as unknown as { __calmReview: { stats: () => Record<string, number | string> } }).__calmReview.stats());
+      assert.equal(stats['frame'], frame, `the ${frame} frame is drawn`);
       const picture = await pixels(page);
-      assert.ok(picture.nonBlack > 500 && picture.max - picture.min > 25, `the finished frame shows the scene: ${JSON.stringify(picture)}`);
+      assert.ok(picture.nonBlack > 500 && picture.max - picture.min > 25, `the ${frame} frame shows the scene: ${JSON.stringify(picture)}`);
       const peakDraws = await page.evaluate(() => {
         const draws = (window as unknown as DrawWindow).__frameDraws;
         return draws.length ? Math.max(...draws) : 0;
       });
-      assert.ok(peakDraws < 200, `the ${device.name} draw budget holds with the finish: ${String(peakDraws)}`);
+      assert.ok(peakDraws < 200, `the ${device.name} draw budget holds in the ${frame} frame: ${String(peakDraws)}`);
       assert.deepEqual(errors, []);
-      console.log(`finish (${device.name}): on, ${String(peakDraws)} peak draws`);
+      console.log(`${frame} (${device.name}): ${String(peakDraws)} peak draws`);
     } finally {
       await context.close();
     }

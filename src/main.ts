@@ -30,7 +30,7 @@ import { createWeatherFx } from './weather-fx.js';
 import { createLandLife, HERD_CELL, TOWN_CELL } from './land-life.js';
 import { PACES, type Pace } from './pace.js';
 import { createViewControls } from './view-controls.js';
-import { createFinish, finishSupported } from './finish.js';
+import { createFinish, frameMode, isFrameMode } from './finish.js';
 import { displayExposure } from './tone.js';
 import { item } from './item.js';
 
@@ -185,15 +185,16 @@ if (!canvasEl) {
 }
 const canvas = canvasEl;
 
-// The finish (src/finish.ts) draws the scene multisampled in half floats; a browser without them, or on a CPU
-// renderer, draws straight to the canvas. Review (`?debug=1&finish=1`) can ask for it on a CPU renderer.
-const finished = finishSupported(debug && params.get('finish') === '1');
+// The finish (src/finish.ts) on a GPU with multisampled half floats, a multisampled canvas on other GPUs, a plain
+// canvas on CPU renderers. Review can ask for a mode (`?debug=1&frame=finish`).
+const askedFrame = debug ? params.get('frame') : null;
+const drawMode = frameMode(isFrameMode(askedFrame) ? askedFrame : null);
 const renderer = new THREE.WebGLRenderer({
   canvas,
-  antialias: finished,
+  antialias: drawMode !== 'plain',
   alpha: false,
   powerPreference: 'low-power',
-  outputBufferType: finished ? THREE.HalfFloatType : THREE.UnsignedByteType,
+  outputBufferType: drawMode === 'finish' ? THREE.HalfFloatType : THREE.UnsignedByteType,
 });
 renderer.setClearColor(0x7a9bb0, 1);
 // Counted per frame (`stats()`): the water's mirror and the finish render inside the frame and would reset them.
@@ -259,7 +260,7 @@ try {
     detail: detailFor(quality.tier),
     mobile,
     worker: true,
-    dissolve: finished ? 'coverage' : 'dither',
+    dissolve: drawMode === 'plain' ? 'dither' : 'coverage',
   });
   // Real ocean depth: the shelf, slope and abyssal plain by distance from the coast.
   seafloor = createSeafloor(seed, world.land, world.land.depthAt);
@@ -292,7 +293,7 @@ try {
   // Review only (`?debug=1&fish=1`): every fish species in a small school ahead of the camera.
   if (debug && params.get('fish') === '1') fishShowcase = createFishShowcase(fishTime, UNDERWATER_LAYER);
   if (fishShowcase) scene.add(fishShowcase.group);
-  finish = finished ? createFinish(renderer) : null;
+  finish = drawMode === 'finish' ? createFinish(renderer) : null;
   buildMs = performance.now() - buildStart;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
@@ -727,7 +728,7 @@ if (debug) {
         speed: whale.state.speed,
         behavior: whale.state.behavior,
         exposure: renderer.toneMappingExposure,
-        finish: finish !== null,
+        frame: drawMode,
         dayPhase: sky.phase().name,
         stars: sky.stars,
         day: sky.phase().day,

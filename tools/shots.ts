@@ -35,7 +35,7 @@ async function capture(
   device: DeviceProfile,
   seed: number,
   path: string,
-  query: Record<string, string> = { debug: '1', finish: '1' },
+  query: Record<string, string> = { debug: '1', frame: 'finish' },
   afterOpen?: (page: Page) => Promise<void>,
 ) {
   const { page, context, errors } = await openCalm(browser, base, device, { seed, query });
@@ -64,7 +64,7 @@ await withBrowser(async (browser, base) => {
     MOBILE,
     42,
     `${directory}mobile-spout.png`,
-    { debug: '1', finish: '1' },
+    { debug: '1', frame: 'finish' },
     async (page) => {
       // Natural phone camera. First spout peaks ~5 s (phase offset); seek there, not a close debug frame.
       await page.evaluate(() => {
@@ -83,7 +83,7 @@ await withBrowser(async (browser, base) => {
     MOBILE,
     42,
     `${directory}mobile-breach.png`,
-    { debug: '1', finish: '1' },
+    { debug: '1', frame: 'finish' },
     async (page) => {
       await page.evaluate(() => {
         (window as unknown as { __calmReview?: CalmReview }).__calmReview?.forceBreach?.();
@@ -102,7 +102,7 @@ await withBrowser(async (browser, base) => {
     DESKTOP,
     42,
     `${directory}desktop-breach.png`,
-    { debug: '1', finish: '1' },
+    { debug: '1', frame: 'finish' },
     async (page) => {
       await page.evaluate(() => {
         (window as unknown as { __calmReview?: CalmReview }).__calmReview?.forceBreach?.();
@@ -117,7 +117,7 @@ await withBrowser(async (browser, base) => {
 
   // Chase camera under water: start a deep dive and let the camera follow it down.
   for (const device of [MOBILE, DESKTOP]) {
-    await capture(browser, base, device, 42, `${directory}${device.name}-dive.png`, { debug: '1', finish: '1' }, async (page) => {
+    await capture(browser, base, device, 42, `${directory}${device.name}-dive.png`, { debug: '1', frame: 'finish' }, async (page) => {
       await page.evaluate(() => {
         (window as unknown as { __calmReview?: CalmReview }).__calmReview?.forceDeepDive?.(0.35);
       });
