@@ -10,6 +10,7 @@
 - [x] 2.2 Water: constant reflection gain, haze in scene light, glitter, shallows, storm foam
 - [x] 2.3 Land: palette, sky-hued shade, sun-coloured light, a stronger key, softer cliff bands
 - [x] 2.4 Land tiles dissolve by coverage wherever the frame multisamples
+- [x] 2.5 Sky: a warm horizon belt at low sun, clearer golden and dusk presets, their haze re-measured by `tools/haze-measure.ts`
 
 ## 3. Checks
 

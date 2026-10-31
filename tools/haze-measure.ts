@@ -133,7 +133,8 @@ const dayFor = (index: number) => ((index - start + DAY.length) % DAY.length) / 
 
 const problems: string[] = [];
 await withBrowser(async (browser, base) => {
-  const { page, context, errors } = await openCalm(browser, base, DESKTOP, { seed, reducedMotion: 'reduce', query: { debug: '1' } });
+  // The plain frame: the haze must match the sky as the tone curve alone draws it, without the finish's grade.
+  const { page, context, errors } = await openCalm(browser, base, DESKTOP, { seed, reducedMotion: 'reduce', query: { debug: '1', frame: 'plain' } });
   try {
     const viewport = page.viewportSize();
     if (!viewport) throw new Error('The page has no viewport');

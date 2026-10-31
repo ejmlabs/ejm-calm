@@ -33,6 +33,13 @@ The water SHALL reflect land in scene light with no exposure-based gain, SHALL g
 - **WHEN** the sun's strength is 0 (night, or cloud over the sun)
 - **THEN** the glitter term is 0
 
+### Requirement: Low-sun sky
+At golden hour and dusk the sky SHALL warm toward the horizon away from the sun, with no green cast, and each preset's land haze SHALL be the sky's own colour at the haze angles as `tools/haze-measure.ts` measures it.
+
+#### Scenario: Measured haze
+- **WHEN** `tools/haze-measure.ts` runs on a build
+- **THEN** the golden and dusk haze arrays in `src/sky.ts` match the measured sky within a few sRGB levels
+
 ### Requirement: Land light
 The land SHALL take a natural palette, shade tinted by the sky's own hue at the same brightness, and sunlight in the sun's own hue, so a low sun lights the slopes warm.
 

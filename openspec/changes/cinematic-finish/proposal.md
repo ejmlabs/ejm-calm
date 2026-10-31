@@ -8,7 +8,7 @@ The owner wants calm to look hand-made at a high level: a scene people leave ope
 - **One tone curve**: every material draws scene radiance. Materials authored in display colours (land, walkers, wakes, ship foam and lamps, stars, rain, spray, the whale's splash, the underwater rays and overlay) end with an exact inverse of the curve, so they still draw as authored and now bloom and grade with the rest. The water's exposure-based reflection gain goes.
 - **Water**: sun glitter, a sharp HDR sparkle of ripple facets toward the sun that blooms; shallows that fade before the horizon instead of drawing a band; storm foam broken into streaks and lace.
 - **Land**: a natural palette (sage and olive grass, straw, deep forest, grey-brown rock) in place of lime; ambient light tinted by the sky and the sun's own colour on lit slopes, so a sunset lights the ranges warm; tiles that fade in cross-fade by sample coverage instead of a cross-hatched dither.
-- **Sky**: unchanged model; the sun disc and its glow bloom.
+- **Sky**: golden hour and dusk read as sunsets instead of a murky green-teal: a warm horizon belt driven by the existing low-sun glow, clearer air for those presets, and their land haze re-measured with a new tool (`tools/haze-measure.ts`). The sun disc and its glow bloom.
 
 Out of scope: shadows, new geometry, the whale's model, the camera's framing, weather timing.
 

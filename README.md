@@ -56,6 +56,9 @@ times what the journey's feel adds per frame in Node; `npx tsx tools/feel-shots.
 the regions, times of day, weather and indicator, `npx tsx tools/land-shots.ts <dir>` the land by day,
 dusk and night, the highest range in sight, and a close coast with a town and a herd, and
 `npx tsx tools/world-shots.ts <dir>` the open ocean, a continent's coast and an archipelago along the migration (after a build).
+`npx tsx tools/haze-measure.ts [seed]` (after a build) reads the sky's colour at each haze angle straight away from the
+sun for every time of day, in the plain frame, and prints the `haze` arrays for `src/sky.ts` beside the current ones;
+run it whenever a sky preset or the sky shader changes.
 
 There is no byte cap: load time is the size bar. `npx tsx tools/load-time.ts <base dist> <new dist>` times
 first paint, first contentful paint and the first frame of the sea (the page's `calm-first-frame` mark) over
