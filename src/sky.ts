@@ -96,7 +96,8 @@ const SUN = { color: 0xfff1d6, intensity: SUN_INTENSITY };
 const HEMI = { sky: 0xc0d4e8, ground: 0x2a3e4e, intensity: 0.75 };
 const AMBIENT = { color: 0x6a8498, intensity: 0.4 };
 
-const presets: Record<DayPhase, Preset> = {
+/** What each time of day sets; `tools/haze-measure.ts` checks each `haze` against the sky the rest of it makes. */
+export const presets: Record<DayPhase, Preset> = {
   // Lower turbidity/mie keep the sky horizon from blooming into a cream band.
   golden: {
     elevation: 7, azimuth: 185, turbidity: 4.2, rayleigh: 1.8, mie: 0.003, exposure: 0.5, mieG: 0.8,
