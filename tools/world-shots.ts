@@ -6,6 +6,7 @@ import { withBrowser, openCalm, DESKTOP, MOBILE, type DeviceProfile } from './br
 import { layoutWorld } from '../src/terrain.js';
 import { createLand, type Land } from '../src/land.js';
 import { DAY, createSky, pickTimeOfDay } from '../src/sky.js';
+import { headlessRenderer } from './headless-renderer.js';
 
 /**
  * Review screenshots of the world's layout, desktop and phone: the whale mid-ocean with an open horizon,
@@ -54,7 +55,7 @@ interface Spot { name: string; x: number; z: number }
 /** Points along the lane, a few kilometres before each kind of place, so the whale swims toward it. */
 function spots(seed: number): Spot[] {
   // The page lays the world out for the seed's own sun; a sky with no renderer gives the same azimuth.
-  const renderer = { toneMapping: THREE.NoToneMapping, toneMappingExposure: 1 } as unknown as THREE.WebGLRenderer;
+  const renderer = headlessRenderer();
   const layout = layoutWorld(seed, createSky(seed, renderer, new THREE.Scene()).sunAzimuthDeg);
   // Natural land only: the open sea's rocks would count as land everywhere.
   const land = createLand(seed, { viewYaw: layout.viewYaw, offset: layout.land.offset, landmarks: false });

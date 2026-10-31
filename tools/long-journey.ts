@@ -16,6 +16,7 @@ import { createRegionLook } from '../src/region-look.js';
 import { swellRate } from '../src/swell.js';
 import { FollowCamera } from '../src/camera.js';
 import { last } from '../src/item.js';
+import { headlessRenderer } from './headless-renderer.js';
 
 /**
  * A long headless journey of the whole step-3 loop without a GPU: the real whale mover over the real world,
@@ -45,7 +46,7 @@ for (const seed of seeds) {
   const mover = createWhaleMover(seed, layout.whaleHome, layout.viewYaw - Math.PI / 2, floor.heightAt, layout.journey);
   const m = mover.motion;
   const scene = new THREE.Scene();
-  const renderer = { toneMapping: THREE.NoToneMapping, toneMappingExposure: 1 } as unknown as THREE.WebGLRenderer;
+  const renderer = headlessRenderer();
   const sky = createSky(seed, renderer, scene);
   sky.setEnvironmentRefresh(true);
   const weather = createWeather(seed, sky.clearCover);

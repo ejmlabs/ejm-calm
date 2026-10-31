@@ -10,6 +10,7 @@ import { layoutWorld } from '../src/terrain.js';
 import { makeNoise2D } from '../src/noise.js';
 import { buildTile, MAP_LEVEL, tileSize } from '../src/world-tiles.js';
 import { createLandLife } from '../src/land-life.js';
+import { headlessRenderer } from './headless-renderer.js';
 
 /**
  * CPU cost per frame of what the journey's feel adds, in plain Node (no GPU, no phone): milliseconds per call over
@@ -42,7 +43,7 @@ for (const tier of ['low', 'high'] as QualityTier[]) {
 const wake = createWake();
 time('wake', (i) => { wake.update(source(i), DT); });
 
-const renderer = { toneMapping: THREE.NoToneMapping, toneMappingExposure: 1, getPixelRatio: () => 1 } as unknown as THREE.WebGLRenderer;
+const renderer = headlessRenderer();
 const sky = createSky(1, renderer, new THREE.Scene());
 const weather = createWeather(1, sky.clearCover);
 time('day, weather and fog', (i) => {

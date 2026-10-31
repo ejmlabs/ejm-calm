@@ -39,6 +39,8 @@ export interface UnderwaterOptions {
   origin: FloatingOrigin;
   tier: QualityTier;
   seed?: number;
+  /** The output applies the tone curve to the whole frame, cleared pixels included (the finish), so the clear colour is scene light. */
+  clearInScene: boolean;
 }
 
 export interface UnderwaterHandle {
@@ -534,7 +536,8 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
 
     const below0 = depth > 0;
     sky.sky.visible = !below0;
-    if (below0) renderer.setClearColor(clearColor.copy(tint.color), 1);
+    // The clear shows where nothing is drawn, so it is the colour everything else fades to.
+    if (below0) renderer.setClearColor(options.clearInScene ? radianceFor(tint.color, exposure(), clearColor) : clearColor.copy(tint.color), 1);
     else renderer.setClearColor(clearBase, clearAlpha);
 
     shared.uTime.value = time;

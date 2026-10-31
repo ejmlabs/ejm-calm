@@ -289,7 +289,7 @@ try {
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
   world.origin.onRecenter((dx, dz) => { rig.shift(dx, dz); });
-  underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, depthAt: world.land.depthAt, origin: world.origin, tier: quality.tier, seed });
+  underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, depthAt: world.land.depthAt, origin: world.origin, tier: quality.tier, seed, clearInScene: drawMode === 'finish' });
   // Review only (`?debug=1&fish=1`): every fish species in a small school ahead of the camera.
   if (debug && params.get('fish') === '1') fishShowcase = createFishShowcase(fishTime, UNDERWATER_LAYER);
   if (fishShowcase) scene.add(fishShowcase.group);

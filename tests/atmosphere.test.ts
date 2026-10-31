@@ -6,10 +6,11 @@ import { WEATHER, createWeather } from '../src/weather.js';
 import { createRoute, ROUTE_SECONDS } from '../src/route.js';
 import { REGION_LOOKS } from '../src/regions.js';
 import { loadMemory, saveMemory, validateMemory, STORAGE_KEY, VERSION } from '../src/persistence.js';
+import { headlessRenderer } from '../tools/headless-renderer.js';
 
 /** A sky with no GPU: the environment refresh fails quietly, as it would without WebGL, but is counted. */
 function makeSky(seed: number): { sky: SkyHandle; renderer: THREE.WebGLRenderer; scene: THREE.Scene } {
-  const renderer = { toneMapping: THREE.NoToneMapping, toneMappingExposure: 1, getPixelRatio: () => 1 } as unknown as THREE.WebGLRenderer;
+  const renderer = headlessRenderer();
   const scene = new THREE.Scene();
   return { sky: createSky(seed, renderer, scene), renderer, scene };
 }

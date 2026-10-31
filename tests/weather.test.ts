@@ -22,6 +22,7 @@ import { FX_COUNTS, RAIN_BOX, rainVelocity, stepRain } from '../src/weather-fx.j
 import { seaGeometry } from '../src/ocean.js';
 import type { RegionWeights } from '../src/regions.js';
 import { item, last } from '../src/item.js';
+import { headlessRenderer } from '../tools/headless-renderer.js';
 
 const REGION: RegionWeights[] = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
 const KEYS = ['coverage', 'density', 'fog', 'haze', 'sun', 'grey', 'rain', 'wind', 'dark', 'sea'] as const;
@@ -173,7 +174,7 @@ test('lightning is soft and spaced: one flash per six seconds at most, rising ov
 });
 
 function makeSky(seed: number) {
-  const renderer = { toneMapping: THREE.NoToneMapping, toneMappingExposure: 1, getPixelRatio: () => 1 } as unknown as THREE.WebGLRenderer;
+  const renderer = headlessRenderer();
   return { sky: createSky(seed, renderer, new THREE.Scene()), renderer };
 }
 
