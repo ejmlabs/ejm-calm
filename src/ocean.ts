@@ -431,7 +431,8 @@ const seaFragmentPatches: ShaderPatch[] = [
       // turned away the bright horizon, so each swell reads as light and shade instead of one flat grey. The eye mostly
       // sees faces turned toward it, so the tone pivots on their usual tilt (0.1) and the sea keeps its overall brightness.
       float roughSky = smoothstep( 0.15, 0.85, seaLevel );
-      float facing = dot( -sea.xy, normalize( eyeDirection.xz ) );
+      // Divided, not normalized: straight above or below the eye the horizontal direction is zero, where normalize gives NaN.
+      float facing = dot( -sea.xy, eyeDirection.xz / max( length( eyeDirection.xz ), 1e-4 ) );
       reflectionSample = mix( reflectionSample, reflectionHaze * mix( 1.0, clamp( 1.0 - 2.0 * ( facing - 0.1 ), 0.75, 1.35 ), roughSky ), 0.85 * roughSky );`,
   },
   { find: 'vec4 getNoise( vec2 uv ) {', replace: `uniform float rippleGain;
