@@ -47,10 +47,14 @@ const seeds = [42, 7, 1234];
 /** Minutes of swimming before the travel frame. */
 const TRAVEL_MINUTES = 12;
 
-const stats = (page: Page) => page.evaluate(() => (window as unknown as DrawWindow).__calmReview.stats());
+const stats = (page: Page) =>
+  page.evaluate(() => (window as unknown as DrawWindow).__calmReview.stats());
 /** Calls one review hook by name; arguments are passed as JSON. */
-const review = <K extends Exclude<keyof CalmReview, 'stats'>>(page: Page, hook: K, ...args: Parameters<CalmReview[K]>) =>
-  page.evaluate(`window.__calmReview.${hook}(...${JSON.stringify(args)})`);
+const review = <K extends Exclude<keyof CalmReview, 'stats'>>(
+  page: Page,
+  hook: K,
+  ...args: Parameters<CalmReview[K]>
+) => page.evaluate(`window.__calmReview.${hook}(...${JSON.stringify(args)})`);
 
 /** Frames per second over a short window, plus the median GL draw calls per frame. */
 async function measure(page: Page): Promise<{ fps: number; glDraws: number }> {
@@ -85,7 +89,9 @@ const round = (v: number) => Math.round(v * 10) / 10;
 const camToWhale = (s: Stats) => {
   const wx = (s.whale[0] ?? 0) - (s.origin[0] ?? 0);
   const wz = (s.whale[2] ?? 0) - (s.origin[1] ?? 0);
-  return round(Math.hypot((s.cam[0] ?? 0) - wx, (s.cam[1] ?? 0) - (s.whale[1] ?? 0), (s.cam[2] ?? 0) - wz));
+  return round(
+    Math.hypot((s.cam[0] ?? 0) - wx, (s.cam[1] ?? 0) - (s.whale[1] ?? 0), (s.cam[2] ?? 0) - wz),
+  );
 };
 
 const perf: Record<string, unknown>[] = [];
@@ -95,20 +101,35 @@ await withBrowser(async (browser, base) => {
   for (const device of [DESKTOP, MOBILE]) {
     for (const seed of seeds) {
       const name = `${device.name}-seed${String(seed)}`;
-      const { page, context, errors } = await openCalm(browser, base, device, { seed, query: { debug: '1' }, instrument: true });
+      const { page, context, errors } = await openCalm(browser, base, device, {
+        seed,
+        query: { debug: '1' },
+        instrument: true,
+      });
       const shot = async (label: string) => {
         await page.screenshot({ path: resolve(directory, `${name}-${label}.png`) });
         const s = await stats(page);
         const m = await measure(page);
         const entry = {
-          shot: `${name}-${label}`, ...m, draws: s.draws, triangles: s.triangles,
-          landTriangles: s['landTriangles'], chunks: s['chunks'], ships: s['ships'],
-          camMode: s.camMode, submersion: round(s.submersion), phase: s.phase, behavior: s.behavior, speed: round(s.speed ?? 0),
-          heading: round(s.whaleHeading), camToWhale: camToWhale(s),
+          shot: `${name}-${label}`,
+          ...m,
+          draws: s.draws,
+          triangles: s.triangles,
+          landTriangles: s['landTriangles'],
+          chunks: s['chunks'],
+          ships: s['ships'],
+          camMode: s.camMode,
+          submersion: round(s.submersion),
+          phase: s.phase,
+          behavior: s.behavior,
+          speed: round(s.speed ?? 0),
+          heading: round(s.whaleHeading),
+          camToWhale: camToWhale(s),
         };
         perf.push(entry);
         console.log(JSON.stringify(entry));
-        if (entry.camToWhale < 6) problems.push(`${entry.shot}: camera ${String(entry.camToWhale)} m from the whale`);
+        if (entry.camToWhale < 6)
+          problems.push(`${entry.shot}: camera ${String(entry.camToWhale)} m from the whale`);
         return s;
       };
       try {
@@ -123,23 +144,33 @@ await withBrowser(async (browser, base) => {
 
         await review(page, 'travel', TRAVEL_MINUTES * 60);
         // Swim on until the whale is back at the surface, so the frame shows the new coast.
-        for (let i = 0; i < 40 && ((await stats(page)).whale[1] ?? 0) < -2; i++) await review(page, 'travel', 5);
+        for (let i = 0; i < 40 && ((await stats(page)).whale[1] ?? 0) < -2; i++)
+          await review(page, 'travel', 5);
         await page.waitForTimeout(6000);
         const far = await shot('travel');
         const swum = Math.hypot(far.whale[0] ?? 0, far.whale[2] ?? 0);
-        console.log(`${name}: origin ${far.origin.map(round).join(', ')}, whale ${String(round(swum))} m from the start`);
+        console.log(
+          `${name}: origin ${far.origin.map(round).join(', ')}, whale ${String(round(swum))} m from the start`,
+        );
         item(perf, perf.length - 1)['distanceFromStart'] = round(swum);
 
         // Swim on (fast-forward) until the stop condition holds, then let the chase settle in real frames.
         const swimUntil = async (done: (s: Stats) => boolean, limit: number) => {
-          for (let t = 0; t < limit && !done(await stats(page)); t += 5) await review(page, 'travel', 5);
+          for (let t = 0; t < limit && !done(await stats(page)); t += 5)
+            await review(page, 'travel', 5);
           // Fast-forward jumps far: give streaming time to refine and fade in.
           await page.waitForTimeout(6000);
         };
-        await swimUntil((s) => s.behavior === 'travel' && (s.speed ?? 0) > 7 && (s.whale[1] ?? 0) > -2, 600);
+        await swimUntil(
+          (s) => s.behavior === 'travel' && (s.speed ?? 0) > 7 && (s.whale[1] ?? 0) > -2,
+          600,
+        );
         await shot('fast');
         // At the swarm: slow (circling or lunging) and down at its depth.
-        await swimUntil((s) => s.behavior === 'feed' && (s.whale[1] ?? 0) < -4 && (s.speed ?? 9) < 3.6, 1800);
+        await swimUntil(
+          (s) => s.behavior === 'feed' && (s.whale[1] ?? 0) < -4 && (s.speed ?? 9) < 3.6,
+          1800,
+        );
         await shot('feed');
         await review(page, 'peekUnderwater', 8, true);
         await page.waitForTimeout(2500);

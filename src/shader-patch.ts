@@ -1,4 +1,7 @@
-export interface ShaderPatch { find: string; replace: string }
+export interface ShaderPatch {
+  find: string;
+  replace: string;
+}
 
 /**
  * Applies every patch to a shader source, or returns null if any target text is

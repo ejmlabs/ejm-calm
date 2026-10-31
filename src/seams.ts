@@ -27,7 +27,12 @@ export const FIXED_ORIGIN: FloatingOrigin = {
 };
 
 /** What the follow camera tracks, in render coordinates. `heading` uses whaleForward's convention. */
-export interface FollowTarget { x: number; y: number; z: number; heading: number }
+export interface FollowTarget {
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+}
 
 /** Sea level (the water plane is flat; waves are only a normal map). */
 export const WATER_LEVEL = 0;
@@ -42,7 +47,10 @@ export interface WaterSignal {
   underwater: boolean;
 }
 
-export function waterSignal(cameraY: number, out: WaterSignal = { depth: 0, submersion: 0, underwater: false }): WaterSignal {
+export function waterSignal(
+  cameraY: number,
+  out: WaterSignal = { depth: 0, submersion: 0, underwater: false },
+): WaterSignal {
   const depth = WATER_LEVEL - cameraY;
   const t = Math.min(1, Math.max(0, (depth + SURFACE_BAND) / (2 * SURFACE_BAND)));
   out.depth = depth;
@@ -52,7 +60,10 @@ export function waterSignal(cameraY: number, out: WaterSignal = { depth: 0, subm
 }
 
 /** Anything that sounds like a ship. ShipHandle satisfies it. */
-export interface ShipEmitter { spec: { id: number; kind: 'sloop' | 'tall' }; group: THREE.Object3D }
+export interface ShipEmitter {
+  spec: { id: number; kind: 'sloop' | 'tall' };
+  group: THREE.Object3D;
+}
 
 /**
  * Underwater tint for materials without three's fog (the land). Only the

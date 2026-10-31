@@ -1,4 +1,9 @@
-import { createNoise2D, createNoise4D, type NoiseFunction2D, type NoiseFunction4D } from 'simplex-noise';
+import {
+  createNoise2D,
+  createNoise4D,
+  type NoiseFunction2D,
+  type NoiseFunction4D,
+} from 'simplex-noise';
 import { random, hash } from './rng.js';
 
 export function makeNoise2D(seed: number, channel = 0): NoiseFunction2D {

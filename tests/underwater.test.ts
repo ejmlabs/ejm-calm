@@ -52,13 +52,18 @@ test('fog blend hits both endpoints and moves monotonically between them', () =>
   assert.ok(out.color.equals(above.color));
   assert.ok(Math.abs(out.density - above.density) < 1e-12);
   blendFog(above, below, 1, out);
-  assert.ok(Math.abs(out.color.r - below.color.r) < 1e-9 && Math.abs(out.color.b - below.color.b) < 1e-9);
+  assert.ok(
+    Math.abs(out.color.r - below.color.r) < 1e-9 && Math.abs(out.color.b - below.color.b) < 1e-9,
+  );
   assert.ok(Math.abs(out.density - below.density) < 1e-12);
   let last = { d: 0, r: Infinity, b: Infinity };
   for (let s = 0; s <= 1.0001; s += 0.01) {
     blendFog(above, below, s, out);
     assert.ok(out.density >= last.d, `density monotonic at ${String(s)}`);
-    assert.ok(out.color.r <= last.r + 1e-12 && out.color.b <= last.b + 1e-12, `colour monotonic at ${String(s)}`);
+    assert.ok(
+      out.color.r <= last.r + 1e-12 && out.color.b <= last.b + 1e-12,
+      `colour monotonic at ${String(s)}`,
+    );
     last = { d: out.density, r: out.color.r, b: out.color.b };
   }
   // Clamped outside 0..1.
@@ -105,8 +110,12 @@ test('radiance solver round-trips display colours through ACES, including dark d
       assert.ok(Number.isFinite(radiance[c]) && radiance[c] >= 0);
       // ACES desaturates: a channel it cannot pull low enough ends at zero radiance instead.
       const reached = Math.abs(back[c] - tint.color[c]) < 0.004;
-      const floored = radiance[c] < 1e-4 && back[c] > tint.color[c] && back[c] < tint.color[c] + 0.05;
-      assert.ok(reached || floored, `${String(depth)} ${c}: ${String(back[c])} vs ${String(tint.color[c])}`);
+      const floored =
+        radiance[c] < 1e-4 && back[c] > tint.color[c] && back[c] < tint.color[c] + 0.05;
+      assert.ok(
+        reached || floored,
+        `${String(depth)} ${c}: ${String(back[c])} vs ${String(tint.color[c])}`,
+      );
     }
   }
 });
@@ -138,7 +147,10 @@ test('view fog weight: none well above, full well below, never decreasing on the
 
 test('light fails with depth, red first and blue last, and the deep stays dim but visible', () => {
   const c = depthLight(30, new THREE.Color());
-  assert.ok(c.r < 0.001 && c.g < c.b && c.b > 0.4, `30 m: ${String(c.r)} ${String(c.g)} ${String(c.b)}`);
+  assert.ok(
+    c.r < 0.001 && c.g < c.b && c.b > 0.4,
+    `30 m: ${String(c.r)} ${String(c.g)} ${String(c.b)}`,
+  );
   assert.equal(seenLight(0), 1);
   let prev = 1;
   for (let d = 5; d <= 300; d += 5) {

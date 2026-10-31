@@ -40,7 +40,10 @@ export interface NavOptions {
   known?: (i: number, j: number) => number | undefined;
 }
 
-export function createNavField(maskAt: (x: number, z: number) => number, options: NavOptions): NavField {
+export function createNavField(
+  maskAt: (x: number, z: number) => number,
+  options: NavOptions,
+): NavField {
   const { min, cell } = options;
   const T = options.tile ?? 64;
   const P = Math.min(T, options.pad ?? 32);
@@ -57,7 +60,8 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
   /** Mask samples of a T×T block of lattice points (rounded to float32 so any builder agrees). */
   const blocks = new Map<string, Float32Array>();
   const tiles = new Map<string, Float32Array>();
-  let pending: { key: string; bx: number; bz: number; data: Float32Array; row: number } | null = null;
+  let pending: { key: string; bx: number; bz: number; data: Float32Array; row: number } | null =
+    null;
 
   function touch<V>(map: Map<string, V>, key: string, value: V, cap: number): void {
     map.delete(key);
@@ -72,7 +76,8 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
       const j = z0 + job.row;
       const z = min + j * cell;
       for (let i = 0; i < T; i++) {
-        job.data[job.row * T + i] = options.known?.(x0 + i, j) ?? Math.fround(maskAt(min + (x0 + i) * cell, z));
+        job.data[job.row * T + i] =
+          options.known?.(x0 + i, j) ?? Math.fround(maskAt(min + (x0 + i) * cell, z));
       }
       job.row++;
       if (until()) break;
@@ -87,7 +92,8 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
       touch(blocks, key, hit, maxBlocks);
       return hit;
     }
-    const job = pending?.key === key ? pending : { key, bx, bz, data: new Float32Array(T * T), row: 0 };
+    const job =
+      pending?.key === key ? pending : { key, bx, bz, data: new Float32Array(T * T), row: 0 };
     blockRows(job, () => false);
     if (pending === job) pending = null;
     touch(blocks, key, job.data, maxBlocks);
@@ -129,7 +135,10 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
     for (let j = 0; j < span; j++) {
       for (let i = 0; i < span; i++) {
         const k = (j + P) * W + (i + P);
-        const value = (toLand[k] ?? 0) > 0 ? Math.sqrt(toLand[k] ?? 0) * cell : -Math.sqrt(toSea[k] ?? 0) * cell;
+        const value =
+          (toLand[k] ?? 0) > 0
+            ? Math.sqrt(toLand[k] ?? 0) * cell
+            : -Math.sqrt(toSea[k] ?? 0) * cell;
         out[j * span + i] = Math.max(-saturation, Math.min(saturation, value));
       }
     }
@@ -137,7 +146,12 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
   }
 
   /** The tile being built a slice at a time by `prefetch`. */
-  let building: { key: string; tx: number; tz: number; steps: Generator<void, Float32Array> } | null = null;
+  let building: {
+    key: string;
+    tx: number;
+    tz: number;
+    steps: Generator<void, Float32Array>;
+  } | null = null;
 
   function tile(tx: number, tz: number): Float32Array {
     const key = `${String(tx)}:${String(tz)}`;
@@ -241,7 +255,8 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
       for (let tz = Math.floor(fz) - reach; tz <= Math.floor(fz) + reach; tz++) {
         for (let tx = Math.floor(fx) - reach; tx <= Math.floor(fx) + reach; tx++) {
           const d = Math.hypot(tx + 0.5 - fx, tz + 0.5 - fz) * size;
-          if (d <= radius + size * 0.71 && !tiles.has(`${String(tx)}:${String(tz)}`)) wanted.push({ tx, tz, d });
+          if (d <= radius + size * 0.71 && !tiles.has(`${String(tx)}:${String(tz)}`))
+            wanted.push({ tx, tz, d });
         }
       }
       wanted.sort((a, b) => a.d - b.d || a.tz - b.tz || a.tx - b.tx);
@@ -255,7 +270,8 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
           for (let bx = tx - 1; bx <= tx + 1; bx++) {
             const key = `${String(bx)}:${String(bz)}`;
             if (blocks.has(key)) continue;
-            if (pending?.key !== key) pending = { key, bx, bz, data: new Float32Array(T * T), row: 0 };
+            if (pending?.key !== key)
+              pending = { key, bx, bz, data: new Float32Array(T * T), row: 0 };
             if (!blockRows(pending, over)) return false;
             touch(blocks, key, pending.data, maxBlocks);
             pending = null;
@@ -305,10 +321,14 @@ export function* squaredDistanceSteps(
     z[0] = -Infinity;
     z[1] = Infinity;
     for (let q = 1; q < size; q++) {
-      let s = (((f[q] ?? 0) + q * q) - ((f[v[k] ?? 0] ?? 0) + (v[k] ?? 0) * (v[k] ?? 0))) / (2 * q - 2 * (v[k] ?? 0));
+      let s =
+        ((f[q] ?? 0) + q * q - ((f[v[k] ?? 0] ?? 0) + (v[k] ?? 0) * (v[k] ?? 0))) /
+        (2 * q - 2 * (v[k] ?? 0));
       while (s <= (z[k] ?? 0)) {
         k--;
-        s = (((f[q] ?? 0) + q * q) - ((f[v[k] ?? 0] ?? 0) + (v[k] ?? 0) * (v[k] ?? 0))) / (2 * q - 2 * (v[k] ?? 0));
+        s =
+          ((f[q] ?? 0) + q * q - ((f[v[k] ?? 0] ?? 0) + (v[k] ?? 0) * (v[k] ?? 0))) /
+          (2 * q - 2 * (v[k] ?? 0));
       }
       k++;
       v[k] = q;

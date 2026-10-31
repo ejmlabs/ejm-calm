@@ -101,7 +101,11 @@ export function createPlanet(seed: number, heading: number): Planet {
   const nx = -fz;
   const nz = fx;
   // The planet's north axis crosses the lane at 35 to 55 degrees, so the migration crosses the climate bands.
-  const tilt = ((hash(seed, 'planet-north') & 1 ? 1 : -1) * (35 + (hash(seed, 'planet-tilt') / 0x100000000) * 20) * Math.PI) / 180;
+  const tilt =
+    ((hash(seed, 'planet-north') & 1 ? 1 : -1) *
+      (35 + (hash(seed, 'planet-tilt') / 0x100000000) * 20) *
+      Math.PI) /
+    180;
   const northX = fx * Math.cos(tilt) - fz * Math.sin(tilt);
   const northZ = fx * Math.sin(tilt) + fz * Math.cos(tilt);
 
@@ -118,9 +122,10 @@ export function createPlanet(seed: number, heading: number): Planet {
   function integrate(k: number): Float64Array {
     const dir = k >= 0 ? 1 : -1;
     const prev = k === 0 || k === -1 ? null : chunks.get(k - dir);
-    if (prev === undefined) throw new Error(`lane chunk ${String(k - dir)} is integrated after ${String(k)}`);
+    if (prev === undefined)
+      throw new Error(`lane chunk ${String(k - dir)} is integrated after ${String(k)}`);
     const out = new Float64Array(LANE_CHUNK + 1);
-    let c = prev ? prev[dir > 0 ? LANE_CHUNK : 0] ?? 0 : 0;
+    let c = prev ? (prev[dir > 0 ? LANE_CHUNK : 0] ?? 0) : 0;
     const start = k >= 0 ? k * LANE_CHUNK : (k + 1) * LANE_CHUNK;
     for (let i = 0; i <= LANE_CHUNK; i++) {
       const at = dir > 0 ? i : LANE_CHUNK - i;
@@ -168,8 +173,12 @@ export function createPlanet(seed: number, heading: number): Planet {
   function continentAt(x: number, z: number): number {
     const ux = x + px;
     const uz = z + pz;
-    const wx = ux + fbm2(warpX, ux / (CONTINENT_WAVE * 1.3), uz / (CONTINENT_WAVE * 1.3), 2) * CONTINENT_WARP;
-    const wz = uz + fbm2(warpZ, ux / (CONTINENT_WAVE * 1.3), uz / (CONTINENT_WAVE * 1.3), 2) * CONTINENT_WARP;
+    const wx =
+      ux +
+      fbm2(warpX, ux / (CONTINENT_WAVE * 1.3), uz / (CONTINENT_WAVE * 1.3), 2) * CONTINENT_WARP;
+    const wz =
+      uz +
+      fbm2(warpZ, ux / (CONTINENT_WAVE * 1.3), uz / (CONTINENT_WAVE * 1.3), 2) * CONTINENT_WARP;
     return fbm2(continent, wx / CONTINENT_WAVE, wz / CONTINENT_WAVE, 5);
   }
 
@@ -185,7 +194,9 @@ export function createPlanet(seed: number, heading: number): Planet {
       let longest = 0;
       for (let s = START_COAST; s < PLACE_REACH; s += PLACE_STEP) {
         const c = centre(s);
-        const hit = [-PLACE_NEAR, PLACE_NEAR].some((q) => continentAt(s * fx + (c + q) * nx, s * fz + (c + q) * nz) > LAND_LEVEL);
+        const hit = [-PLACE_NEAR, PLACE_NEAR].some(
+          (q) => continentAt(s * fx + (c + q) * nx, s * fz + (c + q) * nz) > LAND_LEVEL,
+        );
         near += hit ? 1 : 0;
         if (hit && s < PLACE_FIRST) first++;
         run = hit ? run + PLACE_STEP : 0;
@@ -193,7 +204,10 @@ export function createPlanet(seed: number, heading: number): Planet {
       }
       const share = (near * PLACE_STEP) / (PLACE_REACH - START_COAST);
       const early = (first * PLACE_STEP) / (PLACE_FIRST - START_COAST);
-      const score = Math.abs(share - PLACE_SHARE) + Math.abs(early - PLACE_SHARE) + Math.max(0, longest - PLACE_RUN) / 100000;
+      const score =
+        Math.abs(share - PLACE_SHARE) +
+        Math.abs(early - PLACE_SHARE) +
+        Math.max(0, longest - PLACE_RUN) / 100000;
       if (score < best.score) best = { x: px, z: pz, score };
     }
     px = best.x;
@@ -221,7 +235,8 @@ export function createPlanet(seed: number, heading: number): Planet {
     const s = (k + 0.15 + 0.7 * u(3)) * FEATURE_CELL;
     const side = u(2) < 0.5 ? 1 : -1;
     if (u(0) > FEATURE_ODDS || Math.abs(s) < FEATURE_FROM) f = null;
-    else if (u(1) < CLUSTER_SHARE) f = { s, q: side * 3000 * u(5), radius: 2500 + 2000 * u(4), cluster: true };
+    else if (u(1) < CLUSTER_SHARE)
+      f = { s, q: side * 3000 * u(5), radius: 2500 + 2000 * u(4), cluster: true };
     else {
       const radius = 1500 + 7000 * u(4) ** 2;
       f = { s, q: side * (ISLAND_GAP + radius * 1.3 + 2000 * u(5)), radius, cluster: false };
@@ -232,7 +247,8 @@ export function createPlanet(seed: number, heading: number): Planet {
   }
 
   /** Islet lift in [0, …): above about 1.6 an islet breaks the surface of the open sea. */
-  const islets = (x: number, z: number, weight: number): number => weight * Math.max(0, fbm2(islet, x / ISLET_WAVE, z / ISLET_WAVE, 3) - ISLET_FROM) * ISLET_GAIN;
+  const islets = (x: number, z: number, weight: number): number =>
+    weight * Math.max(0, fbm2(islet, x / ISLET_WAVE, z / ISLET_WAVE, 3) - ISLET_FROM) * ISLET_GAIN;
 
   /** The lane's islands and islet clusters, and the oceans' archipelagos, as a mask (MACRO_FLOOR where there are none). */
   function islands(x: number, z: number): number {
@@ -247,11 +263,17 @@ export function createPlanet(seed: number, heading: number): Planet {
       if (d > f.radius * 1.4) continue;
       // A ragged outline, not a circle.
       const edge = f.radius * (1 + 0.3 * fbm2(shape, x / f.radius + k * 7.3, z / f.radius, 2));
-      if (f.cluster) m = Math.max(m, MACRO_FLOOR + islets(x, z, 1 - smoothstep(edge * 0.4, edge, d)));
+      if (f.cluster)
+        m = Math.max(m, MACRO_FLOOR + islets(x, z, 1 - smoothstep(edge * 0.4, edge, d)));
       else m = Math.max(m, (edge - d) * COAST_SLOPE);
     }
     // The oceans' archipelagos keep off the lane, which has its own clusters.
-    const zone = smoothstep(ARCHIPELAGO_EDGE[0], ARCHIPELAGO_EDGE[1], fbm2(archipelagos, x / ARCHIPELAGO_WAVE, z / ARCHIPELAGO_WAVE, 2)) * smoothstep(ZONE_CLEAR, ZONE_CLEAR * 2, Math.abs(lane.q));
+    const zone =
+      smoothstep(
+        ARCHIPELAGO_EDGE[0],
+        ARCHIPELAGO_EDGE[1],
+        fbm2(archipelagos, x / ARCHIPELAGO_WAVE, z / ARCHIPELAGO_WAVE, 2),
+      ) * smoothstep(ZONE_CLEAR, ZONE_CLEAR * 2, Math.abs(lane.q));
     return zone > 0 ? Math.max(m, MACRO_FLOOR + islets(x, z, zone)) : m;
   }
 

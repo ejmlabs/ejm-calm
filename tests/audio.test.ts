@@ -72,21 +72,36 @@ test('whale events stay quiet on steady state', () => {
   const breach: WhaleMoment = { phase: 'breach', phaseT: 0.5 };
   assert.equal(whaleEvents(breach, breach), 0);
   // Large frame steps still fire, once.
-  assert.equal(whaleEvents({ phase: 'breach', phaseT: 0 }, { phase: 'breach', phaseT: 0.99 }), WHALE_BREACH_EXIT | WHALE_BREACH_SPLASH);
+  assert.equal(
+    whaleEvents({ phase: 'breach', phaseT: 0 }, { phase: 'breach', phaseT: 0.99 }),
+    WHALE_BREACH_EXIT | WHALE_BREACH_SPLASH,
+  );
 });
 
 test('whale events handle forced phases', () => {
   // Forced into the middle of a breach: the skipped exit does not replay, the coming splash still fires.
   const forced = whaleEvents({ phase: 'swim', phaseT: 0.7 }, { phase: 'breach', phaseT: 0.26 });
   assert.equal(forced & (WHALE_BREACH_EXIT | WHALE_BREACH_SPLASH), 0);
-  assert.equal(whaleEvents({ phase: 'breach', phaseT: 0.26 }, { phase: 'breach', phaseT: BREACH_SPLASH + 0.001 }), WHALE_BREACH_SPLASH);
+  assert.equal(
+    whaleEvents(
+      { phase: 'breach', phaseT: 0.26 },
+      { phase: 'breach', phaseT: BREACH_SPLASH + 0.001 },
+    ),
+    WHALE_BREACH_SPLASH,
+  );
   // Forced from the start: the exit fires as the whale reaches it.
   assert.equal(whaleEvents({ phase: 'swim', phaseT: 0.2 }, { phase: 'breach', phaseT: 0 }), 0);
-  assert.equal(whaleEvents({ phase: 'breach', phaseT: 0 }, { phase: 'breach', phaseT: BREACH_EXIT }), WHALE_BREACH_EXIT);
+  assert.equal(
+    whaleEvents({ phase: 'breach', phaseT: 0 }, { phase: 'breach', phaseT: BREACH_EXIT }),
+    WHALE_BREACH_EXIT,
+  );
   // Re-forcing the same phase (time jumps back) re-arms without double firing.
   assert.equal(whaleEvents({ phase: 'breach', phaseT: 0.9 }, { phase: 'breach', phaseT: 0.1 }), 0);
   // A forced spout mid-phase still blows.
-  assert.equal(whaleEvents({ phase: 'swim', phaseT: 0.1 }, { phase: 'spout', phaseT: 0.5 }), WHALE_SPOUT);
+  assert.equal(
+    whaleEvents({ phase: 'swim', phaseT: 0.1 }, { phase: 'spout', phaseT: 0.5 }),
+    WHALE_SPOUT,
+  );
 });
 
 test('surf falls with clearance and fades out far from shore', () => {
@@ -152,7 +167,10 @@ test('nearest ship selection is stable', () => {
   const dist: number[] = [];
   const n = nearestShips(ships, 0, 0, 3, 650, out, dist);
   assert.equal(n, 3);
-  assert.deepEqual(out.slice(0, n).map((i) => item(ships, i).id), [1, 9, 3]);
+  assert.deepEqual(
+    out.slice(0, n).map((i) => item(ships, i).id),
+    [1, 9, 3],
+  );
   assert.deepEqual(dist.slice(0, n), [30, 50, 100]);
   // Equal distances resolve by id, whatever the input order.
   const tied = [
@@ -174,13 +192,18 @@ test('sprite offsets fit the packed audio files', () => {
   for (const [start, length] of [...GULL_CALLS, ...SPLASH_HITS]) {
     assert.ok(start >= 0 && length > 0);
   }
-  for (let i = 1; i < GULL_CALLS.length; i++) assert.ok(item(GULL_CALLS, i)[0] >= item(GULL_CALLS, i - 1)[0] + item(GULL_CALLS, i - 1)[1]);
+  for (let i = 1; i < GULL_CALLS.length; i++)
+    assert.ok(item(GULL_CALLS, i)[0] >= item(GULL_CALLS, i - 1)[0] + item(GULL_CALLS, i - 1)[1]);
   assert.ok(item(SPLASH_HITS, 1)[0] >= item(SPLASH_HITS, 0)[0] + item(SPLASH_HITS, 0)[1]);
 });
 
 test('every audio file has both formats, a listed open licence and a source address', async () => {
   const sources = await readFile(resolve(audioDir, 'SOURCES.md'), 'utf8');
-  const rows = sources.split('\n').filter((line) => line.startsWith('| ') && !line.startsWith('| Output') && !line.startsWith('|---'));
+  const rows = sources
+    .split('\n')
+    .filter(
+      (line) => line.startsWith('| ') && !line.startsWith('| Output') && !line.startsWith('|---'),
+    );
   const files = (await readdir(audioDir)).filter((name) => name !== 'SOURCES.md');
   assert.ok(files.length > 0);
   const stems = new Set<string>();
@@ -188,32 +211,49 @@ test('every audio file has both formats, a listed open licence and a source addr
     const ext = extname(name);
     assert.ok(ext === '.ogg' || ext === '.m4a', `unexpected file ${name}`);
     stems.add(basename(name, ext));
-    const listed = rows.filter((row) => item(row.split('|'), 1).split(',').map((s) => s.trim()).includes(name));
+    const listed = rows.filter((row) =>
+      item(row.split('|'), 1)
+        .split(',')
+        .map((s) => s.trim())
+        .includes(name),
+    );
     assert.ok(listed.length > 0, `${name} is not listed in SOURCES.md`);
     for (const row of listed) {
       const licence = item(row.split('|'), 4).trim();
-      assert.match(licence, /^(CC0 1\.0|Public domain|CC BY [0-9.]+)$/, `${name}: licence "${licence}" is not allowed`);
+      assert.match(
+        licence,
+        /^(CC0 1\.0|Public domain|CC BY [0-9.]+)$/,
+        `${name}: licence "${licence}" is not allowed`,
+      );
       assert.match(item(row.split('|'), 2), /https:\/\/\S+/, `${name}: no source address`);
       assert.ok(item(row.split('|'), 3).trim().length > 0, `${name}: no author`);
     }
   }
   for (const stem of stems) {
-    assert.ok(files.includes(`${stem}.ogg`) && files.includes(`${stem}.m4a`), `${stem} needs .ogg and .m4a`);
+    assert.ok(
+      files.includes(`${stem}.ogg`) && files.includes(`${stem}.m4a`),
+      `${stem} needs .ogg and .m4a`,
+    );
   }
 });
 
 test('every audio file the code loads exists', async () => {
   const source = await readFile(resolve(root, 'src/audio.ts'), 'utf8');
-  const referenced = [...source.matchAll(/new URL\('\.\.\/assets\/audio\/([^']+)'/g)].map((m) => item(m, 1));
+  const referenced = [...source.matchAll(/new URL\('\.\.\/assets\/audio\/([^']+)'/g)].map((m) =>
+    item(m, 1),
+  );
   const files = await readdir(audioDir);
   assert.ok(referenced.length > 0);
   for (const name of referenced) assert.ok(files.includes(name), `missing ${name}`);
-  for (const name of files.filter((f) => f !== 'SOURCES.md')) assert.ok(referenced.includes(name), `unused ${name}`);
+  for (const name of files.filter((f) => f !== 'SOURCES.md'))
+    assert.ok(referenced.includes(name), `unused ${name}`);
 });
 
 test('CSP allows same-origin audio fetches and nothing wider', async () => {
   // Sounds are fetched and decoded with Web Audio, which needs connect-src for the site itself.
-  const connect = CSP.split(';').map((s) => s.trim()).find((s) => s.startsWith('connect-src'));
+  const connect = CSP.split(';')
+    .map((s) => s.trim())
+    .find((s) => s.startsWith('connect-src'));
   assert.equal(connect, "connect-src 'self'");
   assert.ok(!/default-src [^;]*(\*|https?:)/.test(CSP));
   assert.ok(!CSP.includes('media-src'), 'media falls back to default-src self');

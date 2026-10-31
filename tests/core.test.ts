@@ -10,7 +10,15 @@ import {
   coastAhead,
   SHIP_LAND_MARGIN,
 } from '../src/terrain.js';
-import { createLand, landFraction, nearShelf, depthForMask, coastSpread, REGION_FROM, VIEW_HALF_CONE } from '../src/land.js';
+import {
+  createLand,
+  landFraction,
+  nearShelf,
+  depthForMask,
+  coastSpread,
+  REGION_FROM,
+  VIEW_HALF_CONE,
+} from '../src/land.js';
 import { biomeColor } from '../src/landmesh.js';
 import { clampClearOfLand } from '../src/shore.js';
 import { validateMemory, VERSION } from '../src/persistence.js';
@@ -18,26 +26,60 @@ import { fbm2, makeNoise2D, ridged2 } from '../src/noise.js';
 import { item } from '../src/item.js';
 
 test('random streams are repeatable, independent, and unsigned', () => {
-  const a = random(42), b = random(42), c = random(43);
+  const a = random(42),
+    b = random(42),
+    c = random(43);
   const values = Array.from({ length: 2000 }, () => a());
-  assert.deepEqual(values, Array.from({ length: 2000 }, () => b()));
-  assert.notDeepEqual(values, Array.from({ length: 2000 }, () => c()));
+  assert.deepEqual(
+    values,
+    Array.from({ length: 2000 }, () => b()),
+  );
+  assert.notDeepEqual(
+    values,
+    Array.from({ length: 2000 }, () => c()),
+  );
   assert.ok(values.every((n) => n >= 0 && n < 1));
   assert.notEqual(hash(42, -1, 2, 3), hash(42, 1, 2, 3));
 });
 
 test('seeds parse complete unsigned decimals and reject ambiguous input', () => {
-  for (const [input, expected] of [['0', 0], ['42', 42], ['00042', 42], ['4294967295', 0xffffffff]] as const) {
+  for (const [input, expected] of [
+    ['0', 0],
+    ['42', 42],
+    ['00042', 42],
+    ['4294967295', 0xffffffff],
+  ] as const) {
     assert.equal(parseSeed(input), expected);
   }
-  for (const input of [null, undefined, '', ' ', '42x', '-1', '1.5', '1e2', 'Infinity', '0x10', '4294967296'] as const) {
+  for (const input of [
+    null,
+    undefined,
+    '',
+    ' ',
+    '42x',
+    '-1',
+    '1.5',
+    '1e2',
+    'Infinity',
+    '0x10',
+    '4294967296',
+  ] as const) {
     assert.equal(parseSeed(input), null);
   }
   assert.deepEqual(resolveSeed('?seed=0', 12), { seed: 0, explicit: true });
   assert.deepEqual(resolveSeed('?seed=oops', 12), { seed: 12, explicit: false });
-  assert.deepEqual(resolveSeed('', -1, () => 0.5), { seed: 0x80000000, explicit: false });
-  assert.equal(seedURL('https://example.test/calm/?other=1#about', 42).href, 'https://example.test/calm/?other=1&seed=42#about');
-  assert.notEqual(nextSeed(42, () => 0.5), 42);
+  assert.deepEqual(
+    resolveSeed('', -1, () => 0.5),
+    { seed: 0x80000000, explicit: false },
+  );
+  assert.equal(
+    seedURL('https://example.test/calm/?other=1#about', 42).href,
+    'https://example.test/calm/?other=1&seed=42#about',
+  );
+  assert.notEqual(
+    nextSeed(42, () => 0.5),
+    42,
+  );
 });
 
 const SEEDS = [0, 7, 42, 1234, 99991];
@@ -78,7 +120,10 @@ test('the opening keeps Earth-like land and long coasts, with the open ocean bey
   for (const seed of SEEDS) {
     const land = layoutWorld(seed).land;
     const fraction = landFraction(land);
-    assert.ok(fraction > 0.1 && fraction < 0.6, `seed ${String(seed)} land fraction ${fraction.toFixed(2)}`);
+    assert.ok(
+      fraction > 0.1 && fraction < 0.6,
+      `seed ${String(seed)} land fraction ${fraction.toFixed(2)}`,
+    );
     // Count land/sea transitions along rows: fractal coasts cross often.
     let crossings = 0;
     for (let row = -3000; row <= 3000; row += 500) {
@@ -107,12 +152,21 @@ test('world layout is deterministic and keeps ships and whale in open water', ()
     assert.deepEqual(layoutData(seed), layoutData(seed));
     assert.ok(world.ships.length >= 2 && world.ships.length <= 5);
     for (const ship of world.ships) {
-      assert.ok(world.land.heightAt(ship.x, ship.z) < -2, `seed ${String(seed)} ship ${String(ship.id)} on land`);
-      assert.ok(world.land.clearance(ship.x, ship.z) >= SHIP_LAND_MARGIN - 1, `seed ${String(seed)} ship ${String(ship.id)} near shore`);
+      assert.ok(
+        world.land.heightAt(ship.x, ship.z) < -2,
+        `seed ${String(seed)} ship ${String(ship.id)} on land`,
+      );
+      assert.ok(
+        world.land.clearance(ship.x, ship.z) >= SHIP_LAND_MARGIN - 1,
+        `seed ${String(seed)} ship ${String(ship.id)} near shore`,
+      );
     }
     const home = world.whaleHome;
     assert.ok(Number.isFinite(home.x) && Number.isFinite(home.z));
-    assert.ok(world.land.clearance(home.x, home.z) > 100, `seed ${String(seed)} whale home too close to land`);
+    assert.ok(
+      world.land.clearance(home.x, home.z) > 100,
+      `seed ${String(seed)} whale home too close to land`,
+    );
   }
 });
 
@@ -122,12 +176,16 @@ test('shore clearance tracks the coast and clamping lands in water', () => {
     const x = Math.sin(i * 3.1) * 1200;
     const z = Math.cos(i * 1.7) * 1200;
     const gap = land.clearance(x, z);
-    if (land.maskAt(x, z) > 0.05) assert.ok(gap <= land.grid.cell, `land point has clearance ${String(gap)}`);
+    if (land.maskAt(x, z) > 0.05)
+      assert.ok(gap <= land.grid.cell, `land point has clearance ${String(gap)}`);
     // Floating things start at sea and get nudged off the beach.
     if (gap < -40 || gap > 30) continue;
     const out = clampClearOfLand(x, z, land, 30);
     const after = land.clearance(out.x, out.z);
-    assert.ok(after >= Math.min(30, gap) - 1e-6, `clamp lost clearance ${String(gap)} -> ${String(after)}`);
+    assert.ok(
+      after >= Math.min(30, gap) - 1e-6,
+      `clamp lost clearance ${String(gap)} -> ${String(after)}`,
+    );
     assert.ok(after > 4, `clamp left ${String(after)} m from shore`);
     assert.ok(land.maskAt(out.x, out.z) < 0, 'clamped point is at sea');
   }
@@ -144,7 +202,10 @@ test('water depth grows away from shore and the shelf map marks shallows', () =>
   const shelf = nearShelf(layoutWorld(7).land);
   assert.equal(shelf.data.length, shelf.size * shelf.size);
   const values = new Set(shelf.data);
-  assert.ok(values.has(0) && values.has(255) && values.size > 50, 'deep, shallow and a gradient between');
+  assert.ok(
+    values.has(0) && values.has(255) && values.size > 50,
+    'deep, shallow and a gradient between',
+  );
 });
 
 test('biomes: beaches at the waterline, green lowlands, rock on cliffs, snow on high flats', () => {
@@ -172,10 +233,16 @@ test('seeds 1..50 put the hero ship and a coastline in the portrait view cone at
       computeViewYaw(world.whaleHome, hero, [], 185),
       `seed ${String(seed)} viewYaw mismatch`,
     );
-    assert.ok(inPortraitViewCone(world.viewYaw, focus, hero), `seed ${String(seed)}: hero ship outside portrait view cone`);
+    assert.ok(
+      inPortraitViewCone(world.viewYaw, focus, hero),
+      `seed ${String(seed)}: hero ship outside portrait view cone`,
+    );
     const coast = coastAhead(world.land, world.viewYaw, focus, 2600, (28 * Math.PI) / 180);
     assert.ok(coast, `seed ${String(seed)}: no coastline in view`);
-    assert.ok(coast.dist > 180, `seed ${String(seed)}: coast ${String(coast.dist)} m crowds the camera`);
+    assert.ok(
+      coast.dist > 180,
+      `seed ${String(seed)}: coast ${String(coast.dist)} m crowds the camera`,
+    );
 
     // The coast is not a wall: its distance varies across the view, with an islet or headland gap.
     const hits: number[] = [];
@@ -196,7 +263,10 @@ test('seeds 1..50 put the hero ship and a coastline in the portrait view cone at
       }
       hits.push(hit);
     }
-    assert.ok(coastSpread(hits) >= 600, `seed ${String(seed)}: coast reads as a wall (${hits.join(' ')})`);
+    assert.ok(
+      coastSpread(hits) >= 600,
+      `seed ${String(seed)}: coast reads as a wall (${hits.join(' ')})`,
+    );
     assert.ok(islet, `seed ${String(seed)}: no islet or headland gap in view`);
   }
 }, 30000);
@@ -214,12 +284,18 @@ test('shallow shelves sit in view between the camera and the coast', () => {
         const x = -Math.sin(yaw) * d;
         const z = -Math.cos(yaw) * d;
         if (world.land.maskAt(x, z) > 0) break;
-        const v = shelf.data[Math.round((z - shelf.min) / cell) * shelf.size + Math.round((x - shelf.min) / cell)] ?? 0;
+        const v =
+          shelf.data[
+            Math.round((z - shelf.min) / cell) * shelf.size + Math.round((x - shelf.min) / cell)
+          ] ?? 0;
         if (v > 200) shallow++;
         if (v < 150) deep++;
       }
     }
-    assert.ok(shallow > 20, `seed ${String(seed)}: only ${String(shallow)} shallow samples in view`);
+    assert.ok(
+      shallow > 20,
+      `seed ${String(seed)}: only ${String(shallow)} shallow samples in view`,
+    );
     assert.ok(deep > 10, `seed ${String(seed)}: no deeper water in view (${String(deep)})`);
   }
 });

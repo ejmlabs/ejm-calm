@@ -43,7 +43,12 @@ interface CalmReview {
   forceBreach: (at?: number) => void;
   forceSpout: () => void;
   /** Optional yaw offset from broadside, pitch and distance for close-up review. */
-  frameWhale: (kind?: 'breach' | 'spout', yawOffset?: number, pitch?: number, distance?: number) => void;
+  frameWhale: (
+    kind?: 'breach' | 'spout',
+    yawOffset?: number,
+    pitch?: number,
+    distance?: number,
+  ) => void;
   /** Review view relative to the whale's heading (yaw 0 = behind); `follow()` returns to the chase. */
   frame: (yaw: number, pitch: number, distance: number) => void;
   follow: () => void;
@@ -69,7 +74,14 @@ interface CalmReview {
    * Towns and herds within `radius` of the whale, nearest first: where, ground height, how many, and a vantage on
    * open water with a clear sightline to them (null when there is none within 400 m).
    */
-  life: (radius: number) => { kind: 'town' | 'herd'; x: number; y: number; z: number; count: number; vantage: [number, number, number] | null }[];
+  life: (radius: number) => {
+    kind: 'town' | 'herd';
+    x: number;
+    y: number;
+    z: number;
+    count: number;
+    vantage: [number, number, number] | null;
+  }[];
   /** The highest land between `near` and `far` metres from the whale (world coordinates). */
   peak: (near: number, far: number) => { x: number; y: number; z: number };
   /** Review camera at world `from` looking at `to`, the whale and the land streamed around it; null returns to the chase. */
@@ -81,7 +93,16 @@ const params = new URLSearchParams(location.search);
 const debug = params.get('debug') === '1';
 
 /** Metres swum since the page opened (the route indicator's distance); in debug also the straight line from the start and how often the whale is back near an earlier spot (`path`, `net`, `revisit`). */
-const journey = { path: 0, x: NaN, z: NaN, fromX: NaN, fromZ: NaN, fixes: [] as number[], fixAt: -Infinity, back: 0 };
+const journey = {
+  path: 0,
+  x: NaN,
+  z: NaN,
+  fromX: NaN,
+  fromZ: NaN,
+  fixes: [] as number[],
+  fixAt: -Infinity,
+  back: 0,
+};
 /** A fix within this distance of one at least this many fixes (seconds) earlier counts as a revisit. */
 const REVISIT_RADIUS = 500;
 const REVISIT_AFTER = 120;
@@ -158,7 +179,11 @@ const ui = createUI({
   },
   route(on) {
     routeOn = on;
-    indicator.setEnabled(on, world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
+    indicator.setEnabled(
+      on,
+      world.land.regions.dominantAt(whale.state.x, whale.state.z),
+      journey.path,
+    );
     ui.showRoute(indicator.visible, indicator.text);
     persist();
   },
@@ -276,9 +301,20 @@ try {
   world.root.add(whale.group);
   weather = createWeather(seed, sky.clearCover);
   // A visitor who asked for the indicator sees it on the first change of region, not at once.
-  indicator.setEnabled(routeOn, world.land.regions.dominantAt(layout.whaleHome.x, layout.whaleHome.z), 0, false);
+  indicator.setEnabled(
+    routeOn,
+    world.land.regions.dominantAt(layout.whaleHome.x, layout.whaleHome.z),
+    0,
+    false,
+  );
   // The whale's wake: its stern, bow and width follow the whale's size, and a deeper body still marks the water.
-  wake = createWake({ surface, stern: 5 * LENGTH_SCALE, bow: 6 * LENGTH_SCALE, width: 0.8 * DEPTH_SCALE, depths: [-2.6 * DEPTH_SCALE, -0.9 * DEPTH_SCALE] });
+  wake = createWake({
+    surface,
+    stern: 5 * LENGTH_SCALE,
+    bow: 6 * LENGTH_SCALE,
+    width: 0.8 * DEPTH_SCALE,
+    depths: [-2.6 * DEPTH_SCALE, -0.9 * DEPTH_SCALE],
+  });
   world.root.add(wake.group);
   shipFx = createShipFx(surface);
   world.root.add(shipFx.group);
@@ -287,10 +323,21 @@ try {
   birds = createBirds(seed, quality.tier);
   world.root.add(birds.group);
   // The floating origin moved: shift the camera with the world so the chase does not jump.
-  world.origin.onRecenter((dx, dz) => { rig.shift(dx, dz); });
-  underwater = createUnderwater(scene, renderer, { sky, heightAt: world.land.heightAt, depthAt: world.land.depthAt, origin: world.origin, tier: quality.tier, seed, clearInScene: drawMode === 'finish' });
+  world.origin.onRecenter((dx, dz) => {
+    rig.shift(dx, dz);
+  });
+  underwater = createUnderwater(scene, renderer, {
+    sky,
+    heightAt: world.land.heightAt,
+    depthAt: world.land.depthAt,
+    origin: world.origin,
+    tier: quality.tier,
+    seed,
+    clearInScene: drawMode === 'finish',
+  });
   // Review only (`?debug=1&fish=1`): every fish species in a small school ahead of the camera.
-  if (debug && params.get('fish') === '1') fishShowcase = createFishShowcase(fishTime, UNDERWATER_LAYER);
+  if (debug && params.get('fish') === '1')
+    fishShowcase = createFishShowcase(fishTime, UNDERWATER_LAYER);
   if (fishShowcase) scene.add(fishShowcase.group);
   finish = drawMode === 'finish' ? createFinish(renderer) : null;
   buildMs = performance.now() - buildStart;
@@ -321,7 +368,9 @@ function resize(): void {
 resize();
 window.addEventListener('resize', resize);
 
-const view = createViewControls(canvas, rig, (orbiting) => { ui.showReset(orbiting); });
+const view = createViewControls(canvas, rig, (orbiting) => {
+  ui.showReset(orbiting);
+});
 
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
 let routeClock = performance.now();
@@ -358,13 +407,24 @@ function followWhale(): void {
 }
 
 /** Side-on, close framing so the whale fills ~35–50% of screen width. */
-function frameWhaleEvent(kind: 'breach' | 'spout', view: { yawOffset?: number | undefined; pitch?: number | undefined; distance?: number | undefined } = {}): void {
+function frameWhaleEvent(
+  kind: 'breach' | 'spout',
+  view: {
+    yawOffset?: number | undefined;
+    pitch?: number | undefined;
+    distance?: number | undefined;
+  } = {},
+): void {
   // Review yaw is relative to the heading (0 = behind); −π/2 is a broadside on the whale's
   // left, and the small negative offset swings toward the head for a three-quarter view.
   // Debug overrides are clamped to the ranges the camera rig itself allows.
   const yaw = -Math.PI / 2 - 0.22 + clamp(view.yawOffset ?? 0, -Math.PI, Math.PI);
   // Close enough that the whale fills ~35–50% of portrait width.
-  const distance = clamp(view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14) * LENGTH_SCALE, 6 * LENGTH_SCALE, 80 * LENGTH_SCALE);
+  const distance = clamp(
+    view.distance ?? (kind === 'breach' ? (portrait ? 27 : 17) : portrait ? 24 : 14) * LENGTH_SCALE,
+    6 * LENGTH_SCALE,
+    80 * LENGTH_SCALE,
+  );
   const pitch = clamp(view.pitch ?? (kind === 'breach' ? 0.12 : 0.02), 0.02, 0.62);
   rig.setReview({ yaw, pitch, distance, minLookY: kind === 'breach' ? 2.5 : 2.4 });
   followWhale();
@@ -423,9 +483,21 @@ function tick(now: number): void {
   // The sky sets the exposure; display-authored materials and the bloom follow it.
   displayExposure.value = renderer.toneMappingExposure;
   finish?.update(renderer.toneMappingExposure);
-  world.ocean.setSky({ haze: sky.hazeColor, exposure: renderer.toneMappingExposure, light: sky.level, shallowLight: sky.shallowLight, sun: sky.sun.intensity / SUN_INTENSITY });
+  world.ocean.setSky({
+    haze: sky.hazeColor,
+    exposure: renderer.toneMappingExposure,
+    light: sky.level,
+    shallowLight: sky.shallowLight,
+    sun: sky.sun.intensity / SUN_INTENSITY,
+  });
   world.ocean.setWaterColor(regionLook.water);
-  world.landStream.setSky(sky.sunDirection, sky.sun.color, sky.hazeGradient, sky.hazeDensity, sky.level);
+  world.landStream.setSky(
+    sky.sunDirection,
+    sky.sun.color,
+    sky.hazeGradient,
+    sky.hazeDensity,
+    sky.level,
+  );
   world.landStream.setLook(regionLook.hazeDensity * weatherLook.haze, regionLook.land);
   wake.setLight(sky.daylight);
   birds.setMix(regionLook.birds);
@@ -438,18 +510,40 @@ function tick(now: number): void {
   // Build the ocean's depth ahead of the whale a slice at a time (a couple of milliseconds a frame at most).
   world.land.prefetchDepth(whale.state.x, whale.state.z, 2);
   // The whale rides the swell while near the surface; deeper down it is free of it.
-  whale.group.position.y = surface(whale.state.x, whale.state.z) * smoothstep(-7 * DEPTH_SCALE, -1.5 * DEPTH_SCALE, whale.state.y);
+  whale.group.position.y =
+    surface(whale.state.x, whale.state.z) *
+    smoothstep(-7 * DEPTH_SCALE, -1.5 * DEPTH_SCALE, whale.state.y);
   wake.update(whale.state, dt);
   shipFx.update(world.ships.active(), sky.level);
   markJourney();
   if (routeOn) {
     // Six seconds of the clock on the wall, not of the simulation: slow frames and reduced motion do not stretch it.
-    indicator.update(Math.min(1, (now - routeClock) / 1000), world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
+    indicator.update(
+      Math.min(1, (now - routeClock) / 1000),
+      world.land.regions.dominantAt(whale.state.x, whale.state.z),
+      journey.path,
+    );
     ui.showRoute(indicator.visible, indicator.text);
   }
   routeClock = now;
-  world.ocean.setWhale(whale.state.x - world.origin.x, whale.state.y, whale.state.z - world.origin.z, whale.state.heading);
-  birds.update(time, whale.state.x, whale.state.z, dt, { x: camera.position.x + world.origin.x, y: camera.position.y, z: camera.position.z + world.origin.z }, motion.matches);
+  world.ocean.setWhale(
+    whale.state.x - world.origin.x,
+    whale.state.y,
+    whale.state.z - world.origin.z,
+    whale.state.heading,
+  );
+  birds.update(
+    time,
+    whale.state.x,
+    whale.state.z,
+    dt,
+    {
+      x: camera.position.x + world.origin.x,
+      y: camera.position.y,
+      z: camera.position.z + world.origin.z,
+    },
+    motion.matches,
+  );
 
   followWhale();
   // Reduced motion keeps the eye at the surface, as does the viewer's choice.
@@ -458,7 +552,11 @@ function tick(now: number): void {
   rig.update(dt, time, motion.matches);
   if (peekDepth !== null) peekCamera(peekDepth);
   if (viewPose) {
-    camera.position.set(viewPose.from[0] - world.origin.x, viewPose.from[1], viewPose.from[2] - world.origin.z);
+    camera.position.set(
+      viewPose.from[0] - world.origin.x,
+      viewPose.from[1],
+      viewPose.from[2] - world.origin.z,
+    );
     camera.lookAt(viewPose.to[0] - world.origin.x, viewPose.to[1], viewPose.to[2] - world.origin.z);
   }
 
@@ -476,7 +574,15 @@ function tick(now: number): void {
   const signal = underwater.update(dt, time, camera, whale.state);
   fishTime.value = time;
   fishShowcase?.follow(camera);
-  audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin, weather: weatherLook });
+  audio.update(dt, {
+    camera,
+    signal,
+    whale: whale.state,
+    ships: world.ships.active(),
+    shore: world.shore,
+    origin: world.origin,
+    weather: weatherLook,
+  });
   renderer.info.reset();
   renderer.render(scene, camera);
   if (!firstFrame) {
@@ -497,7 +603,10 @@ function tick(now: number): void {
  * does not stall a frame.
  */
 function warm(): void {
-  const point = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+  const point = new THREE.BufferGeometry().setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([0, 0, 0], 3),
+  );
   const stage = new THREE.Scene();
   for (const material of world.laterMaterials) {
     const mesh = new THREE.Mesh(point, material);
@@ -548,9 +657,18 @@ if (debug) {
       whale.forcePhase('spout');
       frameWhaleEvent('spout');
     },
-    frameWhale(kind: 'breach' | 'spout' = 'breach', yawOffset?: number, pitch?: number, distance?: number) {
+    frameWhale(
+      kind: 'breach' | 'spout' = 'breach',
+      yawOffset?: number,
+      pitch?: number,
+      distance?: number,
+    ) {
       const finite = (v?: number) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
-      frameWhaleEvent(kind, { yawOffset: finite(yawOffset), pitch: finite(pitch), distance: finite(distance) });
+      frameWhaleEvent(kind, {
+        yawOffset: finite(yawOffset),
+        pitch: finite(pitch),
+        distance: finite(distance),
+      });
     },
     setWaterVisible(visible: boolean) {
       world.ocean.mesh.visible = visible;
@@ -572,9 +690,18 @@ if (debug) {
       whale.forcePhase(phase, typeof at === 'number' && Number.isFinite(at) ? at : undefined);
     },
     peekUnderwater(depth: number | null, site?: boolean) {
-      peekDepth = typeof depth === 'number' && Number.isFinite(depth) ? clamp(depth, -20, 40) : null;
+      peekDepth =
+        typeof depth === 'number' && Number.isFinite(depth) ? clamp(depth, -20, 40) : null;
       // Review a swarm: the nearest feed site, viewed from its side at the given depth.
-      peekSite = site ? (feedSitesNear(seed, whale.state.x, whale.state.z, 2400, underwater.seafloor.heightAt)[0] ?? null) : null;
+      peekSite = site
+        ? (feedSitesNear(
+            seed,
+            whale.state.x,
+            whale.state.z,
+            2400,
+            underwater.seafloor.heightAt,
+          )[0] ?? null)
+        : null;
     },
     frame(yaw: number, pitch: number, distance: number) {
       if (![yaw, pitch, distance].every(Number.isFinite)) return;
@@ -638,9 +765,12 @@ if (debug) {
           for (let d = 60; d <= 400; d += 20) {
             const cx = px + Math.cos(a) * d;
             const cz = pz + Math.sin(a) * d;
-            if (Math.abs(d - 150) >= score || maskAt(cx, cz) > -0.02 || heightAt(cx, cz) > -1) continue;
+            if (Math.abs(d - 150) >= score || maskAt(cx, cz) > -0.02 || heightAt(cx, cz) > -1)
+              continue;
             let clear = true;
-            for (let t = 0.05; t < 0.97 && clear; t += 0.02) clear = heightAt(cx + (px - cx) * t, cz + (pz - cz) * t) < EYE + (py + 3 - EYE) * t - 1;
+            for (let t = 0.05; t < 0.97 && clear; t += 0.02)
+              clear =
+                heightAt(cx + (px - cx) * t, cz + (pz - cz) * t) < EYE + (py + 3 - EYE) * t - 1;
             if (clear) {
               best = [cx, EYE, cz];
               score = Math.abs(d - 150);
@@ -654,14 +784,30 @@ if (debug) {
         const py = heightAt(px, pz);
         out.push({ kind, x: px, y: py, z: pz, count, vantage: vantage(px, pz, py) });
       };
-      for (let j = Math.floor((z - radius) / TOWN_CELL); j <= Math.floor((z + radius) / TOWN_CELL); j++) {
-        for (let i = Math.floor((x - radius) / TOWN_CELL); i <= Math.floor((x + radius) / TOWN_CELL); i++) {
+      for (
+        let j = Math.floor((z - radius) / TOWN_CELL);
+        j <= Math.floor((z + radius) / TOWN_CELL);
+        j++
+      ) {
+        for (
+          let i = Math.floor((x - radius) / TOWN_CELL);
+          i <= Math.floor((x + radius) / TOWN_CELL);
+          i++
+        ) {
           const town = life.town(i, j);
           if (town) add('town', town.x, town.z, town.houses.length);
         }
       }
-      for (let j = Math.floor((z - radius) / HERD_CELL); j <= Math.floor((z + radius) / HERD_CELL); j++) {
-        for (let i = Math.floor((x - radius) / HERD_CELL); i <= Math.floor((x + radius) / HERD_CELL); i++) {
+      for (
+        let j = Math.floor((z - radius) / HERD_CELL);
+        j <= Math.floor((z + radius) / HERD_CELL);
+        j++
+      ) {
+        for (
+          let i = Math.floor((x - radius) / HERD_CELL);
+          i <= Math.floor((x + radius) / HERD_CELL);
+          i++
+        ) {
           const herd = life.herd(i, j);
           if (herd.length) add('herd', item(herd, 0).x, item(herd, 0).z, herd.length);
         }
@@ -683,7 +829,8 @@ if (debug) {
       return best;
     },
     view(from, to) {
-      const finite = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
+      const finite = (v: unknown): v is [number, number, number] =>
+        Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
       if (!finite(from) || !finite(to)) {
         viewPose = null;
         return;
@@ -696,7 +843,11 @@ if (debug) {
     },
     setRoute(on: boolean) {
       routeOn = on;
-      indicator.setEnabled(routeOn, world.land.regions.dominantAt(whale.state.x, whale.state.z), journey.path);
+      indicator.setEnabled(
+        routeOn,
+        world.land.regions.dominantAt(whale.state.x, whale.state.z),
+        journey.path,
+      );
       ui.showRoute(indicator.visible, indicator.text);
       sync();
     },
@@ -729,7 +880,8 @@ if (debug) {
         path: journey.path,
         revisit: journey.fixes.length ? journey.back / (journey.fixes.length / 2) : 0,
         region: world.land.regions.dominantAt(whale.state.x, whale.state.z),
-        regionName: item(REGION_LOOKS, world.land.regions.dominantAt(whale.state.x, whale.state.z)).name,
+        regionName: item(REGION_LOOKS, world.land.regions.dominantAt(whale.state.x, whale.state.z))
+          .name,
         landNear: landWithin(whale.state.x, whale.state.z, 4500),
         net: Math.hypot(journey.x - journey.fromX, journey.z - journey.fromZ) || 0,
         speed: whale.state.speed,

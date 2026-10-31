@@ -3,7 +3,14 @@ import type { Land } from './land.js';
 import { makeNoise2D } from './noise.js';
 import { chunkKey, parseChunkKey, cellDistance } from './chunks.js';
 import { hash } from './rng.js';
-import { buildTile, tileSize, TOP_LEVEL, SINK, type ShadingMaps, type TileData } from './world-tiles.js';
+import {
+  buildTile,
+  tileSize,
+  TOP_LEVEL,
+  SINK,
+  type ShadingMaps,
+  type TileData,
+} from './world-tiles.js';
 import { createLandLife, type LandLife } from './land-life.js';
 import type { WorkerRequest } from './world-worker.js';
 import { underwaterUniforms, UNDERWATER_GLSL_PARS } from './seams.js';
@@ -39,7 +46,12 @@ export interface LandStreamOptions {
 export type Dissolve = 'coverage' | 'dither';
 
 /** A placed, wanted tile with people or animals on it. */
-export interface WalkerTile { x0: number; z0: number; level: number; data: Float32Array }
+export interface WalkerTile {
+  x0: number;
+  z0: number;
+  level: number;
+  data: Float32Array;
+}
 
 export interface LandStream {
   /** Holds tiles at world positions: add it under the world root. */
@@ -62,7 +74,13 @@ export interface LandStream {
    * The light of the day: sun direction and colour (its hue tints the lit slopes), haze colours (as many as at
    * creation), base haze density and brightness (0 dark to 1 day).
    */
-  setSky: (sun: THREE.Vector3, sunColor: THREE.Color, haze: readonly THREE.Color[], density: number, light: number) => void;
+  setSky: (
+    sun: THREE.Vector3,
+    sunColor: THREE.Color,
+    haze: readonly THREE.Color[],
+    density: number,
+    light: number,
+  ) => void;
   /** World X/Z of render (0, 0), so surface detail stays fixed to the ground across recentres. */
   setOrigin: (x: number, z: number) => void;
   /** Uniforms of the land's lighting and haze, for what stands on the land (see `landShadingGLSL`). */
@@ -122,8 +140,18 @@ const PLACE_PER_FRAME = 2;
 const UPGRADE_PER_FRAME = 6;
 
 /** A shading map as a mipmapped texture (see `ShadingMaps`). */
-function mapTexture(maps: ShadingMaps, data: Uint8Array, colorSpace: THREE.ColorSpace): THREE.DataTexture {
-  const texture = new THREE.DataTexture(data, maps.size, maps.size, THREE.RGBAFormat, THREE.UnsignedByteType);
+function mapTexture(
+  maps: ShadingMaps,
+  data: Uint8Array,
+  colorSpace: THREE.ColorSpace,
+): THREE.DataTexture {
+  const texture = new THREE.DataTexture(
+    data,
+    maps.size,
+    maps.size,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  );
   texture.colorSpace = colorSpace;
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -135,7 +163,8 @@ function mapTexture(maps: ShadingMaps, data: Uint8Array, colorSpace: THREE.Color
 }
 
 /** Seeded per-tile value in [0, 1): order jitter and fade length. */
-const tileUnit = (seed: number, level: number, ix: number, iz: number) => hash(seed, 0x544c, level, ix, iz) / 0x100000000;
+const tileUnit = (seed: number, level: number, ix: number, iz: number) =>
+  hash(seed, 0x544c, level, ix, iz) / 0x100000000;
 
 /** (vx, vz)·seconds, capped at `max` metres. */
 function ahead(vx: number, vz: number, seconds: number, max: number): [number, number] {
@@ -413,7 +442,8 @@ export function selectTiles(
   const samples = Math.ceil(Math.hypot(ax, az) / 16);
   const distance = (ix: number, iz: number, size: number) => {
     let d = cellDistance(x, z, ix, iz, size);
-    for (let k = 1; k <= samples; k++) d = Math.min(d, cellDistance(x + (ax * k) / samples, z + (az * k) / samples, ix, iz, size));
+    for (let k = 1; k <= samples; k++)
+      d = Math.min(d, cellDistance(x + (ax * k) / samples, z + (az * k) / samples, ix, iz, size));
     return d;
   };
   const visit = (level: number, ix: number, iz: number) => {
@@ -423,7 +453,8 @@ export function selectTiles(
     const reach = factor * size * (wasSplit.has(key) ? 1.2 : 1);
     if (level > 0 && d < reach) {
       split.add(key);
-      for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) visit(level - 1, ix * 2 + i, iz * 2 + j);
+      for (let j = 0; j < 2; j++)
+        for (let i = 0; i < 2; i++) visit(level - 1, ix * 2 + i, iz * 2 + j);
     } else {
       out.push({ key, d, level });
     }
@@ -437,12 +468,21 @@ export function selectTiles(
   return out.map((t) => t.key);
 }
 
-interface Cell { level: number; ix: number; iz: number }
+interface Cell {
+  level: number;
+  ix: number;
+  iz: number;
+}
 
 function overlaps(a: Cell, b: Cell): boolean {
   const sa = tileSize(a.level);
   const sb = tileSize(b.level);
-  return a.ix * sa < (b.ix + 1) * sb && b.ix * sb < (a.ix + 1) * sa && a.iz * sa < (b.iz + 1) * sb && b.iz * sb < (a.iz + 1) * sa;
+  return (
+    a.ix * sa < (b.ix + 1) * sb &&
+    b.ix * sb < (a.ix + 1) * sa &&
+    a.iz * sa < (b.iz + 1) * sb &&
+    b.iz * sb < (a.iz + 1) * sa
+  );
 }
 
 /**
@@ -460,7 +500,10 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
   let life: LandLife | null = null;
   let walkerVersion = 0;
   // Without a gradient, a single haze colour at every elevation.
-  const gradient = options.hazeGradient ?? { angles: [0, 90], colors: [options.hazeColor, options.hazeColor] };
+  const gradient = options.hazeGradient ?? {
+    angles: [0, 90],
+    colors: [options.hazeColor, options.hazeColor],
+  };
   let baseDensity = options.hazeDensity ?? HAZE;
   let look = 1;
   const uniforms = {
@@ -521,9 +564,16 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
   if (options.worker && typeof Worker !== 'undefined') {
     try {
       worker = new Worker(new URL('./world-worker.ts', import.meta.url), { type: 'module' });
-      const init: WorkerRequest = { type: 'init', seed: land.seed, viewYaw: land.viewYaw, offset: land.offset };
+      const init: WorkerRequest = {
+        type: 'init',
+        seed: land.seed,
+        viewYaw: land.viewYaw,
+        offset: land.offset,
+      };
       worker.postMessage(init);
-      worker.onmessage = (event: MessageEvent<{ type: string; key: string; data: TileData | null }>) => {
+      worker.onmessage = (
+        event: MessageEvent<{ type: string; key: string; data: TileData | null }>,
+      ) => {
         if (event.data.type !== 'tile') return;
         inFlight = Math.max(0, inFlight - 1);
         requested.delete(event.data.key);
@@ -547,7 +597,16 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
 
   function request(key: string): void {
     const { lod, cx, cz } = parseChunkKey(key);
-    const message: WorkerRequest = { type: 'tile', key, level: lod, ix: cx, iz: cz, cells, objects, maps: true };
+    const message: WorkerRequest = {
+      type: 'tile',
+      key,
+      level: lod,
+      ix: cx,
+      iz: cz,
+      cells,
+      objects,
+      maps: true,
+    };
     if (!worker) throw new Error('land tiles requested without a worker');
     worker.postMessage(message);
     requested.add(key);
@@ -612,7 +671,12 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
     mesh.position.set(tile.ix * size, 0, tile.iz * size);
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
-    const maps = data.maps ? [mapTexture(data.maps, data.maps.color, THREE.SRGBColorSpace), mapTexture(data.maps, data.maps.normal, THREE.NoColorSpace)] : null;
+    const maps = data.maps
+      ? [
+          mapTexture(data.maps, data.maps.color, THREE.SRGBColorSpace),
+          mapTexture(data.maps, data.maps.normal, THREE.NoColorSpace),
+        ]
+      : null;
     if (maps) mesh.userData['maps'] = maps;
     mesh.onBeforeRender = () => {
       const material = mesh.material;
@@ -632,7 +696,8 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
   function disposeMesh(mesh: THREE.Mesh): void {
     group.remove(mesh);
     mesh.geometry.dispose();
-    for (const texture of (mesh.userData['maps'] as THREE.Texture[] | undefined) ?? []) texture.dispose();
+    for (const texture of (mesh.userData['maps'] as THREE.Texture[] | undefined) ?? [])
+      texture.dispose();
   }
 
   function carry(tile: Tile, data: TileData): void {
@@ -648,7 +713,24 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
     // Open sea has nothing to dissolve: it counts as solid at once.
     const on = solidNow || !data;
     const fadeTime = FADE * (0.8 + 0.4 * tileUnit(land.seed, lod, cx, cz));
-    const tile: Tile = { key, level: lod, ix: cx, iz: cz, mesh: null, bare: isBare && Boolean(data), under: null, rise: 0, riseStart: 0, triangles: 0, objectTriangles: 0, objects: 0, walkers: null, fade: on ? 1 : 0, fadeTime, state: on ? 'on' : 'in' };
+    const tile: Tile = {
+      key,
+      level: lod,
+      ix: cx,
+      iz: cz,
+      mesh: null,
+      bare: isBare && Boolean(data),
+      under: null,
+      rise: 0,
+      riseStart: 0,
+      triangles: 0,
+      objectTriangles: 0,
+      objects: 0,
+      walkers: null,
+      fade: on ? 1 : 0,
+      fadeTime,
+      state: on ? 'on' : 'in',
+    };
     if (data) {
       tile.mesh = makeMesh(tile, data, solidNow ? solid : dissolving);
       carry(tile, data);
@@ -681,7 +763,17 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
   function buildHere(key: string, full: boolean): TileData | null {
     const { lod, cx, cz } = parseChunkKey(key);
     if (full && objects > 0) life ??= createLandLife(land);
-    return buildTile(land, patchNoise, lod, cx, cz, cells, full && life ? { life, objects } : undefined, false, false);
+    return buildTile(
+      land,
+      patchNoise,
+      lod,
+      cx,
+      cz,
+      cells,
+      full && life ? { life, objects } : undefined,
+      false,
+      false,
+    );
   }
 
   function remove(tile: Tile): void {
@@ -693,13 +785,19 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
 
   /** Whether a cell is drawn solid: by itself, an ancestor, or (two levels down at most) its children. */
   function solidAt(level: number, ix: number, iz: number): boolean {
-    for (let l = level, x = ix, z = iz; l <= TOP_LEVEL; l++, x = Math.floor(x / 2), z = Math.floor(z / 2)) {
+    for (
+      let l = level, x = ix, z = iz;
+      l <= TOP_LEVEL;
+      l++, x = Math.floor(x / 2), z = Math.floor(z / 2)
+    ) {
       if (tiles.get(chunkKey(l, x, z))?.state === 'on') return true;
     }
     const below = (l: number, x: number, z: number, depth: number): boolean => {
       if (tiles.get(chunkKey(l, x, z))?.state === 'on') return true;
       if (l === 0 || depth === 0) return false;
-      for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) if (!below(l - 1, x * 2 + i, z * 2 + j, depth - 1)) return false;
+      for (let j = 0; j < 2; j++)
+        for (let i = 0; i < 2; i++)
+          if (!below(l - 1, x * 2 + i, z * 2 + j, depth - 1)) return false;
       return true;
     };
     return level > 0 && below(level, ix, iz, 2);
@@ -727,12 +825,17 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
         .filter((key) => !tiles.has(key) && !(bias && ready.has(key)))
         .map((key) => {
           const { lod, cx, cz } = parseChunkKey(key);
-          const d = cellDistance(x, z, cx, cz, tileSize(lod)) * (0.8 + 0.4 * tileUnit(land.seed, lod, cx, cz));
+          const d =
+            cellDistance(x, z, cx, cz, tileSize(lod)) *
+            (0.8 + 0.4 * tileUnit(land.seed, lod, cx, cz));
           return { key, rank: bias + (solidAt(lod, cx, cz) ? d : -1) };
         })
         .sort((a, b) => a.rank - b.rank || (a.key < b.key ? -1 : 1))
         .map((t) => t.key);
-    const later = px === x && pz === z ? [] : selectTiles(px, pz, split, new Set()).filter((key) => !wanted.has(key));
+    const later =
+      px === x && pz === z
+        ? []
+        : selectTiles(px, pz, split, new Set()).filter((key) => !wanted.has(key));
     queue = [...order(wantedList, 0), ...order(later, 1e9)];
     lastX = x;
     lastZ = z;
@@ -760,12 +863,20 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
     },
     update(x, z, dt, vx = 0, vz = 0) {
       const [ax, az] = ahead(vx, vz, LEAD, LEAD_MAX);
-      if (Math.max(Math.hypot(x - lastX, z - lastZ), Math.hypot(x + ax - lastX - lastAX, z + az - lastZ - lastAZ)) > RESELECT) {
+      if (
+        Math.max(
+          Math.hypot(x - lastX, z - lastZ),
+          Math.hypot(x + ax - lastX - lastAX, z + az - lastZ - lastAZ),
+        ) > RESELECT
+      ) {
         const [px, pz] = ahead(vx, vz, PREFETCH, PREFETCH_MAX);
         reselect(x, z, ax, az, x + px, z + pz);
       }
       send();
-      for (let placed = 0, upgraded = 0; arrived.length && placed < PLACE_PER_FRAME && upgraded < UPGRADE_PER_FRAME; ) {
+      for (
+        let placed = 0, upgraded = 0;
+        arrived.length && placed < PLACE_PER_FRAME && upgraded < UPGRADE_PER_FRAME;
+      ) {
         const next = arrived.shift();
         if (!next) break;
         const { key, data } = next;
@@ -788,7 +899,8 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
         const step = dt > 0 ? dt / tile.fadeTime : 1;
         if (tile.under) {
           // By the clock, not the frame step: while it lasts the tile draws twice, and slow frames must not stretch that.
-          tile.rise = dt > 0 ? Math.min(1, (performance.now() - tile.riseStart) / (tile.fadeTime * 1000)) : 1;
+          tile.rise =
+            dt > 0 ? Math.min(1, (performance.now() - tile.riseStart) / (tile.fadeTime * 1000)) : 1;
           if (tile.rise >= 1 || tile.state !== 'on') {
             disposeMesh(tile.under);
             tile.under = null;
@@ -814,7 +926,11 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
       holes = 0;
       for (const cell of wantedCells) {
         if (tiles.get(cell.key)?.state === 'on') continue;
-        if (cellDistance(x, z, cell.ix, cell.iz, tileSize(cell.level)) < HAZE_END && !solidAt(cell.level, cell.ix, cell.iz)) holes++;
+        if (
+          cellDistance(x, z, cell.ix, cell.iz, tileSize(cell.level)) < HAZE_END &&
+          !solidAt(cell.level, cell.ix, cell.iz)
+        )
+          holes++;
       }
     },
     setLook(hazeDensity, tint) {
@@ -826,7 +942,8 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
       sun.copy(direction).normalize();
       // The sun's hue at the tint's own brightness: low suns light the slopes gold.
       sunTint.copy(sunColor).multiplyScalar(SUN_TINT_LUMA / Math.max(1e-4, luma(sunColor)));
-      for (let k = 0; k < uniforms.hazeColors.value.length; k++) item(uniforms.hazeColors.value, k).copy(item(haze, Math.min(k, haze.length - 1)));
+      for (let k = 0; k < uniforms.hazeColors.value.length; k++)
+        item(uniforms.hazeColors.value, k).copy(item(haze, Math.min(k, haze.length - 1)));
       baseDensity = density;
       uniforms.hazeDensity.value = baseDensity * look;
       uniforms.landLight.value = light;
@@ -842,7 +959,12 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
       for (const tile of tiles.values()) {
         if (!tile.walkers || tile.state === 'out' || !wanted.has(tile.key)) continue;
         const size = tileSize(tile.level);
-        list.push({ x0: tile.ix * size, z0: tile.iz * size, level: tile.level, data: tile.walkers });
+        list.push({
+          x0: tile.ix * size,
+          z0: tile.iz * size,
+          level: tile.level,
+          data: tile.walkers,
+        });
       }
       return list;
     },
@@ -861,7 +983,17 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
         }
         if (tile.state !== 'on' || tile.under) fading++;
       }
-      return { tiles: tiles.size, triangles, objectTriangles, objects: objectCount, pending: queue.length + requested.size + arrived.length + bare.length, fading, ready: ready.size, holes, completed };
+      return {
+        tiles: tiles.size,
+        triangles,
+        objectTriangles,
+        objects: objectCount,
+        pending: queue.length + requested.size + arrived.length + bare.length,
+        fading,
+        ready: ready.size,
+        holes,
+        completed,
+      };
     },
     dispose() {
       worker?.terminate();

@@ -12,7 +12,11 @@ const PEAK = 2.6;
 /** Largest islet gain a caller may pass (the radius grows with its square root). */
 const GAIN_MAX = 1.7;
 
-export interface Landmark { x: number; z: number; radius: number }
+export interface Landmark {
+  x: number;
+  z: number;
+  radius: number;
+}
 
 export interface Landmarks {
   /** The landmark of lattice cell (i, j), whether or not it stands (see `createLandmarks`). */
@@ -27,7 +31,10 @@ export interface Landmarks {
  * Seeded rocks and islets spaced across the sea, one per 2 km cell: something always passes within reach of the route.
  * A cell whose landmark `isOpen` says is not in open water (near a coast, where it could narrow a passage) has none.
  */
-export function createLandmarks(seed: number, isOpen: (landmark: Landmark) => boolean = () => true): Landmarks {
+export function createLandmarks(
+  seed: number,
+  isOpen: (landmark: Landmark) => boolean = () => true,
+): Landmarks {
   const salt = hash(seed, 17);
   const unit = (i: number, j: number, k: number): number => hash(salt, i, j, k) / 0x100000000;
   // Samples come in runs (a tile, a plan, a ring), so the last cell is kept.

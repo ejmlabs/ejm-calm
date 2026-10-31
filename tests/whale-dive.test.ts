@@ -1,6 +1,12 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { DEEP_DIVE_Y, FLOOR_CLEARANCE, SURFACE_Y, floorLimit, whalePose } from '../src/whale-motion.js';
+import {
+  DEEP_DIVE_Y,
+  FLOOR_CLEARANCE,
+  SURFACE_Y,
+  floorLimit,
+  whalePose,
+} from '../src/whale-motion.js';
 import { DEPTH_SCALE } from '../src/whale-size.js';
 
 test('the deep pose reaches below −10 m', () => {
@@ -14,7 +20,10 @@ test('floor limit keeps clearance, is continuous, and leaves surface riding alon
     let prev = floorLimit(-20, floorY);
     for (let y = -20; y <= 2; y += 0.01) {
       const v = floorLimit(y, floorY);
-      assert.ok(v >= y - 1e-9 && v >= floorY + FLOOR_CLEARANCE - 1e-9, `${String(floorY)} ${String(y)} → ${String(v)}`);
+      assert.ok(
+        v >= y - 1e-9 && v >= floorY + FLOOR_CLEARANCE - 1e-9,
+        `${String(floorY)} ${String(y)} → ${String(v)}`,
+      );
       assert.ok(Math.abs(v - prev) < 0.02, 'continuous');
       prev = v;
     }

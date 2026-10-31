@@ -39,12 +39,22 @@ export interface DetailSpec {
 
 export const WHALE_DETAIL: Record<WhaleDetail, DetailSpec> = {
   high: { rings: 300, radial: 96, flipperSpan: 40, flipperLoop: 14, flukeSpan: 56, flukeLoop: 16 },
-  medium: { rings: 132, radial: 52, flipperSpan: 22, flipperLoop: 10, flukeSpan: 32, flukeLoop: 12 },
+  medium: {
+    rings: 132,
+    radial: 52,
+    flipperSpan: 22,
+    flipperLoop: 10,
+    flukeSpan: 32,
+    flukeLoop: 12,
+  },
   low: { rings: 40, radial: 18, flipperSpan: 10, flipperLoop: 6, flukeSpan: 14, flukeLoop: 6 },
 };
 
 /** Camera distances where each level takes over, per quality tier. */
-export const WHALE_LOD: Record<'high' | 'medium' | 'low', { detail: WhaleDetail; distance: number }[]> = {
+export const WHALE_LOD: Record<
+  'high' | 'medium' | 'low',
+  { detail: WhaleDetail; distance: number }[]
+> = {
   high: [
     { detail: 'high', distance: 0 },
     { detail: 'medium', distance: 4.6 * L },
@@ -67,9 +77,18 @@ export const WHALE_LOD: Record<'high' | 'medium' | 'low', { detail: WhaleDetail;
 // long. The head is broad and flat (U-shaped from above, wider than it is deep), the throat deepens back to
 // the navel, and the long tail stock is laterally compressed.
 const PU = [0, 0.02, 0.05, 0.1, 0.16, 0.22, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.88, 0.95, 1];
-const PTOP = [0.004, 0.012, 0.02, 0.03, 0.04, 0.048, 0.054, 0.056, 0.052, 0.044, 0.034, 0.025, 0.017, 0.011, 0.008];
-const PBOT = [-0.004, -0.014, -0.028, -0.044, -0.056, -0.062, -0.066, -0.064, -0.056, -0.044, -0.032, -0.022, -0.015, -0.01, -0.007];
-const PWID = [0.006, 0.022, 0.034, 0.043, 0.049, 0.053, 0.057, 0.058, 0.054, 0.045, 0.033, 0.022, 0.013, 0.008, 0.006];
+const PTOP = [
+  0.004, 0.012, 0.02, 0.03, 0.04, 0.048, 0.054, 0.056, 0.052, 0.044, 0.034, 0.025, 0.017, 0.011,
+  0.008,
+];
+const PBOT = [
+  -0.004, -0.014, -0.028, -0.044, -0.056, -0.062, -0.066, -0.064, -0.056, -0.044, -0.032, -0.022,
+  -0.015, -0.01, -0.007,
+];
+const PWID = [
+  0.006, 0.022, 0.034, 0.043, 0.049, 0.053, 0.057, 0.058, 0.054, 0.045, 0.033, 0.022, 0.013, 0.008,
+  0.006,
+];
 
 /** Splashguard: the raised ridge in front of the blowholes, centred here along u. */
 export const SPLASHGUARD_U = 0.172;
@@ -87,7 +106,8 @@ function curve(xs: number[], ys: number[], x: number): number {
   while (x > (xs[i + 1] ?? 0)) i++;
   const slope = (k: number) => {
     if (k <= 0) return ((ys[1] ?? 0) - (ys[0] ?? 0)) / ((xs[1] ?? 0) - (xs[0] ?? 0));
-    if (k >= n - 1) return ((ys[n - 1] ?? 0) - (ys[n - 2] ?? 0)) / ((xs[n - 1] ?? 0) - (xs[n - 2] ?? 0));
+    if (k >= n - 1)
+      return ((ys[n - 1] ?? 0) - (ys[n - 2] ?? 0)) / ((xs[n - 1] ?? 0) - (xs[n - 2] ?? 0));
     const a = ((ys[k] ?? 0) - (ys[k - 1] ?? 0)) / ((xs[k] ?? 0) - (xs[k - 1] ?? 0));
     const b = ((ys[k + 1] ?? 0) - (ys[k] ?? 0)) / ((xs[k + 1] ?? 0) - (xs[k] ?? 0));
     return a * b <= 0 ? 0 : (2 * a * b) / (a + b);
@@ -165,12 +185,19 @@ function signedPow(v: number, e: number): number {
  * Point on the skin for ring profile `p` at angle `theta`
  * (0 = dorsal midline, π/2 = left flank, π = belly).
  */
-export function crossSection(p: Profile, theta: number, out: { y: number; z: number }): { y: number; z: number } {
+export function crossSection(
+  p: Profile,
+  theta: number,
+  out: { y: number; z: number },
+): { y: number; z: number } {
   const c = Math.cos(theta);
   const s = Math.sin(theta);
   const exp = c >= 0 ? p.topExp : p.botExp;
   let z = p.width * signedPow(s, 2 / exp);
-  let y = c >= 0 ? p.mid + (p.top - p.mid) * signedPow(c, 2 / exp) : p.mid + (p.mid - p.bot) * signedPow(c, 2 / exp);
+  let y =
+    c >= 0
+      ? p.mid + (p.top - p.mid) * signedPow(c, 2 / exp)
+      : p.mid + (p.mid - p.bot) * signedPow(c, 2 / exp);
   if (c > 0) {
     // Keel, fin, splashguard and rostral ridge ride on the dorsal midline.
     const fromTop = Math.atan2(Math.abs(s), c);
@@ -191,7 +218,11 @@ export function crossSection(p: Profile, theta: number, out: { y: number; z: num
 
 /* ---------------------------------------------------------------- skeleton */
 
-export interface BoneSpec { name: string; x: number; parent: number }
+export interface BoneSpec {
+  name: string;
+  x: number;
+  parent: number;
+}
 
 /** Spine bone stations along u (shares of the body), head→tail. */
 const SPINE_U = [0.094, 0.245, 0.434, 0.604, 0.745, 0.849, 0.934, 1];
@@ -237,7 +268,13 @@ export function flipperRoot(side: 1 | -1): THREE.Vector3 {
 /** Rest orientation: droop down and sweep back, mirrored for the right side. */
 export const FLIPPER_DROOP = 0.62;
 export const FLIPPER_SWEEP = 0.5;
-export function flipperQuaternion(side: 1 | -1, droop: number, sweep: number, twist: number, out = new THREE.Quaternion()): THREE.Quaternion {
+export function flipperQuaternion(
+  side: 1 | -1,
+  droop: number,
+  sweep: number,
+  twist: number,
+  out = new THREE.Quaternion(),
+): THREE.Quaternion {
   const qy = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, side * sweep);
   const qx = new THREE.Quaternion().setFromAxisAngle(X_AXIS, side * droop);
   const qz = new THREE.Quaternion().setFromAxisAngle(Z_AXIS, side * twist);
@@ -359,14 +396,25 @@ function buildBody(spec: DetailSpec, part: Part): void {
 /** Approximate NACA 00xx half-thickness at chord fraction k (0 = leading edge). */
 function foil(k: number): number {
   const x = clamp(k, 0, 1);
-  return 5 * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4);
+  return (
+    5 * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4)
+  );
 }
 
-export interface FlipperStation { le: number; chord: number; thick: number }
+export interface FlipperStation {
+  le: number;
+  chord: number;
+  thick: number;
+}
 
 /** Flipper planform at span fraction s: short, slender, lightly swept, pointed, with a smooth leading edge. */
 export function flipperStation(s: number): FlipperStation {
-  const chord = FLIPPER_LENGTH * (0.17 * (0.85 + 0.15 * Math.sin(Math.PI * clamp(s * 1.3, 0, 1))) * Math.sqrt(Math.max(0, 1 - s ** 2.2)) + 0.006);
+  const chord =
+    FLIPPER_LENGTH *
+    (0.17 *
+      (0.85 + 0.15 * Math.sin(Math.PI * clamp(s * 1.3, 0, 1))) *
+      Math.sqrt(Math.max(0, 1 - s ** 2.2)) +
+      0.006);
   const sweep = 0.12 * FLIPPER_LENGTH * s * s;
   return {
     le: sweep - chord * 0.3,
@@ -375,7 +423,13 @@ export function flipperStation(s: number): FlipperStation {
   };
 }
 
-function buildFlipper(spec: DetailSpec, side: 1 | -1, bone: number, tipBone: number, part: Part): void {
+function buildFlipper(
+  spec: DetailSpec,
+  side: 1 | -1,
+  bone: number,
+  tipBone: number,
+  part: Part,
+): void {
   const root = flipperRoot(side);
   const rest = flipperQuaternion(side, FLIPPER_DROOP, FLIPPER_SWEEP, 0);
   const S = spec.flipperSpan;
@@ -412,7 +466,11 @@ function buildFlipper(spec: DetailSpec, side: 1 | -1, bone: number, tipBone: num
   }
 }
 
-export interface FlukeStation { le: number; chord: number; thick: number }
+export interface FlukeStation {
+  le: number;
+  chord: number;
+  thick: number;
+}
 
 /** Fluke planform at |z| / half-span a: swept leading edge, nearly straight trailing edge with a small notch, pointed tips. */
 export function flukeStation(a: number): FlukeStation {

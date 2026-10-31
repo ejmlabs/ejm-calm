@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { clamp } from './math.js';
-import { UNDER_MAX_DISTANCE, UNDER_ORBIT_PITCH, type FollowCamera, type ReviewView } from './camera.js';
+import {
+  UNDER_MAX_DISTANCE,
+  UNDER_ORBIT_PITCH,
+  type FollowCamera,
+  type ReviewView,
+} from './camera.js';
 import { LENGTH_SCALE } from './whale-size.js';
 import { item } from './item.js';
 
@@ -26,7 +31,11 @@ export interface ViewControls {
  * camera in the whale's heading frame (azimuth 0 = behind it); the follow camera places the real eye
  * from that view, so its clearance, waterline and dive guards still apply.
  */
-export function createViewControls(canvas: HTMLCanvasElement, rig: FollowCamera, onChange: (orbiting: boolean) => void): ViewControls {
+export function createViewControls(
+  canvas: HTMLCanvasElement,
+  rig: FollowCamera,
+  onChange: (orbiting: boolean) => void,
+): ViewControls {
   const proxy = new THREE.PerspectiveCamera();
   const controls = new OrbitControls(proxy, canvas);
   controls.enablePan = false;
@@ -49,7 +58,11 @@ export function createViewControls(canvas: HTMLCanvasElement, rig: FollowCamera,
     orbiting = true;
     const from = rig.view;
     const distance = clamp(from.distance, ORBIT_DISTANCE[0], ORBIT_DISTANCE[1]);
-    proxy.position.setFromSphericalCoords(distance, Math.PI / 2 - clamp(from.pitch, ORBIT_PITCH[0], ORBIT_PITCH[1]), from.yaw);
+    proxy.position.setFromSphericalCoords(
+      distance,
+      Math.PI / 2 - clamp(from.pitch, ORBIT_PITCH[0], ORBIT_PITCH[1]),
+      from.yaw,
+    );
     controls.update();
     rig.setOrbit(view());
     onChange(true);
@@ -66,14 +79,28 @@ export function createViewControls(canvas: HTMLCanvasElement, rig: FollowCamera,
   const onKey = (event: KeyboardEvent) => {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const move: Record<string, () => void> = {
-      ArrowLeft: () => { controls.rotateLeft(KEY_TURN); },
-      ArrowRight: () => { controls.rotateLeft(-KEY_TURN); },
-      ArrowUp: () => { controls.rotateUp(KEY_TURN); },
-      ArrowDown: () => { controls.rotateUp(-KEY_TURN); },
+      ArrowLeft: () => {
+        controls.rotateLeft(KEY_TURN);
+      },
+      ArrowRight: () => {
+        controls.rotateLeft(-KEY_TURN);
+      },
+      ArrowUp: () => {
+        controls.rotateUp(KEY_TURN);
+      },
+      ArrowDown: () => {
+        controls.rotateUp(-KEY_TURN);
+      },
       // OrbitControls' dollyOut moves the eye closer.
-      '+': () => { controls.dollyOut(KEY_ZOOM); },
-      '=': () => { controls.dollyOut(KEY_ZOOM); },
-      '-': () => { controls.dollyIn(KEY_ZOOM); },
+      '+': () => {
+        controls.dollyOut(KEY_ZOOM);
+      },
+      '=': () => {
+        controls.dollyOut(KEY_ZOOM);
+      },
+      '-': () => {
+        controls.dollyIn(KEY_ZOOM);
+      },
     };
     if (event.key === '0' || event.key === 'Home') reset();
     else if (move[event.key]) {
@@ -92,7 +119,9 @@ export function createViewControls(canvas: HTMLCanvasElement, rig: FollowCamera,
       controls.enableDamping = !reducedMotion;
       // Under water the haze closes in and the whale can be seen from below: nearer, and down past the horizon.
       const under = rig.mode === 'under';
-      controls.maxDistance = under ? Math.max(ORBIT_DISTANCE[0], UNDER_MAX_DISTANCE) : ORBIT_DISTANCE[1];
+      controls.maxDistance = under
+        ? Math.max(ORBIT_DISTANCE[0], UNDER_MAX_DISTANCE)
+        : ORBIT_DISTANCE[1];
       controls.maxPolarAngle = Math.PI / 2 - (under ? UNDER_ORBIT_PITCH : ORBIT_PITCH[0]);
       controls.update();
       if (orbiting) rig.setOrbit(view());

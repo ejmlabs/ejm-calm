@@ -45,8 +45,12 @@ export function frameMode(asked: FrameMode | null): FrameMode {
     const info = gl.getExtension('WEBGL_debug_renderer_info');
     const renderer: unknown = gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
     const cpu = typeof renderer === 'string' && SOFTWARE_GL.test(renderer);
-    const halfFloats = gl.getExtension('EXT_color_buffer_float') !== null || gl.getExtension('EXT_color_buffer_half_float') !== null;
-    const floatSamples: unknown = halfFloats ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES) : null;
+    const halfFloats =
+      gl.getExtension('EXT_color_buffer_float') !== null ||
+      gl.getExtension('EXT_color_buffer_half_float') !== null;
+    const floatSamples: unknown = halfFloats
+      ? gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES)
+      : null;
     const canFinish = floatSamples instanceof Int32Array && (floatSamples[0] ?? 0) >= 4;
     // The probe's own canvas asks for antialiasing by default, so its sample count is the canvas's.
     const canvasSamples: unknown = gl.getParameter(gl.SAMPLES);
@@ -107,7 +111,12 @@ const threshold = new THREE.Color();
 /** Puts the bloom and the grade on a renderer made with a half-float output buffer. */
 export function createFinish(renderer: THREE.WebGLRenderer): Finish {
   // Radius 0 leaves the level weights as given.
-  const bloom = new UnrealBloomPass(renderer.getDrawingBufferSize(new THREE.Vector2()), BLOOM_STRENGTH, 0, 1);
+  const bloom = new UnrealBloomPass(
+    renderer.getDrawingBufferSize(new THREE.Vector2()),
+    BLOOM_STRENGTH,
+    0,
+    1,
+  );
   item(bloom.compositeMaterial.uniforms, 'bloomFactors').value = BLOOM_LEVELS;
   // Only the light past the threshold blooms, held under a ceiling: three's pass would bloom the whole of the sun's
   // radiance, hundreds of times the threshold, as one white flood.

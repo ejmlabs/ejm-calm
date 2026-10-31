@@ -11,7 +11,9 @@ import { patchShader } from './shader-patch.js';
 
 // three's matrices, column-major like the GLSL source.
 const ACES_IN = [0.59719, 0.076, 0.0284, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777];
-const ACES_OUT = [1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602];
+const ACES_OUT = [
+  1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602,
+];
 
 /** The fit's output is held under this before inverting, so pure white is a finite radiance (about 18 at noon). */
 const FIT_CEILING = 0.985;
@@ -42,9 +44,15 @@ function invert(m: readonly number[]): number[] {
   const [a = 0, d = 0, g = 0, b = 0, e = 0, h = 0, c = 0, f = 0, i = 0] = m;
   const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
   return [
-    (e * i - f * h) / det, (f * g - d * i) / det, (d * h - e * g) / det,
-    (c * h - b * i) / det, (a * i - c * g) / det, (b * g - a * h) / det,
-    (b * f - c * e) / det, (c * d - a * f) / det, (a * e - b * d) / det,
+    (e * i - f * h) / det,
+    (f * g - d * i) / det,
+    (d * h - e * g) / det,
+    (c * h - b * i) / det,
+    (a * i - c * g) / det,
+    (b * g - a * h) / det,
+    (b * f - c * e) / det,
+    (c * d - a * f) / det,
+    (a * e - b * d) / det,
   ];
 }
 
@@ -67,11 +75,19 @@ export function acesFilmic(c: THREE.Color, exposure: number, out = new THREE.Col
  * can be chosen as it should look on screen. A colour the curve cannot reach (it greys strong teals) comes back as
  * the nearest it can.
  */
-export function radianceFor(target: THREE.Color, exposure: number, out = new THREE.Color()): THREE.Color {
+export function radianceFor(
+  target: THREE.Color,
+  exposure: number,
+  out = new THREE.Color(),
+): THREE.Color {
   mul(ACES_OUT_INVERSE, target.r, target.g, target.b, va);
   mul(ACES_IN_INVERSE, unfit(va[0] ?? 0), unfit(va[1] ?? 0), unfit(va[2] ?? 0), vb);
   const k = 0.6 / Math.max(1e-3, exposure);
-  return out.setRGB(Math.max(0, vb[0] ?? 0) * k, Math.max(0, vb[1] ?? 0) * k, Math.max(0, vb[2] ?? 0) * k);
+  return out.setRGB(
+    Math.max(0, vb[0] ?? 0) * k,
+    Math.max(0, vb[1] ?? 0) * k,
+    Math.max(0, vb[2] ?? 0) * k,
+  );
 }
 
 /** The output's exposure, written once a frame; shaders that convert display colours read it. */
@@ -102,9 +118,14 @@ export function drawAsAuthored<M extends THREE.Material>(material: M): M {
   material.toneMapped = true;
   material.onBeforeCompile = (shader) => {
     const fragment = patchShader(shader.fragmentShader, [
-      { find: '#include <tonemapping_fragment>', replace: 'gl_FragColor.rgb = sceneFromDisplay( gl_FragColor.rgb );\n#include <tonemapping_fragment>' },
+      {
+        find: '#include <tonemapping_fragment>',
+        replace:
+          'gl_FragColor.rgb = sceneFromDisplay( gl_FragColor.rgb );\n#include <tonemapping_fragment>',
+      },
     ]);
-    if (fragment === null) throw new Error(`${material.type} has no tone mapping step to draw through`);
+    if (fragment === null)
+      throw new Error(`${material.type} has no tone mapping step to draw through`);
     shader.fragmentShader = `${SCENE_FROM_DISPLAY_GLSL}\n${fragment}`;
     shader.uniforms['displayExposure'] = displayExposure;
   };

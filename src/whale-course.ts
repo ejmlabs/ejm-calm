@@ -38,7 +38,14 @@ export interface WhaleCourse {
   /** Where the whale was every 30 s for the last twenty minutes (x, z pairs, oldest first): water it has already tried. */
   trail?: number[];
   /** A heading the whale has committed to after making poor headway, and until when; no new one before `cooldown`. */
-  escape?: { heading: number; until: number; cooldown: number; refresh: number; x: number; z: number };
+  escape?: {
+    heading: number;
+    until: number;
+    cooldown: number;
+    refresh: number;
+    x: number;
+    z: number;
+  };
   farCache?: PlanCache;
   startCache?: PlanCache;
   /** The way the wide plan leads, and when it is planned again. */
@@ -130,13 +137,20 @@ function avoidLand(
   const ndx = -away.x;
   const ndz = -away.z;
   const fwd = whaleForward(heading);
-  const closeness = clamp(1 - (gap - WHALE_ISLAND_MARGIN * 0.5) / (influence - WHALE_ISLAND_MARGIN * 0.5), 0, 1);
+  const closeness = clamp(
+    1 - (gap - WHALE_ISLAND_MARGIN * 0.5) / (influence - WHALE_ISLAND_MARGIN * 0.5),
+    0,
+    1,
+  );
   const ahead = fwd.x * ndx + fwd.z * ndz;
   if (ahead < 0.05 && closeness < 0.5) return desired;
   // Follow the coast on the nearer side; when very close, head straight out.
   const left = headingToward(-ndz, ndx);
   const right = headingToward(ndz, -ndx);
-  const tangent = Math.abs(shortestAngle(desired, left)) <= Math.abs(shortestAngle(desired, right)) ? left : right;
+  const tangent =
+    Math.abs(shortestAngle(desired, left)) <= Math.abs(shortestAngle(desired, right))
+      ? left
+      : right;
   const flee = closeness > 0.72 ? headingToward(away.x, away.z) : tangent;
   const weight = clamp(closeness * (0.45 + 0.9 * clamp(ahead, 0, 1)), 0, 1);
   return desired + shortestAngle(desired, flee) * weight;
@@ -150,7 +164,22 @@ const PROBES: readonly (readonly [number, number])[] = [
   [150, 50],
 ];
 /** Detours tried, nearest the journey first; the last ones turn back out of a bay. */
-const DETOURS = [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.45, -1.45, 1.9, -1.9, 2.5, -2.5, Math.PI];
+const DETOURS = [
+  0,
+  0.35,
+  -0.35,
+  0.7,
+  -0.7,
+  1.05,
+  -1.05,
+  1.45,
+  -1.45,
+  1.9,
+  -1.9,
+  2.5,
+  -2.5,
+  Math.PI,
+];
 
 /** Seconds between plans of the way on (fixed in sim time). */
 export const PLAN_EVERY = 5;
@@ -220,23 +249,46 @@ const ESCAPE_STEP = 150;
 const ESCAPE_CLEAR = 80;
 
 /** The bearing with the longest stretch of open water ahead (up to ESCAPE_RUN), turned toward `prefer` among those that are as open. */
-export function escapeHeading(x: number, z: number, prefer: number, shore: Shore, tried: readonly number[] = []): number {
+export function escapeHeading(
+  x: number,
+  z: number,
+  prefer: number,
+  shore: Shore,
+  tried: readonly number[] = [],
+): number {
   let best = prefer;
   let bestScore = -Infinity;
   for (let k = 0; k < ESCAPE_BEARINGS; k++) {
     const bearing = wrapAngle(prefer + (k / ESCAPE_BEARINGS) * Math.PI * 2);
     const fwd = whaleForward(bearing);
     let run = 0;
-    while (run < ESCAPE_RUN && shore.clearance(x + fwd.x * (run + ESCAPE_STEP), z + fwd.z * (run + ESCAPE_STEP)) > ESCAPE_CLEAR) run += ESCAPE_STEP;
+    while (
+      run < ESCAPE_RUN &&
+      shore.clearance(x + fwd.x * (run + ESCAPE_STEP), z + fwd.z * (run + ESCAPE_STEP)) >
+        ESCAPE_CLEAR
+    )
+      run += ESCAPE_STEP;
     // Open water all the way counts the same; then the bearing nearest the journey wins, never straight back.
     const turned = Math.abs(shortestAngle(prefer, bearing));
     // Water where the whale has already been (and come back from) is the last place to try.
     const end = whaleForward(bearing);
     let seen = 0;
     for (let i = 0; i < tried.length; i += 2) {
-      if (Math.hypot(x + end.x * run - (tried[i] ?? 0), z + end.z * run - (tried[i + 1] ?? 0)) < 1500 || Math.hypot(x + end.x * run * 0.5 - (tried[i] ?? 0), z + end.z * run * 0.5 - (tried[i + 1] ?? 0)) < 1000) seen++;
+      if (
+        Math.hypot(x + end.x * run - (tried[i] ?? 0), z + end.z * run - (tried[i + 1] ?? 0)) <
+          1500 ||
+        Math.hypot(
+          x + end.x * run * 0.5 - (tried[i] ?? 0),
+          z + end.z * run * 0.5 - (tried[i + 1] ?? 0),
+        ) < 1000
+      )
+        seen++;
     }
-    const score = run + (run >= ESCAPE_RUN ? 400 * Math.cos(turned) : 0) - (turned > 2.4 ? 600 : 0) - 250 * Math.min(seen, 6);
+    const score =
+      run +
+      (run >= ESCAPE_RUN ? 400 * Math.cos(turned) : 0) -
+      (turned > 2.4 ? 600 : 0) -
+      250 * Math.min(seen, 6);
     if (score > bestScore) {
       bestScore = score;
       best = bearing;
@@ -246,8 +298,18 @@ export function escapeHeading(x: number, z: number, prefer: number, shore: Shore
 }
 
 /** The lattice a plan runs over: cell size (m), radius in cells, cells of path before a target counts, and the clearance it reads. */
-export interface PlanGrid { cell: number; radius: number; minDepth: number; far: boolean }
-const NEAR_GRID: PlanGrid = { cell: PLAN_CELL, radius: PLAN_RADIUS, minDepth: PLAN_MIN_DEPTH, far: false };
+export interface PlanGrid {
+  cell: number;
+  radius: number;
+  minDepth: number;
+  far: boolean;
+}
+const NEAR_GRID: PlanGrid = {
+  cell: PLAN_CELL,
+  radius: PLAN_RADIUS,
+  minDepth: PLAN_MIN_DEPTH,
+  far: false,
+};
 /** A wide, coarse plan (12.8 km) over `Shore.reach`: only used to find the way out when the near plan has gone nowhere. */
 const EDGE_SHARE = 0.85;
 const EDGE_BONUS = 30000;
@@ -260,10 +322,24 @@ const START_GRID: PlanGrid = { cell: 640, radius: 20, minDepth: 6, far: true };
 function widePlan(course: WhaleCourse, params: WhaleCourseParams, journey: number, shore: Shore) {
   const start = Math.hypot(course.x - params.homeX, course.z - params.homeZ) < START_REACH;
   const cache = start ? (course.startCache ??= new Map()) : (course.farCache ??= new Map());
-  return planJourney(course.x, course.z, journey, shore, cache, undefined, [], start ? START_GRID : FAR_GRID);
+  return planJourney(
+    course.x,
+    course.z,
+    journey,
+    shore,
+    cache,
+    undefined,
+    [],
+    start ? START_GRID : FAR_GRID,
+  );
 }
 
-function wayOut(course: WhaleCourse, params: WhaleCourseParams, flow: number, shore: Shore): number {
+function wayOut(
+  course: WhaleCourse,
+  params: WhaleCourseParams,
+  flow: number,
+  shore: Shore,
+): number {
   const plan = widePlan(course, params, flow, shore);
   return plan ? plan.bearing : escapeHeading(course.x, course.z, flow, shore, course.trail);
 }
@@ -299,13 +375,16 @@ export function planJourney(
   /** Cost of crossing a cell: 1 in deep water, more near the coast, Infinity where too close. */
   const cost = (li: number, lj: number): number => {
     // Only the disc is planned over: the square's corners lie beyond the navigation tiles kept built around the whale.
-    if ((li - grid.radius) ** 2 + (lj - grid.radius) ** 2 > grid.radius * grid.radius) return Infinity;
+    if ((li - grid.radius) ** 2 + (lj - grid.radius) ** 2 > grid.radius * grid.radius)
+      return Infinity;
     const i = ci + li - grid.radius;
     const j = cj + lj - grid.radius;
     const key = `${String(i)}:${String(j)}`;
     let m = cache.get(key);
     if (m === undefined) {
-      m = grid.far ? (shore.reach ?? shore.clearance)((i + 0.5) * grid.cell, (j + 0.5) * grid.cell) : shore.clearance((i + 0.5) * grid.cell, (j + 0.5) * grid.cell);
+      m = grid.far
+        ? (shore.reach ?? shore.clearance)((i + 0.5) * grid.cell, (j + 0.5) * grid.cell)
+        : shore.clearance((i + 0.5) * grid.cell, (j + 0.5) * grid.cell);
       cache.set(key, m);
       trimOldest(cache, PLAN_CACHE_CAP);
     }
@@ -353,7 +432,8 @@ export function planJourney(
   const fwd = whaleForward(journey);
   const keepI = keep ? Math.floor(keep.x / grid.cell) - ci + grid.radius : -1;
   const keepJ = keep ? Math.floor(keep.z / grid.cell) - cj + grid.radius : -1;
-  const keepK = keepI >= 0 && keepJ >= 0 && keepI < side && keepJ < side ? keepJ * side + keepI : -1;
+  const keepK =
+    keepI >= 0 && keepJ >= 0 && keepI < side && keepJ < side ? keepJ * side + keepI : -1;
   let best = -1;
   let bestScore = -Infinity;
   let any = -1;
@@ -375,7 +455,10 @@ export function planJourney(
       // Behind the cone only the furthest reachable cell counts: out of a pocket by its mouth, not along its far wall.
       // On the wide plan, water that runs on to the edge of the lattice beats any dead end short of it: a gulf is not entered.
       const open = grid.far && away >= grid.radius * grid.cell * EDGE_SHARE ? EDGE_BONUS : 0;
-      const score = open + (along < CONE * away ? away - BACKTRACK : along) - 0.3 * ((dist[k] ?? 0) * grid.cell - away);
+      const score =
+        open +
+        (along < CONE * away ? away - BACKTRACK : along) -
+        0.3 * ((dist[k] ?? 0) * grid.cell - away);
       // Water by a spent target is a way through, not somewhere to head for.
       if (score > bestScore && !spent.some((t) => Math.hypot(wx - t.x, wz - t.z) < SPENT_RADIUS)) {
         bestScore = score;
@@ -398,7 +481,13 @@ export function planJourney(
         const c = cost(ni, nj);
         if (c === Infinity) continue;
         // Diagonal moves may not squeeze between two closed cells.
-        if (di !== 0 && dj !== 0 && cost(li + di, lj) === Infinity && cost(li, lj + dj) === Infinity) continue;
+        if (
+          di !== 0 &&
+          dj !== 0 &&
+          cost(li + di, lj) === Infinity &&
+          cost(li, lj + dj) === Infinity
+        )
+          continue;
         const next = (dist[k] ?? 0) + c * (di !== 0 && dj !== 0 ? Math.SQRT2 : 1);
         if (next < (dist[nk] ?? 0)) {
           dist[nk] = next;
@@ -414,7 +503,10 @@ export function planJourney(
   if (best < 0) return null;
   const bi = best % side;
   const bj = (best - bi) / side;
-  const target = { x: (ci + bi - grid.radius + 0.5) * grid.cell, z: (cj + bj - grid.radius + 0.5) * grid.cell };
+  const target = {
+    x: (ci + bi - grid.radius + 0.5) * grid.cell,
+    z: (cj + bj - grid.radius + 0.5) * grid.cell,
+  };
   // The path from the whale to the target, nearest cell first.
   const path: number[] = [];
   for (let k = best; k !== start && k >= 0; k = parent[k] ?? 0) path.push(k);
@@ -428,7 +520,8 @@ export function planJourney(
       const pz = (cj + (k - (k % side)) / side - grid.radius + 0.5) * grid.cell;
       const run = Math.hypot(px - x, pz - z);
       let clear = true;
-      for (let d = LINE_STEP; d < run && clear; d += LINE_STEP) clear = shore.clearance(x + ((px - x) * d) / run, z + ((pz - z) * d) / run) > LINE_CLEAR;
+      for (let d = LINE_STEP; d < run && clear; d += LINE_STEP)
+        clear = shore.clearance(x + ((px - x) * d) / run, z + ((pz - z) * d) / run) > LINE_CLEAR;
       if (clear) {
         waypoint = k;
         break;
@@ -508,13 +601,26 @@ export function stepWhaleCourse(
   const pick = (): number => {
     if (escape && time < escape.until) return escape.heading;
     const flowing = flow + bias;
-    return course.farSmooth !== undefined && Math.abs(shortestAngle(flowing, course.farSmooth)) > FAR_TURN ? course.farSmooth : flowing;
+    return course.farSmooth !== undefined &&
+      Math.abs(shortestAngle(flowing, course.farSmooth)) > FAR_TURN
+      ? course.farSmooth
+      : flowing;
   };
   let heading = pick();
   if (course.scan !== scan && time >= PLAN_START) {
     course.scan = scan;
     if (course.far !== undefined) {
-      course.farSmooth = course.farSmooth === undefined ? course.far : wrapAngle(course.farSmooth + clamp(shortestAngle(course.farSmooth, course.far), -FAR_RATE * PLAN_EVERY, FAR_RATE * PLAN_EVERY));
+      course.farSmooth =
+        course.farSmooth === undefined
+          ? course.far
+          : wrapAngle(
+              course.farSmooth +
+                clamp(
+                  shortestAngle(course.farSmooth, course.far),
+                  -FAR_RATE * PLAN_EVERY,
+                  FAR_RATE * PLAN_EVERY,
+                ),
+            );
     } else course.farSmooth = undefined;
     if (time >= (course.farAt ?? 0)) {
       course.farAt = time + FAR_EVERY;
@@ -533,11 +639,25 @@ export function stepWhaleCourse(
     if (track.length > need * 2) track.splice(0, track.length - need * 2);
     if (track.length === need * 2 && !course.aim && (!escape || time >= escape.cooldown)) {
       let path = 0;
-      for (let i = 2; i < track.length; i += 2) path += Math.hypot((track[i] ?? 0) - (track[i - 2] ?? 0), (track[i + 1] ?? 0) - (track[i - 1] ?? 0));
-      const net = Math.hypot((track[track.length - 2] ?? 0) - (track[0] ?? 0), (track[track.length - 1] ?? 0) - (track[1] ?? 0));
+      for (let i = 2; i < track.length; i += 2)
+        path += Math.hypot(
+          (track[i] ?? 0) - (track[i - 2] ?? 0),
+          (track[i + 1] ?? 0) - (track[i - 1] ?? 0),
+        );
+      const net = Math.hypot(
+        (track[track.length - 2] ?? 0) - (track[0] ?? 0),
+        (track[track.length - 1] ?? 0) - (track[1] ?? 0),
+      );
       if (path > HEADWAY_PATH && net < HEADWAY_SHARE * path) {
         const out = wayOut(course, params, flow, shore);
-        escape = course.escape = { heading: out, until: time + ESCAPE_SECONDS, cooldown: time + ESCAPE_COOLDOWN, refresh: time + ESCAPE_REPLAN, x: course.x, z: course.z };
+        escape = course.escape = {
+          heading: out,
+          until: time + ESCAPE_SECONDS,
+          cooldown: time + ESCAPE_COOLDOWN,
+          refresh: time + ESCAPE_REPLAN,
+          x: course.x,
+          z: course.z,
+        };
         // The flow resumes slowly: its bias carries the committed heading on.
         bias = course.bias = clamp(wrapAngle(out - flow), -0.7, 0.7);
         course.target = undefined;
@@ -545,7 +665,8 @@ export function stepWhaleCourse(
       }
     }
     if (escape && time < escape.until) {
-      if (Math.hypot(course.x - escape.x, course.z - escape.z) > ESCAPE_DISTANCE) escape.until = time;
+      if (Math.hypot(course.x - escape.x, course.z - escape.z) > ESCAPE_DISTANCE)
+        escape.until = time;
       else if (time >= escape.refresh) {
         escape.refresh = time + ESCAPE_REPLAN;
         escape.heading = wayOut(course, params, flow, shore);
@@ -555,20 +676,31 @@ export function stepWhaleCourse(
     const gap = held ? Math.hypot(held.x - course.x, held.z - course.z) : 0;
     // Headway is measured along the planned path (held.closest is in path cells).
     const stalled = !!held && time - held.closestAt > STALL_SECONDS;
-    const keep = held && !stalled && time - held.since < TARGET_SECONDS && gap > TARGET_REACHED ? held : undefined;
+    const keep =
+      held && !stalled && time - held.since < TARGET_SECONDS && gap > TARGET_REACHED
+        ? held
+        : undefined;
     // A target let go (reached, stalled on or too old) is spent: no new target is picked by it for a while.
     const spent = (course.spent ??= []);
     if (held && !keep) spent.push({ x: held.x, z: held.z, at: time });
-    while (spent.length > SPENT_MAX || (spent.length && time - item(spent, 0).at > SPENT_SECONDS)) spent.shift();
+    while (spent.length > SPENT_MAX || (spent.length && time - item(spent, 0).at > SPENT_SECONDS))
+      spent.shift();
     const cache = (course.planCache ??= new Map());
-    const plan2 = (k?: { x: number; z: number }) => planJourney(course.x, course.z, heading, shore, cache, k, spent);
+    const plan2 = (k?: { x: number; z: number }) =>
+      planJourney(course.x, course.z, heading, shore, cache, k, spent);
     let plan = plan2(keep);
-    if (course.plan !== undefined && (stalled || (keep && (plan?.x !== keep.x || plan.z !== keep.z)))) {
+    if (
+      course.plan !== undefined &&
+      (stalled || (keep && (plan?.x !== keep.x || plan.z !== keep.z)))
+    ) {
       // The way to the held target closed up ahead (or the whale made no headway): remember
       // that gap as shut, so it does not turn back and try it again a few minutes later.
       const fwd = whaleForward(course.plan);
       for (let d = PLAN_CELL; d <= PLAN_CELL * 3; d += PLAN_CELL) {
-        cache.set(`${String(Math.floor((course.x + fwd.x * d) / PLAN_CELL))}:${String(Math.floor((course.z + fwd.z * d) / PLAN_CELL))}`, -Infinity);
+        cache.set(
+          `${String(Math.floor((course.x + fwd.x * d) / PLAN_CELL))}:${String(Math.floor((course.z + fwd.z * d) / PLAN_CELL))}`,
+          -Infinity,
+        );
       }
       plan = plan2();
     }
@@ -584,7 +716,9 @@ export function stepWhaleCourse(
   const journey = course.plan ?? heading;
   // Over ten minutes or so the journey itself turns the way the plans lead.
   // The bias also relaxes back to the flow's heading, so the way around a coast does not become the new course.
-  course.bias = wrapAngle(bias + shortestAngle(heading, journey) * clamp(dt / 600, 0, 1) - bias * clamp(dt / 1200, 0, 1));
+  course.bias = wrapAngle(
+    bias + shortestAngle(heading, journey) * clamp(dt / 600, 0, 1) - bias * clamp(dt / 1200, 0, 1),
+  );
 
   const slot = Math.floor(time / LOOK_EVERY);
   if (course.slot !== slot) {
@@ -594,7 +728,9 @@ export function stepWhaleCourse(
   const detour = course.detour ?? 0;
   // The meander only plays in open water.
   const aim = course.aim;
-  let desired = aim ? headingToward(aim.x - course.x, aim.z - course.z) : journey + detour + (detour === 0 ? wander : 0);
+  let desired = aim
+    ? headingToward(aim.x - course.x, aim.z - course.z)
+    : journey + detour + (detour === 0 ? wander : 0);
   course.leg = wrapAngle(desired);
   desired = avoidLand(course.x, course.z, course.heading, desired, shore, reach);
 
@@ -610,7 +746,12 @@ export function stepWhaleCourse(
   course.x = cleared.x;
   course.z = cleared.z;
 
-  if (!Number.isFinite(course.x) || !Number.isFinite(course.z) || !Number.isFinite(course.heading) || !Number.isFinite(course.leg)) {
+  if (
+    !Number.isFinite(course.x) ||
+    !Number.isFinite(course.z) ||
+    !Number.isFinite(course.heading) ||
+    !Number.isFinite(course.leg)
+  ) {
     course.x = params.homeX;
     course.z = params.homeZ;
     course.heading = wrapAngle(params.baseHeading);

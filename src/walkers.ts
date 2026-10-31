@@ -57,7 +57,11 @@ function animalMesh(): THREE.BufferGeometry {
 
 /** Per kind: size, pace (m/s) and coat or clothes colours (sRGB hex). */
 const LOOKS: Record<number, { scale: number; speed: number; tints: number[] }> = {
-  [WALKER.person]: { scale: 1.1, speed: 1.2, tints: [0x8a3b32, 0x34507a, 0x4a6a3a, 0xc9a24a, 0xe6e0d4, 0x5a5560] },
+  [WALKER.person]: {
+    scale: 1.1,
+    speed: 1.2,
+    tints: [0x8a3b32, 0x34507a, 0x4a6a3a, 0xc9a24a, 0xe6e0d4, 0x5a5560],
+  },
   [WALKER.sheep]: { scale: 1, speed: 0.12, tints: [0xe6e1d6, 0xd8d1c2, 0x3b3532] },
   [WALKER.cow]: { scale: 1.55, speed: 0.1, tints: [0x6b4a34, 0x2f2a28, 0xe4ddd0] },
   [WALKER.deer]: { scale: 1.25, speed: 0.15, tints: [0x9a6e46, 0x8a5f3c, 0xa47a50] },
@@ -125,7 +129,8 @@ export function createWalkers(stream: LandStream, initialCap: number): Walkers {
   const kinds = [false, true].map((animal) => {
     const base = animal ? animalMesh() : personMesh();
     const geometry = new THREE.InstancedBufferGeometry();
-    for (const name of ['position', 'normal', 'color', 'tag']) geometry.setAttribute(name, base.getAttribute(name));
+    for (const name of ['position', 'normal', 'color', 'tag'])
+      geometry.setAttribute(name, base.getAttribute(name));
     const material = new THREE.ShaderMaterial({
       vertexShader: vertexShader(animal),
       fragmentShader: fragmentShader(stream.hazeStops),
@@ -138,7 +143,13 @@ export function createWalkers(stream: LandStream, initialCap: number): Walkers {
     mesh.layers.set(1);
     mesh.visible = false;
     group.add(mesh);
-    return { geometry, material, mesh, triangles: geometry.getAttribute('position').count / 3, count: 0 };
+    return {
+      geometry,
+      material,
+      mesh,
+      triangles: geometry.getAttribute('position').count / 3,
+      count: 0,
+    };
   });
 
   function allocate(size: number): void {
@@ -158,7 +169,10 @@ export function createWalkers(stream: LandStream, initialCap: number): Walkers {
     const tiles = stream.walkerTiles();
     // Nearest tiles first, so the cap drops the farthest walkers.
     const order = tiles
-      .map((tile) => ({ tile, d: Math.hypot(tile.x0 - cameraX, tile.z0 - cameraZ) + tile.level * 1e-3 }))
+      .map((tile) => ({
+        tile,
+        d: Math.hypot(tile.x0 - cameraX, tile.z0 - cameraZ) + tile.level * 1e-3,
+      }))
       .sort((a, b) => a.d - b.d);
     const ax = Math.round(cameraX / 64) * 64;
     const az = Math.round(cameraZ / 64) * 64;
@@ -172,15 +186,28 @@ export function createWalkers(stream: LandStream, initialCap: number): Walkers {
         const n = kind.count++;
         total++;
         const g = kind.geometry;
-        (g.getAttribute('spot') as THREE.InstancedBufferAttribute).setXYZW(n, tile.x0 + (data[r + 1] ?? 0) - ax, data[r + 2] ?? 0, tile.z0 + (data[r + 3] ?? 0) - az, data[r + 4] ?? 0);
-        (g.getAttribute('motion') as THREE.InstancedBufferAttribute).setXYZW(n, data[r + 6] ?? 0, data[r + 5] ?? 0, look.speed, look.scale);
+        (g.getAttribute('spot') as THREE.InstancedBufferAttribute).setXYZW(
+          n,
+          tile.x0 + (data[r + 1] ?? 0) - ax,
+          data[r + 2] ?? 0,
+          tile.z0 + (data[r + 3] ?? 0) - az,
+          data[r + 4] ?? 0,
+        );
+        (g.getAttribute('motion') as THREE.InstancedBufferAttribute).setXYZW(
+          n,
+          data[r + 6] ?? 0,
+          data[r + 5] ?? 0,
+          look.speed,
+          look.scale,
+        );
         const [cr, cg, cb] = linear(look.tints[(data[r + 7] ?? 0) % look.tints.length] ?? 0);
         (g.getAttribute('tint') as THREE.InstancedBufferAttribute).setXYZ(n, cr, cg, cb);
       }
     }
     for (const kind of kinds) {
       const g = kind.geometry;
-      for (const name of ['spot', 'motion', 'tint']) (g.getAttribute(name) as THREE.InstancedBufferAttribute).needsUpdate = true;
+      for (const name of ['spot', 'motion', 'tint'])
+        (g.getAttribute(name) as THREE.InstancedBufferAttribute).needsUpdate = true;
       g.instanceCount = kind.count;
       kind.mesh.visible = kind.count > 0;
       kind.mesh.position.set(ax, 0, az);

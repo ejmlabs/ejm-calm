@@ -115,10 +115,7 @@ export function computeViewYaw(
   const heroDx = hero.x - focus.x;
   const heroDz = hero.z - focus.z;
   const heroLen = Math.hypot(heroDx, heroDz);
-  let yaw =
-    heroLen > 1e-3
-      ? Math.atan2(-heroDx / heroLen, -heroDz / heroLen)
-      : sunYaw;
+  let yaw = heroLen > 1e-3 ? Math.atan2(-heroDx / heroLen, -heroDz / heroLen) : sunYaw;
 
   // Nearest landmark already roughly in front of the hero heading (ignore anything behind).
   let nearest: { x: number; z: number } | null = null;
@@ -183,7 +180,11 @@ export function coastAhead(
 /** Ships keep this much water between hull and coast. */
 export const SHIP_LAND_MARGIN = 40;
 
-export function layoutWorld(seed: number, sunAzimuthDeg = 185, options: { gridSize?: number } = {}): WorldLayout {
+export function layoutWorld(
+  seed: number,
+  sunAzimuthDeg = 185,
+  options: { gridSize?: number } = {},
+): WorldLayout {
   const rng = fork(seed, 'layout');
   const sunYaw = (sunAzimuthDeg * Math.PI) / 180;
   const occupied: { x: number; z: number; radius: number }[] = [];
@@ -195,15 +196,9 @@ export function layoutWorld(seed: number, sunAzimuthDeg = 185, options: { gridSi
   const shipCount = 2 + Math.floor(rng() * 4); // 2–5
   const ships: ShipSpec[] = [];
 
-  const heroPos = placeAway(
-    rng,
-    occupied,
-    70,
-    130,
-    18,
-    60,
-    { center: sunYaw, spread: (14 * Math.PI) / 180 },
-  ) ?? pointAlongYaw(sunYaw, 95, whalePos);
+  const heroPos =
+    placeAway(rng, occupied, 70, 130, 18, 60, { center: sunYaw, spread: (14 * Math.PI) / 180 }) ??
+    pointAlongYaw(sunYaw, 95, whalePos);
   const heroKind: ShipSpec['kind'] = rng() > 0.4 ? 'tall' : 'sloop';
   ships.push({
     id: 0,

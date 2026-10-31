@@ -29,7 +29,15 @@ export interface Swarms {
   group: THREE.Group;
   /** Sites currently drawn, nearest first. */
   readonly sites: readonly FeedSite[];
-  update: (time: number, camWorldX: number, camWorldZ: number, whaleRender: THREE.Vector3, origin: FloatingOrigin, pointScale: number, draw: boolean) => void;
+  update: (
+    time: number,
+    camWorldX: number,
+    camWorldZ: number,
+    whaleRender: THREE.Vector3,
+    origin: FloatingOrigin,
+    pointScale: number,
+    draw: boolean,
+  ) => void;
   dispose: () => void;
 }
 
@@ -52,7 +60,12 @@ function swarmGeometry(count: number, salt: number): THREE.BufferGeometry {
   return g;
 }
 
-export function createSwarms(seed: number, floorAt: (x: number, z: number) => number, tier: QualityTier, layer: number, fogUniforms: { uFogColor: THREE.IUniform; uFogDensity: THREE.IUniform; uLight: THREE.IUniform },
+export function createSwarms(
+  seed: number,
+  floorAt: (x: number, z: number) => number,
+  tier: QualityTier,
+  layer: number,
+  fogUniforms: { uFogColor: THREE.IUniform; uFogDensity: THREE.IUniform; uLight: THREE.IUniform },
   /** Scene radiance for an sRGB display colour, so colours read as chosen after tone mapping. */
   radiance: (hex: number) => THREE.Color,
 ): Swarms {
@@ -60,7 +73,10 @@ export function createSwarms(seed: number, floorAt: (x: number, z: number) => nu
   group.name = 'underwater-swarms';
   group.visible = false;
   const counts = COUNTS[tier];
-  const geometries = { krill: swarmGeometry(counts.krill, 0x4b52), baitball: swarmGeometry(counts.baitball, 0x4242) };
+  const geometries = {
+    krill: swarmGeometry(counts.krill, 0x4b52),
+    baitball: swarmGeometry(counts.baitball, 0x4242),
+  };
 
   const slots = Array.from({ length: SWARM_SLOTS }, () => {
     const material = new THREE.ShaderMaterial({
@@ -172,7 +188,11 @@ export function createSwarms(seed: number, floorAt: (x: number, z: number) => nu
         const look = looks[site.kind];
         const u = slot.material.uniforms;
         slot.points.geometry = geometries[site.kind];
-        (item(u, 'uCentre').value as THREE.Vector3).set(site.x - origin.x, site.y, site.z - origin.z);
+        (item(u, 'uCentre').value as THREE.Vector3).set(
+          site.x - origin.x,
+          site.y,
+          site.z - origin.z,
+        );
         item(u, 'uRadius').value = site.radius;
         item(u, 'uTime').value = time;
         (item(u, 'uWhale').value as THREE.Vector3).copy(whaleRender);

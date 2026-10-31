@@ -10,7 +10,16 @@ import type { NoiseFunction2D } from 'simplex-noise';
  */
 export type WorkerRequest =
   | { type: 'init'; seed: number; viewYaw: number; offset: { x: number; z: number } }
-  | { type: 'tile'; key: string; level: number; ix: number; iz: number; cells: number; objects: number; maps: boolean }
+  | {
+      type: 'tile';
+      key: string;
+      level: number;
+      ix: number;
+      iz: number;
+      cells: number;
+      objects: number;
+      maps: boolean;
+    }
   | { type: 'far'; id: number; size: number; extent: number; cx: number; cz: number };
 
 let land: Land | null = null;
@@ -31,9 +40,26 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
   }
   if (!land || !patch || !life) return;
   if (message.type === 'tile') {
-    const data = buildTile(land, patch, message.level, message.ix, message.iz, message.cells, message.objects > 0 ? { life, objects: message.objects } : undefined, message.maps);
+    const data = buildTile(
+      land,
+      patch,
+      message.level,
+      message.ix,
+      message.iz,
+      message.cells,
+      message.objects > 0 ? { life, objects: message.objects } : undefined,
+      message.maps,
+    );
     const transfer = data
-      ? [data.positions.buffer, data.normals.buffer, data.colors.buffer, data.detail.buffer, data.index.buffer, ...(data.walkers ? [data.walkers.buffer] : []), ...(data.maps ? [data.maps.color.buffer, data.maps.normal.buffer] : [])]
+      ? [
+          data.positions.buffer,
+          data.normals.buffer,
+          data.colors.buffer,
+          data.detail.buffer,
+          data.index.buffer,
+          ...(data.walkers ? [data.walkers.buffer] : []),
+          ...(data.maps ? [data.maps.color.buffer, data.maps.normal.buffer] : []),
+        ]
       : [];
     scope.postMessage({ type: 'tile', key: message.key, data }, transfer);
   } else {

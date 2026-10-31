@@ -1,7 +1,20 @@
 import { item } from './item.js';
 /** Simple boids: separation, alignment and cohesion within a group, plus a pull toward that group's leader. */
-export interface Boid { x: number; y: number; z: number; vx: number; vy: number; vz: number; group: number; size: number }
-export interface Leader { x: number; y: number; z: number }
+export interface Boid {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  group: number;
+  size: number;
+}
+export interface Leader {
+  x: number;
+  y: number;
+  z: number;
+}
 export interface FlockParams {
   /** Metres per second for each group (cruise speed). */
   speeds: readonly number[];
@@ -14,17 +27,30 @@ const SEPARATION = 7;
 const NEIGHBOURS = 55;
 
 /** Advance every boid by `dt` seconds. O(n²) on at most a couple of dozen birds. */
-export function stepFlock(boids: Boid[], leaders: readonly Leader[], params: FlockParams, dt: number): void {
+export function stepFlock(
+  boids: Boid[],
+  leaders: readonly Leader[],
+  params: FlockParams,
+  dt: number,
+): void {
   if (dt <= 0) return;
   for (const bird of boids) {
     const leader = item(leaders, bird.group);
     const cruise = params.speeds[bird.group] ?? 0;
-    let sepX = 0, sepY = 0, sepZ = 0;
-    let avgVx = 0, avgVz = 0, avgX = 0, avgY = 0, avgZ = 0;
+    let sepX = 0,
+      sepY = 0,
+      sepZ = 0;
+    let avgVx = 0,
+      avgVz = 0,
+      avgX = 0,
+      avgY = 0,
+      avgZ = 0;
     let near = 0;
     for (const other of boids) {
       if (other === bird) continue;
-      const dx = bird.x - other.x, dy = bird.y - other.y, dz = bird.z - other.z;
+      const dx = bird.x - other.x,
+        dy = bird.y - other.y,
+        dz = bird.z - other.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       const reach = SEPARATION * (bird.size + other.size) * 0.5;
       if (d2 < reach * reach && d2 > 1e-6) {
@@ -35,19 +61,26 @@ export function stepFlock(boids: Boid[], leaders: readonly Leader[], params: Flo
         sepZ += (dz / d) * push;
       }
       if (other.group === bird.group && d2 < NEIGHBOURS * NEIGHBOURS) {
-        avgVx += other.vx; avgVz += other.vz;
-        avgX += other.x; avgY += other.y; avgZ += other.z;
+        avgVx += other.vx;
+        avgVz += other.vz;
+        avgX += other.x;
+        avgY += other.y;
+        avgZ += other.z;
         near++;
       }
     }
-    let ax = sepX * 4, ay = sepY * 4, az = sepZ * 4;
+    let ax = sepX * 4,
+      ay = sepY * 4,
+      az = sepZ * 4;
     if (near > 0) {
       ax += (avgVx / near - bird.vx) * 0.4 + (avgX / near - bird.x) * 0.02;
       ay += (avgY / near - bird.y) * 0.02;
       az += (avgVz / near - bird.vz) * 0.4 + (avgZ / near - bird.z) * 0.02;
     }
     // Pull toward the leader grows with distance; a straggler also flies a little faster to catch up.
-    const lx = leader.x - bird.x, ly = leader.y - bird.y, lz = leader.z - bird.z;
+    const lx = leader.x - bird.x,
+      ly = leader.y - bird.y,
+      lz = leader.z - bird.z;
     const lead = Math.hypot(lx, ly, lz);
     const pull = Math.min(1, lead / 120) * 0.9 + 0.05;
     ax += (lx / (lead + 1e-6)) * pull * cruise * 0.35;
@@ -61,7 +94,9 @@ export function stepFlock(boids: Boid[], leaders: readonly Leader[], params: Flo
     const speed = Math.hypot(bird.vx, bird.vy, bird.vz);
     if (speed > limit) {
       const scale = limit / speed;
-      bird.vx *= scale; bird.vy *= scale; bird.vz *= scale;
+      bird.vx *= scale;
+      bird.vy *= scale;
+      bird.vz *= scale;
     }
     // Keep a steady forward pace: never hover, never climb or dive steeply.
     const flat = Math.hypot(bird.vx, bird.vz);

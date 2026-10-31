@@ -1,4 +1,5 @@
-export const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
+export const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
 
 export const damp = (value: number, target: number, rate: number, dt: number): number =>
   value + (target - value) * (1 - Math.exp(-rate * dt));

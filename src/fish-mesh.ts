@@ -16,9 +16,21 @@ export type FishLevel = 0 | 1 | 2;
 /** Detail per level: body rings and sides (fish), grid cells (ray), bell rows and segments (jelly). */
 type Detail = readonly [number, number];
 const LEVELS: Record<FishShape, readonly [Detail, Detail, Detail]> = {
-  fish: [[7, 6], [4, 4], [2, 3]],
-  ray: [[5, 6], [3, 4], [2, 2]],
-  jelly: [[4, 8], [3, 6], [2, 4]],
+  fish: [
+    [7, 6],
+    [4, 4],
+    [2, 3],
+  ],
+  ray: [
+    [5, 6],
+    [3, 4],
+    [2, 2],
+  ],
+  jelly: [
+    [4, 8],
+    [3, 6],
+    [2, 4],
+  ],
 };
 
 type Point = readonly [number, number, number];
@@ -34,7 +46,8 @@ export function buildFish(species: FishSpecies, level: FishLevel): THREE.BufferG
   const same = (p: Point, q: Point) => p[0] === q[0] && p[1] === q[1] && p[2] === q[2];
   // Shade runs from belly to back over the middle of the body's height. Triangles collapsed at a tip are dropped.
   const tri = (...points: [Point, Point, Point]) => {
-    if (same(points[0], points[1]) || same(points[1], points[2]) || same(points[0], points[2])) return;
+    if (same(points[0], points[1]) || same(points[1], points[2]) || same(points[0], points[2]))
+      return;
     for (const p of points) {
       position.push(p[0], p[1], p[2]);
       c.lerpColors(belly, back, THREE.MathUtils.smoothstep(p[1], -0.04, 0.04));
@@ -53,9 +66,15 @@ export function buildFish(species: FishSpecies, level: FishLevel): THREE.BufferG
       const t = i / (a + 1);
       const angle = (s / b) * Math.PI * 2;
       const r = radius(t);
-      return [0.5 - 0.8 * t, (Math.cos(angle) * r * species.height) / 2, (Math.sin(angle) * r * species.width) / 2];
+      return [
+        0.5 - 0.8 * t,
+        (Math.cos(angle) * r * species.height) / 2,
+        (Math.sin(angle) * r * species.width) / 2,
+      ];
     };
-    for (let i = 0; i <= a; i++) for (let s = 0; s < b; s++) quad(ring(i, s), ring(i, s + 1), ring(i + 1, s), ring(i + 1, s + 1));
+    for (let i = 0; i <= a; i++)
+      for (let s = 0; s < b; s++)
+        quad(ring(i, s), ring(i, s + 1), ring(i + 1, s), ring(i + 1, s + 1));
     // Forked tail fin, and a dorsal fin above the widest point on the finer levels.
     const h = species.height;
     tri([-0.27, 0, 0], [-0.5, 0.6 * h, 0], [-0.4, 0, 0]);
@@ -72,8 +91,20 @@ export function buildFish(species: FishSpecies, level: FishLevel): THREE.BufferG
       for (let i = 0; i < a; i++) {
         for (let j = 0; j < b; j++) {
           const [u0, u1, v0, v1] = [i / a, (i + 1) / a, (2 * j) / b - 1, (2 * (j + 1)) / b - 1];
-          if (side > 0) quad(point(u0, v0, side), point(u0, v1, side), point(u1, v0, side), point(u1, v1, side));
-          else quad(point(u0, v1, side), point(u0, v0, side), point(u1, v1, side), point(u1, v0, side));
+          if (side > 0)
+            quad(
+              point(u0, v0, side),
+              point(u0, v1, side),
+              point(u1, v0, side),
+              point(u1, v1, side),
+            );
+          else
+            quad(
+              point(u0, v1, side),
+              point(u0, v0, side),
+              point(u1, v1, side),
+              point(u1, v0, side),
+            );
         }
       }
     }
@@ -83,9 +114,15 @@ export function buildFish(species: FishSpecies, level: FishLevel): THREE.BufferG
     const bell = (row: number, s: number): Point => {
       const phi = (row / a) * Math.PI * 0.5;
       const angle = (s / b) * Math.PI * 2;
-      return [Math.sin(phi) * Math.cos(angle) * 0.5, Math.cos(phi) * species.height, Math.sin(phi) * Math.sin(angle) * 0.5];
+      return [
+        Math.sin(phi) * Math.cos(angle) * 0.5,
+        Math.cos(phi) * species.height,
+        Math.sin(phi) * Math.sin(angle) * 0.5,
+      ];
     };
-    for (let row = 0; row < a; row++) for (let s = 0; s < b; s++) quad(bell(row, s), bell(row, s + 1), bell(row + 1, s), bell(row + 1, s + 1));
+    for (let row = 0; row < a; row++)
+      for (let s = 0; s < b; s++)
+        quad(bell(row, s), bell(row, s + 1), bell(row + 1, s), bell(row + 1, s + 1));
     for (let k = 0; k < b / 2; k++) {
       const angle = (k / (b / 2)) * Math.PI * 2;
       const [x, z] = [Math.cos(angle) * 0.3, Math.sin(angle) * 0.3];
@@ -123,14 +160,26 @@ const SWIM: Record<FishShape, string> = {
 };
 
 /** Shader additions: the swim from an instanced phase and rate (`aSwim`), and a glow added after the depth absorption. */
-export function patchFishShader(shader: THREE.WebGLProgramParametersWithUniforms, species: FishSpecies, time: THREE.IUniform<number>): void {
+export function patchFishShader(
+  shader: THREE.WebGLProgramParametersWithUniforms,
+  species: FishSpecies,
+  time: THREE.IUniform<number>,
+): void {
   shader.uniforms['uTime'] = time;
   shader.uniforms['uBeat'] = { value: species.beat };
   shader.uniforms['uSway'] = { value: species.sway };
-  shader.uniforms['uGlow'] = { value: new THREE.Color(species.glowColor).multiplyScalar(species.glow) };
+  shader.uniforms['uGlow'] = {
+    value: new THREE.Color(species.glowColor).multiplyScalar(species.glow),
+  };
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute vec2 aSwim;\nuniform float uTime;\nuniform float uBeat;\nuniform float uSway;')
-    .replace('#include <begin_vertex>', `#include <begin_vertex>\nfloat swimW = 6.2831853 * uBeat * aSwim.y * uTime + aSwim.x;${SWIM[species.shape]}`);
+    .replace(
+      '#include <common>',
+      '#include <common>\nattribute vec2 aSwim;\nuniform float uTime;\nuniform float uBeat;\nuniform float uSway;',
+    )
+    .replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\nfloat swimW = 6.2831853 * uBeat * aSwim.y * uTime + aSwim.x;${SWIM[species.shape]}`,
+    );
   absorb(shader);
   shader.fragmentShader = shader.fragmentShader
     .replace('#include <common>', '#include <common>\nuniform vec3 uGlow;')
@@ -138,7 +187,12 @@ export function patchFishShader(shader: THREE.WebGLProgramParametersWithUniforms
 }
 
 /** An instanced school of one species at one level; each slot gets a seeded swim phase and a rate near 1. */
-export function createFishMesh(species: FishSpecies, level: FishLevel, capacity: number, time: THREE.IUniform<number>): THREE.InstancedMesh {
+export function createFishMesh(
+  species: FishSpecies,
+  level: FishLevel,
+  capacity: number,
+  time: THREE.IUniform<number>,
+): THREE.InstancedMesh {
   const geometry = buildFish(species, level);
   const swim = new Float32Array(capacity * 2);
   for (let i = 0; i < capacity; i++) {
@@ -147,7 +201,9 @@ export function createFishMesh(species: FishSpecies, level: FishLevel, capacity:
   }
   geometry.setAttribute('aSwim', new THREE.InstancedBufferAttribute(swim, 2));
   const material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  material.onBeforeCompile = (shader) => { patchFishShader(shader, species, time); };
+  material.onBeforeCompile = (shader) => {
+    patchFishShader(shader, species, time);
+  };
   material.customProgramCacheKey = () => `fish-${species.shape}`;
   const mesh = new THREE.InstancedMesh(geometry, material, capacity);
   mesh.name = `fish-${species.name}-${String(level)}`;
@@ -155,7 +211,10 @@ export function createFishMesh(species: FishSpecies, level: FishLevel, capacity:
 }
 
 /** Review only: a small school of every species, side by side in two rows, held broadside 14 m ahead of the camera. */
-export function createFishShowcase(time: THREE.IUniform<number>, layer: number): { group: THREE.Group; follow: (camera: THREE.Camera) => void; dispose: () => void } {
+export function createFishShowcase(
+  time: THREE.IUniform<number>,
+  layer: number,
+): { group: THREE.Group; follow: (camera: THREE.Camera) => void; dispose: () => void } {
   const group = new THREE.Group();
   group.name = 'fish-showcase';
   const matrix = new THREE.Matrix4();
@@ -169,7 +228,10 @@ export function createFishShowcase(time: THREE.IUniform<number>, layer: number):
       const r = (n: number) => hash(0x4653, i, k, n) / 0x100000000 - 0.5;
       euler.set(0, r(4) * 0.4, r(5) * 0.2);
       const at = new THREE.Vector3(r(1) * cell, r(2) * cell * 0.4, r(3) * cell * 0.5);
-      mesh.setMatrixAt(k, matrix.compose(at, quat.setFromEuler(euler), new THREE.Vector3().setScalar(species.length)));
+      mesh.setMatrixAt(
+        k,
+        matrix.compose(at, quat.setFromEuler(euler), new THREE.Vector3().setScalar(species.length)),
+      );
     }
     mesh.position.set(((i % 4) - 1.5) * 4.5, i < 4 ? 2 : -2, 0);
     mesh.frustumCulled = false;

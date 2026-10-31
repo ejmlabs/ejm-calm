@@ -4,7 +4,13 @@ import { item } from './item.js';
 import { drawAsAuthored } from './tone.js';
 
 /** Where a wake is made: world metres, heading as the whale's (forward = (−cos h, sin h)), height of the body and speed in m/s. */
-export interface WakeSource { x: number; y: number; z: number; heading: number; speed: number }
+export interface WakeSource {
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  speed: number;
+}
 
 export interface WakeOptions {
   /** Points of the trail, one per `interval` seconds. */
@@ -50,7 +56,12 @@ const ACROSS_ALPHA = [0, 0.4, 1, 0.4, 0] as const;
 const COLUMNS = ACROSS.length;
 
 /** Strength of the wake of a body: none when slow or under water, full when fast and at the surface. */
-export function wakeStrength(speed: number, y: number, speeds: readonly [number, number] = [3, 14], depths: readonly [number, number] = [-2.6, -0.9]): number {
+export function wakeStrength(
+  speed: number,
+  y: number,
+  speeds: readonly [number, number] = [3, 14],
+  depths: readonly [number, number] = [-2.6, -0.9],
+): number {
   return smoothstep(speeds[0], speeds[1], speed) * smoothstep(depths[0], depths[1], y);
 }
 
@@ -93,8 +104,14 @@ export function createWake(options: WakeOptions = {}): Wake {
   const bowBase = positions.subarray(trailVerts * 3);
   const bowColors = colors.subarray(trailVerts * 4);
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 4).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute(
+    'position',
+    new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage),
+  );
+  geometry.setAttribute(
+    'color',
+    new THREE.BufferAttribute(colors, 4).setUsage(THREE.DynamicDrawUsage),
+  );
   const trailIndex: number[] = [];
   for (let i = 0; i + 1 < count; i++) {
     for (let c = 0; c + 1 < COLUMNS; c++) {
@@ -114,15 +131,17 @@ export function createWake(options: WakeOptions = {}): Wake {
   }
   geometry.setIndex(trailIndex);
 
-  const material = drawAsAuthored(new THREE.MeshBasicMaterial({
-    color: COLOR,
-    vertexColors: true,
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-    // White water stays white, as the whale's own spray does: authored as it should look on screen.
-    fog: false,
-  }));
+  const material = drawAsAuthored(
+    new THREE.MeshBasicMaterial({
+      color: COLOR,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      // White water stays white, as the whale's own spray does: authored as it should look on screen.
+      fog: false,
+    }),
+  );
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.renderOrder = 2;
@@ -132,7 +151,8 @@ export function createWake(options: WakeOptions = {}): Wake {
   group.add(mesh);
 
   /** Opacity of a point of this age and strength. */
-  const fade = (age: number, s: number): number => PEAK * s * (1 - smoothstep(0, LIFE, age)) ** 1.5 * smoothstep(0, 0.4, age);
+  const fade = (age: number, s: number): number =>
+    PEAK * s * (1 - smoothstep(0, LIFE, age)) ** 1.5 * smoothstep(0, 0.4, age);
 
   function writeTrail(source: WakeSource): void {
     // The mesh sits on the source, so vertices are small offsets.
@@ -143,7 +163,9 @@ export function createWake(options: WakeOptions = {}): Wake {
       const age = pa[i] ?? 0;
       // Churned water is patchy: each point is a little stronger or weaker than its neighbours.
       // Broken foam: patches along the trail, and ragged across it.
-      const a = fade(age, ps[i] ?? 0) * (0.3 + 0.7 * Math.abs(Math.sin((pn[i] ?? 0) * 0.8) * Math.cos((pn[i] ?? 0) * 0.31 + 1)));
+      const a =
+        fade(age, ps[i] ?? 0) *
+        (0.3 + 0.7 * Math.abs(Math.sin((pn[i] ?? 0) * 0.8) * Math.cos((pn[i] ?? 0) * 0.31 + 1)));
       const half = width + spread * age;
       // Across the heading: the whale's right is (−fz, fx) with forward (−cos h, sin h).
       const fx = -Math.cos(ph[i] ?? 0);
@@ -160,7 +182,8 @@ export function createWake(options: WakeOptions = {}): Wake {
         trailColors[q] = 1;
         trailColors[q + 1] = 1;
         trailColors[q + 2] = 1;
-        trailColors[q + 3] = a * item(ACROSS_ALPHA, c) * (0.55 + 0.45 * Math.sin((pn[i] ?? 0) * 2.3 + c * 1.7));
+        trailColors[q + 3] =
+          a * item(ACROSS_ALPHA, c) * (0.55 + 0.45 * Math.sin((pn[i] ?? 0) * 2.3 + c * 1.7));
       }
       written++;
     }
@@ -189,7 +212,10 @@ export function createWake(options: WakeOptions = {}): Wake {
           // Right of the heading is (−fz, fx).
           bowBase[o + edge * 3] = fx * bow - fx * back + -fz * w;
           bowBase[o + edge * 3 + 2] = fz * bow - fz * back + fx * w;
-          bowBase[o + edge * 3 + 1] = surface(source.x + (bowBase[o + edge * 3] ?? 0), source.z + (bowBase[o + edge * 3 + 2] ?? 0));
+          bowBase[o + edge * 3 + 1] = surface(
+            source.x + (bowBase[o + edge * 3] ?? 0),
+            source.z + (bowBase[o + edge * 3 + 2] ?? 0),
+          );
         }
         const a = PEAK * 1.3 * s * (1 - u) ** 1.2;
         const c = (arm * ARM + i) * 8;

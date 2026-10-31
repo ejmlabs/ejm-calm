@@ -38,7 +38,10 @@ import {
  * nothing runs while it is off or the page is hidden.
  */
 
-export interface AudioSettings { enabled: boolean; volume: number }
+export interface AudioSettings {
+  enabled: boolean;
+  volume: number;
+}
 
 export interface AudioInput {
   /** The listener rides on this camera (render coordinates). */
@@ -55,17 +58,50 @@ export interface AudioInput {
 }
 
 const SOUNDS = {
-  ocean: [new URL('../assets/audio/ocean.ogg', import.meta.url).href, new URL('../assets/audio/ocean.m4a', import.meta.url).href],
-  surf: [new URL('../assets/audio/surf.ogg', import.meta.url).href, new URL('../assets/audio/surf.m4a', import.meta.url).href],
-  wind: [new URL('../assets/audio/wind.ogg', import.meta.url).href, new URL('../assets/audio/wind.m4a', import.meta.url).href],
-  gulls: [new URL('../assets/audio/gulls.ogg', import.meta.url).href, new URL('../assets/audio/gulls.m4a', import.meta.url).href],
-  engine: [new URL('../assets/audio/ship-engine.ogg', import.meta.url).href, new URL('../assets/audio/ship-engine.m4a', import.meta.url).href],
-  wash: [new URL('../assets/audio/ship-wash.ogg', import.meta.url).href, new URL('../assets/audio/ship-wash.m4a', import.meta.url).href],
-  horn: [new URL('../assets/audio/ship-horn.ogg', import.meta.url).href, new URL('../assets/audio/ship-horn.m4a', import.meta.url).href],
-  blow: [new URL('../assets/audio/whale-blow.ogg', import.meta.url).href, new URL('../assets/audio/whale-blow.m4a', import.meta.url).href],
-  splash: [new URL('../assets/audio/splash.ogg', import.meta.url).href, new URL('../assets/audio/splash.m4a', import.meta.url).href],
-  song: [new URL('../assets/audio/whale-song.ogg', import.meta.url).href, new URL('../assets/audio/whale-song.m4a', import.meta.url).href],
-  underwater: [new URL('../assets/audio/underwater.ogg', import.meta.url).href, new URL('../assets/audio/underwater.m4a', import.meta.url).href],
+  ocean: [
+    new URL('../assets/audio/ocean.ogg', import.meta.url).href,
+    new URL('../assets/audio/ocean.m4a', import.meta.url).href,
+  ],
+  surf: [
+    new URL('../assets/audio/surf.ogg', import.meta.url).href,
+    new URL('../assets/audio/surf.m4a', import.meta.url).href,
+  ],
+  wind: [
+    new URL('../assets/audio/wind.ogg', import.meta.url).href,
+    new URL('../assets/audio/wind.m4a', import.meta.url).href,
+  ],
+  gulls: [
+    new URL('../assets/audio/gulls.ogg', import.meta.url).href,
+    new URL('../assets/audio/gulls.m4a', import.meta.url).href,
+  ],
+  engine: [
+    new URL('../assets/audio/ship-engine.ogg', import.meta.url).href,
+    new URL('../assets/audio/ship-engine.m4a', import.meta.url).href,
+  ],
+  wash: [
+    new URL('../assets/audio/ship-wash.ogg', import.meta.url).href,
+    new URL('../assets/audio/ship-wash.m4a', import.meta.url).href,
+  ],
+  horn: [
+    new URL('../assets/audio/ship-horn.ogg', import.meta.url).href,
+    new URL('../assets/audio/ship-horn.m4a', import.meta.url).href,
+  ],
+  blow: [
+    new URL('../assets/audio/whale-blow.ogg', import.meta.url).href,
+    new URL('../assets/audio/whale-blow.m4a', import.meta.url).href,
+  ],
+  splash: [
+    new URL('../assets/audio/splash.ogg', import.meta.url).href,
+    new URL('../assets/audio/splash.m4a', import.meta.url).href,
+  ],
+  song: [
+    new URL('../assets/audio/whale-song.ogg', import.meta.url).href,
+    new URL('../assets/audio/whale-song.m4a', import.meta.url).href,
+  ],
+  underwater: [
+    new URL('../assets/audio/underwater.ogg', import.meta.url).href,
+    new URL('../assets/audio/underwater.m4a', import.meta.url).href,
+  ],
 } as const;
 
 type SoundName = keyof typeof SOUNDS;
@@ -385,20 +421,38 @@ class SoundEngine {
     const z = w.z - input.origin.z;
     const near = 45 / (45 + Math.hypot(x - this.listenerPos.x, z - this.listenerPos.z));
     const r = this.rng;
-    if (events & WHALE_SPOUT) this.shot(this.blow, x, 1.6, z, 0, 0, near * lerp(0.8, 1, r()), lerp(0.9, 1.06, r()), now);
-    if (events & WHALE_BREACH_EXIT) this.splash(x, z, 0, near * lerp(0.6, 0.75, r()), lerp(0.68, 0.78, r()), now);
-    if (events & WHALE_BREACH_SPLASH) this.splash(x, z, 1, near * lerp(0.9, 1, r()), lerp(0.58, 0.68, r()), now);
-    if (events & WHALE_DIVE) this.splash(x, z, 0, near * lerp(0.2, 0.3, r()), lerp(0.85, 0.95, r()), now);
-    if (events & WHALE_SURFACE) this.splash(x, z, 0, near * lerp(0.1, 0.16, r()), lerp(1.05, 1.2, r()), now);
+    if (events & WHALE_SPOUT)
+      this.shot(this.blow, x, 1.6, z, 0, 0, near * lerp(0.8, 1, r()), lerp(0.9, 1.06, r()), now);
+    if (events & WHALE_BREACH_EXIT)
+      this.splash(x, z, 0, near * lerp(0.6, 0.75, r()), lerp(0.68, 0.78, r()), now);
+    if (events & WHALE_BREACH_SPLASH)
+      this.splash(x, z, 1, near * lerp(0.9, 1, r()), lerp(0.58, 0.68, r()), now);
+    if (events & WHALE_DIVE)
+      this.splash(x, z, 0, near * lerp(0.2, 0.3, r()), lerp(0.85, 0.95, r()), now);
+    if (events & WHALE_SURFACE)
+      this.splash(x, z, 0, near * lerp(0.1, 0.16, r()), lerp(1.05, 1.2, r()), now);
   }
 
   private splash(x: number, z: number, hit: number, gain: number, rate: number, now: number): void {
-    const voice = item(this.splashes, 0).isPlaying && !item(this.splashes, 1).isPlaying ? item(this.splashes, 1) : item(this.splashes, 0);
+    const voice =
+      item(this.splashes, 0).isPlaying && !item(this.splashes, 1).isPlaying
+        ? item(this.splashes, 1)
+        : item(this.splashes, 0);
     const [offset, duration] = item(SPLASH_HITS, hit);
     this.shot(voice, x, 0.3, z, offset, duration, gain, rate, now);
   }
 
-  private shot(voice: THREE.PositionalAudio, x: number, y: number, z: number, offset: number, duration: number, gain: number, rate: number, now: number): void {
+  private shot(
+    voice: THREE.PositionalAudio,
+    x: number,
+    y: number,
+    z: number,
+    offset: number,
+    duration: number,
+    gain: number,
+    rate: number,
+    now: number,
+  ): void {
     if (voice.isPlaying) voice.stop();
     voice.position.set(x, y, z);
     voice.offset = offset;
@@ -451,7 +505,12 @@ class SoundEngine {
     this.gust = damp(this.gust, this.gustTarget, 0.4, step);
     const height = Math.max(0, this.listenerPos.y);
     const weather = input.weather;
-    setLevel(this.wind.gain.gain, windGain(height) * this.gust * 0.6 * weatherWindGain(weather.wind), now, 0.6);
+    setLevel(
+      this.wind.gain.gain,
+      windGain(height) * this.gust * 0.6 * weatherWindGain(weather.wind),
+      now,
+      0.6,
+    );
     setLevel(this.ocean.gain.gain, oceanGain(this.clearance) * seaGain(weather.sea), now, 0.6);
     setLevel(this.rain.gain.gain, rainGain(weather.rain), now, 1.5);
 
@@ -484,7 +543,10 @@ class SoundEngine {
     }
     this.gullTimer = lerp(10, 2.5, g) * lerp(0.6, 1.4, r());
     const voice = item(this.gulls, 0).isPlaying ? item(this.gulls, 1) : item(this.gulls, 0);
-    const [offset, duration] = item(GULL_CALLS, Math.floor(r() * GULL_CALLS.length) % GULL_CALLS.length);
+    const [offset, duration] = item(
+      GULL_CALLS,
+      Math.floor(r() * GULL_CALLS.length) % GULL_CALLS.length,
+    );
     const along = (r() - 0.5) * 120;
     this.shot(
       voice,
@@ -515,14 +577,23 @@ class SoundEngine {
       p.x = this.tmp.x;
       p.z = this.tmp.z;
     }
-    const count = nearestShips(this.points, lx, lz, SHIP_SLOTS, SHIP_RANGE, this.nearest, this.nearestDist);
+    const count = nearestShips(
+      this.points,
+      lx,
+      lz,
+      SHIP_SLOTS,
+      SHIP_RANGE,
+      this.nearest,
+      this.nearestDist,
+    );
 
     // Release slots whose ship left the selection; they fade out where they are.
     for (let s = 0; s < this.slots.length; s++) {
       const slot = item(this.slots, s);
       if (slot.id < 0) continue;
       let kept = false;
-      for (let k = 0; k < count; k++) if (item(this.points, this.nearest[k] ?? 0).id === slot.id) kept = true;
+      for (let k = 0; k < count; k++)
+        if (item(this.points, this.nearest[k] ?? 0).id === slot.id) kept = true;
       if (!kept) slot.id = -1;
     }
     // Give newly selected ships a silent slot.
@@ -568,8 +639,16 @@ class SoundEngine {
         slot.wash.stop();
         continue;
       }
-      setLevel(slot.engine.gain.gain, (slot.id >= 0 ? engineGain(distance) : 0) * 0.85 * slot.level, now);
-      setLevel(slot.wash.gain.gain, (slot.id >= 0 ? washGain(distance) : 0) * 0.6 * slot.level, now);
+      setLevel(
+        slot.engine.gain.gain,
+        (slot.id >= 0 ? engineGain(distance) : 0) * 0.85 * slot.level,
+        now,
+      );
+      setLevel(
+        slot.wash.gain.gain,
+        (slot.id >= 0 ? washGain(distance) : 0) * 0.6 * slot.level,
+        now,
+      );
       slot.engine.updateMatrixWorld(true);
       slot.wash.updateMatrixWorld(true);
     }
@@ -583,7 +662,17 @@ class SoundEngine {
     this.hornTimer = 90 + this.rng() * 110;
     const p = item(this.points, this.nearest[0] ?? 0);
     const d = this.nearestDist[0] ?? 0;
-    this.shot(this.horn, p.x, 6, p.z, 0, 0, hornGain(d) * lerp(0.6, 0.85, this.rng()), lerp(0.94, 1.04, this.rng()), now);
+    this.shot(
+      this.horn,
+      p.x,
+      6,
+      p.z,
+      0,
+      0,
+      hornGain(d) * lerp(0.6, 0.85, this.rng()),
+      lerp(0.94, 1.04, this.rng()),
+      now,
+    );
   }
 
   dispose(): void {

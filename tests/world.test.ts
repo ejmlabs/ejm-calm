@@ -1,7 +1,20 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { chunkCoord, chunkKey, chunksAround, createChunkStreamer, parseChunkKey, cellDistance, SHIP_CELL } from '../src/chunks.js';
-import { createWorldOrigin, recenterDelta, RECENTER_RADIUS, ORIGIN_SNAP } from '../src/world-origin.js';
+import {
+  chunkCoord,
+  chunkKey,
+  chunksAround,
+  createChunkStreamer,
+  parseChunkKey,
+  cellDistance,
+  SHIP_CELL,
+} from '../src/chunks.js';
+import {
+  createWorldOrigin,
+  recenterDelta,
+  RECENTER_RADIUS,
+  ORIGIN_SNAP,
+} from '../src/world-origin.js';
 import { createLand, type Land } from '../src/land.js';
 import { layoutWorld } from '../src/terrain.js';
 import { createShipStream, shipSpecsForCell } from '../src/world-ships.js';
@@ -13,7 +26,12 @@ import { buildTile, tileSize } from '../src/world-tiles.js';
 import { makeNoise2D } from '../src/noise.js';
 import { createNavField } from '../src/world-nav.js';
 import { waterSignal, SURFACE_BAND } from '../src/seams.js';
-import { WHALE_ISLAND_MARGIN, createWhalePilot, shortestAngle, type WhaleCourse } from '../src/whale-course.js';
+import {
+  WHALE_ISLAND_MARGIN,
+  createWhalePilot,
+  shortestAngle,
+  type WhaleCourse,
+} from '../src/whale-course.js';
 import { detailFor } from '../src/quality.js';
 import { item, last } from '../src/item.js';
 
@@ -82,7 +100,10 @@ test('recenterDelta: nothing inside the radius, snapped moves outside, continuou
   assert.equal(recenterDelta(0, 0, RECENTER_RADIUS * 0.7, RECENTER_RADIUS * 0.7), null);
   const d = recenterDelta(0, 0, RECENTER_RADIUS + 30, -300);
   assert.ok(d);
-  assert.deepEqual(d, { dx: Math.round((RECENTER_RADIUS + 30) / ORIGIN_SNAP) * ORIGIN_SNAP, dz: Math.round(-300 / ORIGIN_SNAP) * ORIGIN_SNAP });
+  assert.deepEqual(d, {
+    dx: Math.round((RECENTER_RADIUS + 30) / ORIGIN_SNAP) * ORIGIN_SNAP,
+    dz: Math.round(-300 / ORIGIN_SNAP) * ORIGIN_SNAP,
+  });
   assert.equal(d.dx % ORIGIN_SNAP, 0);
   const origin = createWorldOrigin();
   const deltas: [number, number][] = [];
@@ -112,15 +133,23 @@ test('recenterDelta: nothing inside the radius, snapped moves outside, continuou
   assert.ok(deltas.length >= 25, `recentred ${String(deltas.length)} times`);
   // The spec: at most one recentre per 2 minutes at cruise.
   const gaps = when.slice(1).map((t, i) => t - (when[i] ?? 0));
-  assert.ok(Math.min(...gaps) >= 120, `shortest gap between recentres ${String(Math.min(...gaps))} s`);
+  assert.ok(
+    Math.min(...gaps) >= 120,
+    `shortest gap between recentres ${String(Math.min(...gaps))} s`,
+  );
 });
 
 /** The first coast along a ray from the start beyond `from` metres: sea, then land a kilometre on. */
-function coastAlong(land: { maskAt: (x: number, z: number) => number }, angle: number, from = 40000): [number, number] {
+function coastAlong(
+  land: { maskAt: (x: number, z: number) => number },
+  angle: number,
+  from = 40000,
+): [number, number] {
   const dx = Math.cos(angle);
   const dz = Math.sin(angle);
   for (let d = from; d < 1_500_000; d += 500) {
-    if (land.maskAt(dx * d, dz * d) < -0.3 && land.maskAt(dx * (d + 1000), dz * (d + 1000)) > 0.3) return [dx * (d + 500), dz * (d + 500)];
+    if (land.maskAt(dx * d, dz * d) < -0.3 && land.maskAt(dx * (d + 1000), dz * (d + 1000)) > 0.3)
+      return [dx * (d + 500), dz * (d + 500)];
   }
   throw new Error(`no coast along ${String(angle)}`);
 }
@@ -153,7 +182,8 @@ test('land is endless: finite everywhere, coasts and highlands far from the star
   for (let i = 0; i < 60; i++) {
     const x = ax - 3000 + i * 97;
     const c = land.clearance(x, az);
-    if (land.maskAt(x, az) > 0.05) assert.ok(c <= land.nav.cell, `land at ${String(x)} has clearance ${String(c)}`);
+    if (land.maskAt(x, az) > 0.05)
+      assert.ok(c <= land.nav.cell, `land at ${String(x)} has clearance ${String(c)}`);
     if (land.maskAt(x, az) < -0.05) {
       sea++;
       if (c > 0) shore++;
@@ -179,7 +209,10 @@ test('the opening is unchanged: an offset rebuild matches and the start grid agr
     const exact = g.distance[iz * g.size + ix] ?? 0;
     if (Math.abs(exact) >= land.nav.saturation) continue;
     const tiled = land.nav.distanceAt(g.min + ix * g.cell, g.min + iz * g.cell);
-    assert.ok(Math.abs(tiled - exact) < 1e-3, `texel ${String(ix)},${String(iz)}: ${String(tiled)} vs ${String(exact)}`);
+    assert.ok(
+      Math.abs(tiled - exact) < 1e-3,
+      `texel ${String(ix)},${String(iz)}: ${String(tiled)} vs ${String(exact)}`,
+    );
   }
 });
 
@@ -187,10 +220,16 @@ test('nav tiles are independent of visit order', () => {
   const land = createLand(11, { viewYaw: 0.4 });
   const a = createNavField(land.maskAt, { min: -1600, cell: 10 });
   const b = createNavField(land.maskAt, { min: -1600, cell: 10 });
-  const points = Array.from({ length: 30 }, (_, i) => [8000 + Math.sin(i) * 900, -6000 + Math.cos(i * 2.1) * 900] as const);
+  const points = Array.from(
+    { length: 30 },
+    (_, i) => [8000 + Math.sin(i) * 900, -6000 + Math.cos(i * 2.1) * 900] as const,
+  );
   const first = points.map(([x, z]) => a.distanceAt(x, z));
   b.prefetch(8000, -6000, 1200, Infinity);
-  const second = [...points].reverse().map(([x, z]) => b.distanceAt(x, z)).reverse();
+  const second = [...points]
+    .reverse()
+    .map(([x, z]) => b.distanceAt(x, z))
+    .reverse();
   assert.deepEqual(first, second);
 });
 
@@ -208,28 +247,48 @@ test('a nav prefetch call ends at its budget, not a slice past it', () => {
   for (let done = false; !done; calls++) {
     const before = clock;
     done = field.prefetch(8000, -6000, 700, budget);
-    assert.ok(clock - before <= budget, `a call spent ${(clock - before).toFixed(2)} ms of ${String(budget)} ms`);
+    assert.ok(
+      clock - before <= budget,
+      `a call spent ${(clock - before).toFixed(2)} ms of ${String(budget)} ms`,
+    );
     assert.ok(calls < 100000, 'prefetch finishes');
   }
   assert.ok(calls > 10, 'a small budget spreads the work over many calls');
 });
 
 test('only ships within a few hundred metres of the whale sway their sails', () => {
-  const ship = (id: number, x: number): ShipSpec => ({ id, x, z: 0, heading: 0.3, scale: 1, kind: 'sloop', seed: id });
+  const ship = (id: number, x: number): ShipSpec => ({
+    id,
+    x,
+    z: 0,
+    heading: 0.3,
+    scale: 1,
+    kind: 'sloop',
+    seed: id,
+  });
   const near = ship(1, 150);
   const far = ship(2, 900);
-  const stream = createShipStream({ seed: 1, maskAt: () => 1, startSpecs: [near, far], parent: new THREE.Group(), cap: 8, shoreReady: () => false });
+  const stream = createShipStream({
+    seed: 1,
+    maskAt: () => 1,
+    startSpecs: [near, far],
+    parent: new THREE.Group(),
+    cap: 8,
+    shoreReady: () => false,
+  });
   const open = { clearance: () => 1000, away: () => ({ x: 1, z: 0 }) };
   const sails = (spec: ShipSpec) => {
     const handle = stream.all().find((h) => h.spec.id === spec.id);
     assert.ok(handle, `ship ${String(spec.id)} is afloat`);
-    return (item(handle.group.children, 1) as THREE.Mesh).geometry.getAttribute('position').array.slice();
+    return (item(handle.group.children, 1) as THREE.Mesh).geometry
+      .getAttribute('position')
+      .array.slice();
   };
   stream.update(1 / 30, 1, 0, 0, open);
   const before = [near, far].map(sails);
   stream.update(1 / 30, 2.2, 0, 0, open);
-  assert.notDeepEqual(sails(near), item(before, 0), 'the near ship\'s cloth moves');
-  assert.deepEqual(sails(far), item(before, 1), 'the far ship\'s cloth is left alone');
+  assert.notDeepEqual(sails(near), item(before, 0), "the near ship's cloth moves");
+  assert.deepEqual(sails(far), item(before, 1), "the far ship's cloth is left alone");
   assert.equal(stream.stats().visible, 2, 'both ships are still drawn');
   stream.dispose();
 });
@@ -249,15 +308,19 @@ test('land tiles and ship cells are pure functions of seed and key', () => {
     return buildTile(land, patch, lod, cx, cz, 16);
   });
   const fresh = createLand(42, { viewYaw: land.viewYaw, offset: land.offset });
-  const twice = [...pick].reverse().map((key) => {
-    const { lod, cx, cz } = parseChunkKey(key);
-    return buildTile(fresh, makeNoise2D(42, 21), lod, cx, cz, 16);
-  }).reverse();
+  const twice = [...pick]
+    .reverse()
+    .map((key) => {
+      const { lod, cx, cz } = parseChunkKey(key);
+      return buildTile(fresh, makeNoise2D(42, 21), lod, cx, cz, 16);
+    })
+    .reverse();
   assert.deepEqual(once, twice);
 
   const specs = (seed: number) => {
     const out = [];
-    for (let cz = -6; cz <= 6; cz++) for (let cx = -6; cx <= 6; cx++) out.push(...shipSpecsForCell(seed, cx, cz, land.maskAt));
+    for (let cz = -6; cz <= 6; cz++)
+      for (let cx = -6; cx <= 6; cx++) out.push(...shipSpecsForCell(seed, cx, cz, land.maskAt));
     return out;
   };
   const ships = specs(42);
@@ -287,7 +350,13 @@ function journey(seed: number, dt: number, seconds: number, shore: Land) {
   // As the app starts it: heading for the way out of the start's sea.
   const heading = world.journey;
   const pilot = createWhalePilot(seed, world.whaleHome, heading);
-  const course: WhaleCourse = { x: world.whaleHome.x, z: world.whaleHome.z, heading, leg: heading, speed: CRUISE };
+  const course: WhaleCourse = {
+    x: world.whaleHome.x,
+    z: world.whaleHome.z,
+    heading,
+    leg: heading,
+    speed: CRUISE,
+  };
   const steps = Math.round(seconds / dt);
   const marks: number[] = [];
   let minClear = Infinity;
@@ -302,10 +371,14 @@ function journey(seed: number, dt: number, seconds: number, shore: Land) {
     const pz = course.z;
     pilot.step(course, dt, i * dt, shore);
     path += Math.hypot(course.x - px, course.z - pz);
-    assert.ok(Math.abs(shortestAngle(prev, course.heading)) <= pilot.params.turnRate * dt + 1e-8, `seed ${String(seed)} turn rate`);
+    assert.ok(
+      Math.abs(shortestAngle(prev, course.heading)) <= pilot.params.turnRate * dt + 1e-8,
+      `seed ${String(seed)} turn rate`,
+    );
     minClear = Math.min(minClear, shore.clearance(course.x, course.z));
     far = Math.max(far, Math.hypot(course.x - world.whaleHome.x, course.z - world.whaleHome.z));
-    if (i % Math.round(300 / dt) === 0) marks.push(Math.hypot(course.x - world.whaleHome.x, course.z - world.whaleHome.z));
+    if (i % Math.round(300 / dt) === 0)
+      marks.push(Math.hypot(course.x - world.whaleHome.x, course.z - world.whaleHome.z));
   }
   const net = Math.hypot(course.x - world.whaleHome.x, course.z - world.whaleHome.z);
   return { course, net, far, minClear, marks, path };
@@ -313,13 +386,23 @@ function journey(seed: number, dt: number, seconds: number, shore: Land) {
 
 // One test per seed: the ten together took 131 s on untouched main on a four-core machine, over the old 120 s limit
 // for all of them, and a seed that hangs now fails by name.
-test.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])('the whale cruises for 25 minutes, never beaching (seed %i)', (seed) => {
-  const land = layoutWorld(seed).land;
-  const run = journey(seed, 1 / 30, 1500, land);
-  assert.ok(run.net > 0.6 * run.path, `seed ${String(seed)} net ${run.net.toFixed(0)} m over ${run.path.toFixed(0)} m swum`);
-  assert.ok(run.far > 15000, `seed ${String(seed)} got ${run.far.toFixed(0)} m from the start`);
-  assert.ok(run.minClear >= WHALE_ISLAND_MARGIN - 1e-3, `seed ${String(seed)} came within ${run.minClear.toFixed(1)} m of land`);
-}, 120000);
+test.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])(
+  'the whale cruises for 25 minutes, never beaching (seed %i)',
+  (seed) => {
+    const land = layoutWorld(seed).land;
+    const run = journey(seed, 1 / 30, 1500, land);
+    assert.ok(
+      run.net > 0.6 * run.path,
+      `seed ${String(seed)} net ${run.net.toFixed(0)} m over ${run.path.toFixed(0)} m swum`,
+    );
+    assert.ok(run.far > 15000, `seed ${String(seed)} got ${run.far.toFixed(0)} m from the start`);
+    assert.ok(
+      run.minClear >= WHALE_ISLAND_MARGIN - 1e-3,
+      `seed ${String(seed)} came within ${run.minClear.toFixed(1)} m of land`,
+    );
+  },
+  120000,
+);
 
 test('the journey is deterministic and close across 30 and 60 fps', () => {
   const land = layoutWorld(3).land;
@@ -343,7 +426,11 @@ const FAST = 28;
 const streamLand = layoutWorld(42);
 
 function landStreamAt(x: number, z: number) {
-  const stream = createLandStream(streamLand.land, { segments: 48, sunDirection: new THREE.Vector3(0.3, 0.6, 0.2), hazeColor: new THREE.Color(0xc8d8e0) });
+  const stream = createLandStream(streamLand.land, {
+    segments: 48,
+    sunDirection: new THREE.Vector3(0.3, 0.6, 0.2),
+    hazeColor: new THREE.Color(0xc8d8e0),
+  });
   stream.prime(x, z);
   return stream;
 }
@@ -376,7 +463,9 @@ test('land tiles ahead are built before the view needs them at 28 m/s', () => {
     stream.update(p.x, p.z, 1 / FPS, p.vx, p.vz);
     // What the view at the camera itself (no lead) asks for, fine tiles only.
     const next = new Set<string>();
-    const now = new Set(selectTiles(p.x, p.z, split, next).filter((key) => parseChunkKey(key).lod <= 1));
+    const now = new Set(
+      selectTiles(p.x, p.z, split, next).filter((key) => parseChunkKey(key).lod <= 1),
+    );
     split = next;
     for (const key of now) {
       const c = parseChunkKey(key);
@@ -389,7 +478,11 @@ test('land tiles ahead are built before the view needs them at 28 m/s', () => {
     needed = now;
   });
   assert.ok(fresh > 20, `${String(fresh)} tiles came into view`);
-  assert.equal(late, 0, `${String(late)}/${String(fresh)} fine tiles were not solid when the view reached them`);
+  assert.equal(
+    late,
+    0,
+    `${String(late)}/${String(fresh)} fine tiles were not solid when the view reached them`,
+  );
   assert.ok(stream.stats().ready > 0, 'tiles further ahead are held ready');
   stream.dispose();
 });
@@ -402,7 +495,10 @@ test('land arrivals trickle: few per frame and never on a fixed beat', () => {
   path.forEach((p, i) => {
     stream.update(p.x, p.z, 1 / FPS, p.vx, p.vz);
     const after = stream.stats();
-    assert.ok(after.tiles - before.tiles <= 2, `frame ${String(i)} placed ${String(after.tiles - before.tiles)} tiles`);
+    assert.ok(
+      after.tiles - before.tiles <= 2,
+      `frame ${String(i)} placed ${String(after.tiles - before.tiles)} tiles`,
+    );
     if (after.completed > before.completed) done.push(i);
     before = after;
   });
@@ -410,7 +506,10 @@ test('land arrivals trickle: few per frame and never on a fixed beat', () => {
   assert.ok(gaps.length > 30, `${String(gaps.length)} completions`);
   const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
   const sd = Math.sqrt(gaps.reduce((a, b) => a + (b - mean) ** 2, 0) / gaps.length);
-  assert.ok(new Set(gaps).size >= 5 && sd / mean > 0.3, `gaps not periodic (cv ${(sd / mean).toFixed(2)})`);
+  assert.ok(
+    new Set(gaps).size >= 5 && sd / mean > 0.3,
+    `gaps not periodic (cv ${(sd / mean).toFixed(2)})`,
+  );
   stream.dispose();
 });
 
@@ -447,14 +546,23 @@ test('streamed tiles do not depend on speed or route', () => {
   const fast = landStreamAt(streamLand.whaleHome.x, streamLand.whaleHome.z);
   for (let i = 0; i <= 250 * FPS; i++) {
     const t = Math.min(1, i / (250 * FPS));
-    fast.update(streamLand.whaleHome.x + 2400 * t, streamLand.whaleHome.z + 1800 * t, 1 / FPS, 9.6, 7.2);
+    fast.update(
+      streamLand.whaleHome.x + 2400 * t,
+      streamLand.whaleHome.z + 1800 * t,
+      1 / FPS,
+      9.6,
+      7.2,
+    );
   }
   const direct = landStreamAt(end.x, end.z);
   const a = settle(fast);
   const b = settle(direct);
   // Split hysteresis may leave a different mix of levels; every tile both hold is identical.
   const shared = [...b.keys()].filter((key) => a.has(key));
-  assert.ok(shared.length > 20 && shared.length > b.size * 0.7, `${String(shared.length)}/${String(b.size)} shared`);
+  assert.ok(
+    shared.length > 20 && shared.length > b.size * 0.7,
+    `${String(shared.length)}/${String(b.size)} shared`,
+  );
   for (const key of shared) assert.equal(a.get(key), b.get(key), key);
   fast.dispose();
   direct.dispose();
@@ -489,7 +597,9 @@ test('a fast world update stays within its frame budget and keeps ships and navi
   assert.ok(p95 < 4, `p95 streaming ${p95.toFixed(2)} ms`);
   const stats = world.stats();
   assert.equal(stats['coverageMisses'], 0);
-  assert.ok(Math.abs((stats['whaleSpeed'] as number) - Math.hypot(last(path).vx, last(path).vz)) < 1);
+  assert.ok(
+    Math.abs((stats['whaleSpeed'] as number) - Math.hypot(last(path).vx, last(path).vz)) < 1,
+  );
   assert.ok(navAhead > (path.length - 10 * FPS) * 0.95, 'navigation is built 30 s ahead');
   assert.ok((stats['shipCells'] as number) > 4);
   world.dispose();

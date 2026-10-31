@@ -7,7 +7,12 @@ import { CSP, CSP_HEADER, ICON_FILES } from '../tools/serve.js';
 
 const root = resolve(import.meta.dirname, '..');
 const ALLOWED_TOP = new Set([
-  'LICENSE', 'THIRD_PARTY_NOTICES', '_headers', 'index.html', '404.html', 'assets',
+  'LICENSE',
+  'THIRD_PARTY_NOTICES',
+  '_headers',
+  'index.html',
+  '404.html',
+  'assets',
   ...ICON_FILES,
 ]);
 
@@ -15,7 +20,7 @@ async function walk(directory: string): Promise<string[]> {
   const result: string[] = [];
   for (const entry of await readdir(resolve(root, directory), { withFileTypes: true })) {
     const path = `${directory}/${entry.name}`;
-    if (entry.isDirectory()) result.push(...await walk(path));
+    if (entry.isDirectory()) result.push(...(await walk(path)));
     else result.push(path);
   }
   return result;
@@ -33,8 +38,15 @@ test('build output holds only the Vite public tree and host headers', async () =
   execFileSync('npx', ['vite', 'build'], { cwd: root, stdio: 'ignore' });
   const headers = await readFile(resolve(root, 'dist/_headers'), 'utf8');
   assert.ok(headers.includes(`Content-Security-Policy: ${CSP_HEADER}`));
-  assert.match(headers, /\/assets\/\*[\s\S]*Cache-Control:\s*public,\s*max-age=31536000,\s*immutable/);
-  for (const name of ['X-Content-Type-Options: nosniff', 'X-Frame-Options: DENY', 'Referrer-Policy: no-referrer']) {
+  assert.match(
+    headers,
+    /\/assets\/\*[\s\S]*Cache-Control:\s*public,\s*max-age=31536000,\s*immutable/,
+  );
+  for (const name of [
+    'X-Content-Type-Options: nosniff',
+    'X-Frame-Options: DENY',
+    'Referrer-Policy: no-referrer',
+  ]) {
     assert.ok(headers.includes(name));
   }
 
@@ -47,7 +59,11 @@ test('build output holds only the Vite public tree and host headers', async () =
   }
 
   const files = await walk('dist');
-  assert.equal(files.some((path) => path.endsWith('.ts') || path.endsWith('.map')), false, 'dist must not ship TypeScript or source maps');
+  assert.equal(
+    files.some((path) => path.endsWith('.ts') || path.endsWith('.map')),
+    false,
+    'dist must not ship TypeScript or source maps',
+  );
 
   const html = await readFile(resolve(root, 'dist/index.html'), 'utf8');
   assert.equal(/<script(?![^>]*\bsrc=)[^>]*>/i.test(html), false, 'no inline scripts');

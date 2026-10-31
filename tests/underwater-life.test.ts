@@ -2,7 +2,13 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { layoutWorld } from '../src/terrain.js';
 import { createSeafloor } from '../src/seafloor.js';
-import { LIFE_CELL, createHabitat, lifeInCell, sceneryFade, schoolInCell } from '../src/underwater-life.js';
+import {
+  LIFE_CELL,
+  createHabitat,
+  lifeInCell,
+  sceneryFade,
+  schoolInCell,
+} from '../src/underwater-life.js';
 
 const land = layoutWorld(42, 140).land;
 const floor = createSeafloor(42, land);
@@ -14,7 +20,10 @@ for (let cz = -6; cz <= 6; cz += 2) for (let cx = -6; cx <= 6; cx += 2) cells.pu
 
 test('life per cell is deterministic and independent of visit order', () => {
   const forward = cells.map(([cx, cz]) => lifeInCell(42, cx, cz, floor.heightAt, habitat, 30));
-  const backward = [...cells].reverse().map(([cx, cz]) => lifeInCell(42, cx, cz, floor.heightAt, habitat, 30)).reverse();
+  const backward = [...cells]
+    .reverse()
+    .map(([cx, cz]) => lifeInCell(42, cx, cz, floor.heightAt, habitat, 30))
+    .reverse();
   assert.deepEqual(forward, backward);
   const all = forward.flat();
   const kinds = new Set(all.map((i) => i.kind));

@@ -84,7 +84,10 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
   }
   const rainGeometry = new THREE.BufferGeometry();
   // Positions are computed in the shader; this attribute only carries the seed (three needs a `position`).
-  rainGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(most.rain * 2 * 3), 3));
+  rainGeometry.setAttribute(
+    'position',
+    new THREE.BufferAttribute(new Float32Array(most.rain * 2 * 3), 3),
+  );
   rainGeometry.setAttribute('drop', new THREE.BufferAttribute(rainSeeds, 4));
   rainGeometry.setAttribute('tail', new THREE.BufferAttribute(rainTail, 1));
   const rainUniforms = {
@@ -138,7 +141,10 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
   const spraySeeds = new Float32Array(most.spray * 4);
   for (let i = 0; i < spraySeeds.length; i++) spraySeeds[i] = rng();
   const sprayGeometry = new THREE.BufferGeometry();
-  sprayGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(most.spray * 3), 3));
+  sprayGeometry.setAttribute(
+    'position',
+    new THREE.BufferAttribute(new Float32Array(most.spray * 3), 3),
+  );
   sprayGeometry.setAttribute('puff', new THREE.BufferAttribute(spraySeeds, 4));
   const sprayUniforms = {
     uTime: { value: 0 },
@@ -238,7 +244,8 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
         sprayUniforms.uWind.value.set(dx * (0.4 + input.wind), dz * (0.4 + input.wind));
         sprayUniforms.uSea.value = input.sea;
         sprayUniforms.uLight.value = input.light;
-        sprayUniforms.uScale.value = input.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+        sprayUniforms.uScale.value =
+          input.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
       }
       drawn = (rain.visible ? 1 : 0) + (spray.visible ? 1 : 0);
     },

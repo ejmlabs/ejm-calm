@@ -104,7 +104,10 @@ const FLUKE_LAG = 4.2;
 /** Flipper tips lag their own sweep by this much of the stroke. */
 const FLIPPER_LAG = 0.9;
 /** Flipper trunk bone, tip bone and side. */
-const FLIPPERS = [[FLIPPER_L, FLIPPER_TIP_L, 1], [FLIPPER_R, FLIPPER_TIP_R, -1]] as const;
+const FLIPPERS = [
+  [FLIPPER_L, FLIPPER_TIP_L, 1],
+  [FLIPPER_R, FLIPPER_TIP_R, -1],
+] as const;
 /** Forced review breach starts just after the exit so the shot lands near the apex. */
 const FORCED_BREACH_T = 0.26;
 /** Milliseconds the last skin took to generate (debug stats). */
@@ -161,10 +164,13 @@ function foamTexture(seed: number, channel: number, rim = 0): THREE.CanvasTextur
   const noise = makeNoise2D(seed, channel);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const dx = (x + 0.5) / size * 2 - 1;
-      const dy = (y + 0.5) / size * 2 - 1;
+      const dx = ((x + 0.5) / size) * 2 - 1;
+      const dy = ((y + 0.5) / size) * 2 - 1;
       const d = Math.hypot(dx, dy);
-      const n = 0.6 * noise(dx * 3.2, dy * 3.2) + 0.3 * noise(dx * 8 + 9, dy * 8) + 0.1 * noise(dx * 20, dy * 20 + 4);
+      const n =
+        0.6 * noise(dx * 3.2, dy * 3.2) +
+        0.3 * noise(dx * 8 + 9, dy * 8) +
+        0.1 * noise(dx * 20, dy * 20 + 4);
       const radial = rim > 0 ? Math.exp(-(((d - 0.82) / rim) ** 2)) : 1 - smoothstep(0.25, 0.95, d);
       // Threshold rises toward the edge so the patch breaks up into lacework, not a disc.
       const v = clamp((n * 0.5 + 0.5 + radial - (rim > 0 ? 1.2 : 0.95)) * 2.6, 0, 1) * radial;
@@ -197,8 +203,16 @@ function streakTexture(seed: number): THREE.CanvasTexture {
     for (let x = 0; x < w; x++) {
       const across = ((x + 0.5) / w) * 2 - 1;
       const core = Math.exp(-((across / (0.55 - 0.3 * up)) ** 2));
-      const breakup = smoothstep(0.35 - up * 0.5, 0.75 - up * 0.3, noise(across * 3, up * 9) * 0.5 + 0.5);
-      const a = core * (1 - smoothstep(0.7, 1, up)) * lerp(1, breakup, smoothstep(0.2, 0.6, up)) * smoothstep(0, 0.06, up);
+      const breakup = smoothstep(
+        0.35 - up * 0.5,
+        0.75 - up * 0.3,
+        noise(across * 3, up * 9) * 0.5 + 0.5,
+      );
+      const a =
+        core *
+        (1 - smoothstep(0.7, 1, up)) *
+        lerp(1, breakup, smoothstep(0.2, 0.6, up)) *
+        smoothstep(0, 0.06, up);
       const i = (y * w + x) * 4;
       image.data[i] = 255;
       image.data[i + 1] = 255;
@@ -231,7 +245,11 @@ function mistTexture(): THREE.CanvasTexture {
   return texture;
 }
 
-export function createWhale(seed: number, home: { x: number; z: number }, options: WhaleOptions = {}): WhaleHandle {
+export function createWhale(
+  seed: number,
+  home: { x: number; z: number },
+  options: WhaleOptions = {},
+): WhaleHandle {
   const rng = fork(seed, 'whale');
   // First draw is the starting heading; tests rely on that order.
   // Always draw, so the rest of the seeded stream is the same either way.
@@ -263,7 +281,11 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       skin.dispose();
       skin = fine;
     };
-    const idle = (globalThis as { requestIdleCallback?: (fn: () => void, options?: { timeout: number }) => void }).requestIdleCallback;
+    const idle = (
+      globalThis as {
+        requestIdleCallback?: (fn: () => void, options?: { timeout: number }) => void;
+      }
+    ).requestIdleCallback;
     if (idle) idle(upgrade, { timeout: 4000 });
     else setTimeout(upgrade, 1500);
   }
@@ -375,7 +397,14 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   washPivot.visible = false;
   group.add(washPivot);
 
-  interface Spray { sprite: THREE.Sprite; kind: 'crown' | 'drop' | 'mist'; angle: number; out: number; up: number; size: number }
+  interface Spray {
+    sprite: THREE.Sprite;
+    kind: 'crown' | 'drop' | 'mist';
+    angle: number;
+    out: number;
+    up: number;
+    size: number;
+  }
   const CROWN_N = 34;
   const DROP_N = 16;
   const MIST_N = 3;
@@ -404,9 +433,19 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       sprite,
       kind,
       angle: (j / n) * Math.PI * 2 + (r(1) - 0.5) * (kind === 'crown' ? 0.4 : 0.8),
-      out: kind === 'crown' ? 0.55 + r(2) * 0.8 : (kind === 'drop' ? 2 + r(2) * 3.5 : 0.5 + r(2)) * LENGTH_SCALE,
-      up: (kind === 'crown' ? 6.5 + r(3) * 5.5 : kind === 'drop' ? 6 + r(3) * 4 : 1.5 + r(3)) * SPLASH_SPEED,
-      size: (kind === 'crown' ? 1.3 + r(4) * 1.4 : kind === 'drop' ? 0.45 + r(4) * 0.5 : 1.8 + r(4) * 0.6) * LENGTH_SCALE,
+      out:
+        kind === 'crown'
+          ? 0.55 + r(2) * 0.8
+          : (kind === 'drop' ? 2 + r(2) * 3.5 : 0.5 + r(2)) * LENGTH_SCALE,
+      up:
+        (kind === 'crown' ? 6.5 + r(3) * 5.5 : kind === 'drop' ? 6 + r(3) * 4 : 1.5 + r(3)) *
+        SPLASH_SPEED,
+      size:
+        (kind === 'crown'
+          ? 1.3 + r(4) * 1.4
+          : kind === 'drop'
+            ? 0.45 + r(4) * 0.5
+            : 1.8 + r(4) * 0.6) * LENGTH_SCALE,
     });
   }
   group.add(spray);
@@ -415,20 +454,41 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
   const SHEET_N = 8;
   const sheet = new THREE.Group();
   sheet.visible = false;
-  const sheetSprites: { sprite: THREE.Sprite; x: number; y: number; z: number; speed: number }[] = [];
+  const sheetSprites: { sprite: THREE.Sprite; x: number; y: number; z: number; speed: number }[] =
+    [];
   for (let i = 0; i < SHEET_N; i++) {
     const r = (k: number) => hash(seed, i, k, 'sheet') / 0x100000000;
-    const mat = new THREE.SpriteMaterial({ map: streakTex, color: 0xf2f7f9, transparent: true, opacity: 0, depthWrite: false });
+    const mat = new THREE.SpriteMaterial({
+      map: streakTex,
+      color: 0xf2f7f9,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
     const sprite = new THREE.Sprite(mat);
     sheet.add(sprite);
     const side = i % 2 === 0 ? 1 : -1;
     const u = 0.19 + r(1) * 0.47;
     const x = HEAD_X + u * BODY_LENGTH;
     const prof = sampleProfile(u);
-    sheetSprites.push({ sprite, x, y: prof.mid + (r(2) - 0.3) * 0.8 * DEPTH_SCALE, z: side * prof.width * 1.02, speed: (3 + r(3) * 3) * LENGTH_SCALE });
+    sheetSprites.push({
+      sprite,
+      x,
+      y: prof.mid + (r(2) - 0.3) * 0.8 * DEPTH_SCALE,
+      z: side * prof.width * 1.02,
+      speed: (3 + r(3) * 3) * LENGTH_SCALE,
+    });
   }
   body.add(sheet);
-  const splashFx = { age: Infinity, power: 0, x: 0, z: 0, radius: 2 * LENGTH_SCALE, exit: false, sheetAge: Infinity };
+  const splashFx = {
+    age: Infinity,
+    power: 0,
+    x: 0,
+    z: 0,
+    radius: 2 * LENGTH_SCALE,
+    exit: false,
+    sheetAge: Infinity,
+  };
 
   const mover = createWhaleMover(seed, home, startHeading, options.floorAt, options.journey);
   const motion = mover.motion;
@@ -473,11 +533,20 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     // Spine order in SPINE: H2, H1, B0, B1..B5.
     item(bones, 1).rotation.set(0, TURN_BEND * 0.8 * turn, angles.head[0] ?? 0);
     item(bones, 0).rotation.set(0, TURN_BEND * 0.6 * turn, angles.head[1] ?? 0);
-    for (let i = 0; i < 5; i++) item(bones, 3 + i).rotation.set(0, -TURN_BEND * (TURN_TAIL[i] ?? 0) * turn, angles.tail[i] ?? 0);
+    for (let i = 0; i < 5; i++)
+      item(bones, 3 + i).rotation.set(
+        0,
+        -TURN_BEND * (TURN_TAIL[i] ?? 0) * turn,
+        angles.tail[i] ?? 0,
+      );
     // Flukes trail the stroke and tip up through the dive.
     item(bones, FLUKE_BONE).rotation.z += p.arch * 0.1;
     // The blades flex after the peduncle turns, so each stroke ends with the tips following through.
-    item(bones, FLUKE_FLEX).rotation.set(0, 0, FLUKE_FLEX_AMP * p.stroke * Math.sin(strokePhase - FLUKE_LAG));
+    item(bones, FLUKE_FLEX).rotation.set(
+      0,
+      0,
+      FLUKE_FLEX_AMP * p.stroke * Math.sin(strokePhase - FLUKE_LAG),
+    );
 
     // Flippers scull with the stroke and spread wide in the air; into a turn the inside one
     // drops and reaches forward and the outside one lifts, steering with them.
@@ -493,7 +562,11 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       );
       item(bones, index).quaternion.copy(tmpQ);
       // The outer half bends behind the inner half's sweep.
-      item(bones, tip).rotation.set(side * 0.14 * Math.sin(strokePhase + 1.1 - FLIPPER_LAG) * p.stroke, 0, 0);
+      item(bones, tip).rotation.set(
+        side * 0.14 * Math.sin(strokePhase + 1.1 - FLIPPER_LAG) * p.stroke,
+        0,
+        0,
+      );
     }
   }
 
@@ -522,7 +595,16 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       mover.pace = pace;
     },
     forcePhase(phase: WhalePhase, at?: number) {
-      const preset = phase === 'breach' ? FORCED_BREACH_T : phase === 'spout' ? 0.5 : phase === 'surface' ? 0.45 : phase === 'deep' ? 0.3 : 0;
+      const preset =
+        phase === 'breach'
+          ? FORCED_BREACH_T
+          : phase === 'spout'
+            ? 0.5
+            : phase === 'surface'
+              ? 0.45
+              : phase === 'deep'
+                ? 0.3
+                : 0;
       const t = typeof at === 'number' && Number.isFinite(at) ? clamp(at, 0, 0.99) : preset;
       mover.force(phase, t);
       // Starting exactly at 0 still fires the exit splash on the way up.
@@ -683,7 +765,8 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
         s.sprite.position.set(Math.cos(s.angle) * ring, 0.02, Math.sin(s.angle) * ring);
         s.sprite.scale.set(s.size * (exit ? 0.8 : 1) * (1 + age * 0.4), top, 1);
         // Sheets thin out as they slump; the crown is gone within ~1.8 s.
-        mat.opacity = 0.9 * (falling ? smoothstep(0, 1.5, top) : 1) * (1 - smoothstep(0.8, 1.8, age));
+        mat.opacity =
+          0.9 * (falling ? smoothstep(0, 1.5, top) : 1) * (1 - smoothstep(0.8, 1.8, age));
         continue;
       }
       if (falling && top < 0) {
@@ -692,9 +775,16 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       }
       // Drops are flung off the crown rim and fall in an arc; mist hangs low and small.
       const reach = splashFx.radius + s.out * lift * (1 - Math.exp(-age * 1.5));
-      const size = Math.min(s.size * (1 + age * (s.kind === 'mist' ? 0.4 : 0.2)), 2.4 * LENGTH_SCALE);
+      const size = Math.min(
+        s.size * (1 + age * (s.kind === 'mist' ? 0.4 : 0.2)),
+        2.4 * LENGTH_SCALE,
+      );
       const base = size * 0.6 + 0.05;
-      s.sprite.position.set(Math.cos(s.angle) * reach, Math.max(base, top + base), Math.sin(s.angle) * reach);
+      s.sprite.position.set(
+        Math.cos(s.angle) * reach,
+        Math.max(base, top + base),
+        Math.sin(s.angle) * reach,
+      );
       s.sprite.scale.set(size, size, 1);
       const life = clamp(1 - age / (s.kind === 'mist' ? 2.4 : 2.2), 0, 1);
       const settle = falling ? smoothstep(0, 1, top) : 1;

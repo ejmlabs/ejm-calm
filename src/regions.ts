@@ -32,10 +32,54 @@ export interface RegionLook {
 }
 
 export const REGION_LOOKS: readonly RegionLook[] = [
-  { name: 'Temperate', isletGain: 1, water: 0x1a4e68, fog: 0x163e54, fogMix: 0, fogDensity: 1, hazeDensity: 1, land: [1, 1, 1], birds: [0.5, 0.35, 0.15], ships: 0.6 },
-  { name: 'Tropical', isletGain: 1.6, water: 0x1e7a8c, fog: 0x2a8a8a, fogMix: 0.35, fogDensity: 0.9, hazeDensity: 0.85, land: [0.94, 1.1, 0.9], birds: [0.2, 0.7, 0.1], ships: 0.5 },
-  { name: 'Polar', isletGain: 0.5, water: 0x1a4a62, fog: 0x7e98a8, fogMix: 0.45, fogDensity: 1.5, hazeDensity: 1.4, land: [1.08, 1.1, 1.14], birds: [0.4, 0.05, 0.55], ships: 0.2 },
-  { name: 'Deep blue', isletGain: 0.25, water: 0x123e66, fog: 0x1a4a78, fogMix: 0.3, fogDensity: 0.8, hazeDensity: 0.9, land: [1, 1, 1], birds: [0.15, 0.1, 0.75], ships: 0.7 },
+  {
+    name: 'Temperate',
+    isletGain: 1,
+    water: 0x1a4e68,
+    fog: 0x163e54,
+    fogMix: 0,
+    fogDensity: 1,
+    hazeDensity: 1,
+    land: [1, 1, 1],
+    birds: [0.5, 0.35, 0.15],
+    ships: 0.6,
+  },
+  {
+    name: 'Tropical',
+    isletGain: 1.6,
+    water: 0x1e7a8c,
+    fog: 0x2a8a8a,
+    fogMix: 0.35,
+    fogDensity: 0.9,
+    hazeDensity: 0.85,
+    land: [0.94, 1.1, 0.9],
+    birds: [0.2, 0.7, 0.1],
+    ships: 0.5,
+  },
+  {
+    name: 'Polar',
+    isletGain: 0.5,
+    water: 0x1a4a62,
+    fog: 0x7e98a8,
+    fogMix: 0.45,
+    fogDensity: 1.5,
+    hazeDensity: 1.4,
+    land: [1.08, 1.1, 1.14],
+    birds: [0.4, 0.05, 0.55],
+    ships: 0.2,
+  },
+  {
+    name: 'Deep blue',
+    isletGain: 0.25,
+    water: 0x123e66,
+    fog: 0x1a4a78,
+    fogMix: 0.3,
+    fogDensity: 0.8,
+    hazeDensity: 0.9,
+    land: [1, 1, 1],
+    birds: [0.15, 0.1, 0.75],
+    ships: 0.7,
+  },
 ];
 
 export interface Regions {

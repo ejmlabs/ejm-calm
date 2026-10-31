@@ -24,10 +24,30 @@ import type { RegionWeights } from '../src/regions.js';
 import { item, last } from '../src/item.js';
 import { headlessRenderer } from '../tools/headless-renderer.js';
 
-const REGION: RegionWeights[] = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
-const KEYS = ['coverage', 'density', 'fog', 'haze', 'sun', 'grey', 'rain', 'wind', 'dark', 'sea'] as const;
+const REGION: RegionWeights[] = [
+  [1, 0, 0, 0],
+  [0, 1, 0, 0],
+  [0, 0, 1, 0],
+  [0, 0, 0, 1],
+];
+const KEYS = [
+  'coverage',
+  'density',
+  'fog',
+  'haze',
+  'sun',
+  'grey',
+  'rain',
+  'wind',
+  'dark',
+  'sea',
+] as const;
 const RANGE = Object.fromEntries(
-  KEYS.map((k) => [k, Math.max(...Object.values(WEATHER).map((s) => s[k])) - Math.min(...Object.values(WEATHER).map((s) => s[k]))]),
+  KEYS.map((k) => [
+    k,
+    Math.max(...Object.values(WEATHER).map((s) => s[k])) -
+      Math.min(...Object.values(WEATHER).map((s) => s[k])),
+  ]),
 ) as Record<(typeof KEYS)[number], number>;
 
 /** The regions in turn, 1700 s in each, blended over 300 s as the whale swims through them. */
@@ -42,7 +62,13 @@ function walk(t: number, out: RegionWeights): RegionWeights {
 }
 
 /** Runs a seed's weather for `hours` at `step` seconds, walking through the regions; calls `each` every step. */
-function run(seed: number, hours: number, step: number, each: (look: WeatherLook, state: WeatherState, t: number) => void, region?: number): void {
+function run(
+  seed: number,
+  hours: number,
+  step: number,
+  each: (look: WeatherLook, state: WeatherState, t: number) => void,
+  region?: number,
+): void {
   const w = createWeather(seed, WEATHER.clear.coverage);
   const weights: RegionWeights = [0, 0, 0, 0];
   for (let t = step; t <= hours * 3600; t += step) {
@@ -52,7 +78,14 @@ function run(seed: number, hours: number, step: number, each: (look: WeatherLook
 }
 
 test('six weather states, and every one of them comes in ten hours of a seed', () => {
-  assert.deepEqual([...WEATHER_STATES].sort(), ['clear', 'fog', 'hazy', 'overcast', 'rain', 'storm']);
+  assert.deepEqual([...WEATHER_STATES].sort(), [
+    'clear',
+    'fog',
+    'hazy',
+    'overcast',
+    'rain',
+    'storm',
+  ]);
   for (const seed of [42, 7, 1234]) {
     const seen = new Set<string>();
     run(seed, 10, 5, (_, state) => seen.add(state));
@@ -88,25 +121,43 @@ test('the weather moves a rung at a time and never jumps: no look value moves 2 
     for (let k = 0; k < 200; k++) {
       const a = track.ladder(k * track.span);
       const b = track.ladder((k + 1) * track.span);
-      assert.ok(Math.abs(a - b) <= 1 / (LADDER.length - 1) + 1e-9, `seed ${String(seed)} knot ${String(k)} skipped a rung`);
+      assert.ok(
+        Math.abs(a - b) <= 1 / (LADDER.length - 1) + 1e-9,
+        `seed ${String(seed)} knot ${String(k)} skipped a rung`,
+      );
     }
     let previous: WeatherLook | null = null;
-    const worst = Object.fromEntries(KEYS.map((k) => [k, 0])) as Record<(typeof KEYS)[number], number>;
+    const worst = Object.fromEntries(KEYS.map((k) => [k, 0])) as Record<
+      (typeof KEYS)[number],
+      number
+    >;
     run(seed, 2, 1, (look) => {
-      if (previous) for (const k of KEYS) worst[k] = Math.max(worst[k], Math.abs(look[k] - previous[k]) / RANGE[k]);
+      if (previous)
+        for (const k of KEYS)
+          worst[k] = Math.max(worst[k], Math.abs(look[k] - previous[k]) / RANGE[k]);
       previous = { ...look };
     });
-    for (const k of KEYS) assert.ok(worst[k] <= 0.02, `seed ${String(seed)}: ${k} moved ${(100 * worst[k]).toFixed(2)} percent of its range in a second`);
+    for (const k of KEYS)
+      assert.ok(
+        worst[k] <= 0.02,
+        `seed ${String(seed)}: ${k} moved ${(100 * worst[k]).toFixed(2)} percent of its range in a second`,
+      );
   }
 });
 
 test('the opening is clear for at least a minute, in every region', () => {
   for (const seed of [42, 7, 1234, 99]) {
     for (const region of [0, 1, 2, 3]) {
-      run(seed, 60 / 3600, 1, (look, state) => {
-        assert.equal(state, 'clear');
-        assert.equal(look.rain, 0);
-      }, region);
+      run(
+        seed,
+        60 / 3600,
+        1,
+        (look, state) => {
+          assert.equal(state, 'clear');
+          assert.equal(look.rain, 0);
+        },
+        region,
+      );
     }
   }
 });
@@ -117,16 +168,25 @@ test('polar seas are rougher and foggier than tropical ones', () => {
       let sea = 0;
       let fog = 0;
       let n = 0;
-      run(seed, 10, 10, (look, state) => {
-        sea += look.sea;
-        fog += state === 'fog' ? 1 : 0;
-        n++;
-      }, region);
+      run(
+        seed,
+        10,
+        10,
+        (look, state) => {
+          sea += look.sea;
+          fog += state === 'fog' ? 1 : 0;
+          n++;
+        },
+        region,
+      );
       return { sea: sea / n, fog: fog / n };
     };
     const polar = mean(2);
     const tropical = mean(1);
-    assert.ok(polar.sea > tropical.sea, `seed ${String(seed)}: polar sea ${polar.sea.toFixed(3)}, tropical ${tropical.sea.toFixed(3)}`);
+    assert.ok(
+      polar.sea > tropical.sea,
+      `seed ${String(seed)}: polar sea ${polar.sea.toFixed(3)}, tropical ${tropical.sea.toFixed(3)}`,
+    );
     assert.ok(polar.fog > tropical.fog);
   }
 });
@@ -136,7 +196,10 @@ test('seas build and fall slowly, and a distant swell can arrive under a clear s
   for (const seed of [42, 7, 1234]) {
     let last = 0;
     run(seed, 6, 1, (look, state) => {
-      assert.ok(Math.abs(look.sea - last) <= 0.01 + 1e-9, 'the sea moved more than 1 percent in a second');
+      assert.ok(
+        Math.abs(look.sea - last) <= 0.01 + 1e-9,
+        'the sea moved more than 1 percent in a second',
+      );
       last = look.sea;
       if (state === 'clear' && look.sea > 0.15) swellUnderClear = true;
     });
@@ -156,20 +219,27 @@ test('lightning is soft and spaced: one flash per six seconds at most, rising ov
       starts.push(t);
       rising = f;
     }
-    if (f > 0 && starts.length && t - last(starts) < FLASH_RISE) assert.ok(f - prev <= dt / FLASH_RISE + 1e-6, 'a flash jumped up');
+    if (f > 0 && starts.length && t - last(starts) < FLASH_RISE)
+      assert.ok(f - prev <= dt / FLASH_RISE + 1e-6, 'a flash jumped up');
     prev = f;
   }
   assert.ok(rising <= dt / FLASH_RISE + 1e-6);
   assert.ok(starts.length > 60, `${String(starts.length)} flashes in an hour of storm`);
-  for (let i = 1; i < starts.length; i++) assert.ok((starts[i] ?? 0) - (starts[i - 1] ?? 0) >= FLASH_CELL, 'two flashes too close together');
+  for (let i = 1; i < starts.length; i++)
+    assert.ok(
+      (starts[i] ?? 0) - (starts[i - 1] ?? 0) >= FLASH_CELL,
+      'two flashes too close together',
+    );
   assert.equal(flashAt(42, 1000, 0), 0);
   // The weather turns them off when asked (reduced motion), even in a storm.
   const w = createWeather(42);
   w.set('storm');
   let any = 0;
-  for (let t = 0; t < 600; t += 0.05) any = Math.max(any, w.update(0.05, t, item(REGION, 0), false).flash);
+  for (let t = 0; t < 600; t += 0.05)
+    any = Math.max(any, w.update(0.05, t, item(REGION, 0), false).flash);
   assert.equal(any, 0);
-  for (let t = 0; t < 600 && any === 0; t += 0.05) any = w.update(0.05, t, item(REGION, 0), true).flash;
+  for (let t = 0; t < 600 && any === 0; t += 0.05)
+    any = w.update(0.05, t, item(REGION, 0), true).flash;
   assert.ok(any > 0, 'a storm flashes when motion is allowed');
 });
 
@@ -178,7 +248,7 @@ function makeSky(seed: number) {
   return { sky: createSky(seed, renderer, new THREE.Scene()), renderer };
 }
 
-test('a lightning flash lifts the sky\'s light by at most 35 percent', () => {
+test("a lightning flash lifts the sky's light by at most 35 percent", () => {
   const { sky } = makeSky(42);
   const w = createWeather(42);
   w.set('storm');
@@ -219,7 +289,10 @@ test('a storm darkens the view; sunsets glow under a clear sky and go grey under
     sky.setWeather(w.look);
     sky.update(0);
     assert.ok(sky.glow < 0.2);
-    assert.ok(clear > sky.horizonColor.r / sky.horizonColor.b, 'the clear sunset is no warmer than the overcast one');
+    assert.ok(
+      clear > sky.horizonColor.r / sky.horizonColor.b,
+      'the clear sunset is no warmer than the overcast one',
+    );
   }
   assert.ok(found);
   sky.dispose();
@@ -234,29 +307,45 @@ test('the calm end of the sea is the swell it was, and a rough sea stands about 
     let h = 0;
     for (const w of SWELL_WAVES) {
       const k = (Math.PI * 2) / w.wavelength;
-      h += w.amplitude * Math.sin(k * (x * Math.cos(w.heading) + z * Math.sin(w.heading)) - k * w.speed * t);
+      h +=
+        w.amplitude *
+        Math.sin(k * (x * Math.cos(w.heading) + z * Math.sin(w.heading)) - k * w.speed * t);
     }
     assert.ok(Math.abs(swellAt(x, z, t).height - h) < 1e-12);
   }
   setSea(1, 0.7);
   let top = 0;
-  for (let x = 0; x < 1000; x += 4) for (let z = 0; z < 1000; z += 4) top = Math.max(top, swellAt(x, z, 50).height);
+  for (let x = 0; x < 1000; x += 4)
+    for (let z = 0; z < 1000; z += 4) top = Math.max(top, swellAt(x, z, 50).height);
   assert.ok(top >= 1.5 && top <= SEA_MAX, `top ${top.toFixed(2)} m`);
   setSea(0);
 });
 
-test('the water\'s packed waves agree with the swell the riders sample, far from the start', () => {
+test("the water's packed waves agree with the swell the riders sample, far from the start", () => {
   setSea(0.8, 2.1);
   const packed = new Float32Array(SEA_WAVES * 4);
   const origin = { x: 183_456.25, z: -92_311.5 };
   const t = 7_345.3;
   packWaves(origin.x, origin.z, t, packed);
-  for (const [rx, rz] of [[0, 0], [12.5, -40], [-300, 220]] as const) {
+  for (const [rx, rz] of [
+    [0, 0],
+    [12.5, -40],
+    [-300, 220],
+  ] as const) {
     let h = 0;
-    for (let i = 0; i < SEA_WAVES; i++) h += (packed[i * 4 + 2] ?? 0) * Math.sin(rx * (packed[i * 4] ?? 0) + rz * (packed[i * 4 + 1] ?? 0) + (packed[i * 4 + 3] ?? 0));
-    assert.ok(Math.abs(h - swellAt(origin.x + rx, origin.z + rz, t).height) < 2e-3, `render (${String(rx)}, ${String(rz)})`);
+    for (let i = 0; i < SEA_WAVES; i++)
+      h +=
+        (packed[i * 4 + 2] ?? 0) *
+        Math.sin(
+          rx * (packed[i * 4] ?? 0) + rz * (packed[i * 4 + 1] ?? 0) + (packed[i * 4 + 3] ?? 0),
+        );
+    assert.ok(
+      Math.abs(h - swellAt(origin.x + rx, origin.z + rz, t).height) < 2e-3,
+      `render (${String(rx)}, ${String(rz)})`,
+    );
   }
-  for (let i = 0; i < SEA_WAVES; i++) assert.ok((packed[i * 4 + 3] ?? 0) >= 0 && (packed[i * 4 + 3] ?? 0) < Math.PI * 2);
+  for (let i = 0; i < SEA_WAVES; i++)
+    assert.ok((packed[i * 4 + 3] ?? 0) >= 0 && (packed[i * 4 + 3] ?? 0) < Math.PI * 2);
   setSea(0);
 });
 
@@ -300,7 +389,10 @@ test('rain never rises and never jumps when the wind changes, hours in', () => {
       // The move this frame, wrapped back out of the box: exactly the velocity over the frame, whatever the clock.
       let moved = (offset[i] ?? 0) - (before[i] ?? 0);
       moved -= Math.round(moved / (box[i] ?? 0)) * (box[i] ?? 0);
-      assert.ok(Math.abs(moved - (velocity[i] ?? 0) * step) < 1e-6, `rain jumps at ${String(t)} on axis ${String(i)}`);
+      assert.ok(
+        Math.abs(moved - (velocity[i] ?? 0) * step) < 1e-6,
+        `rain jumps at ${String(t)} on axis ${String(i)}`,
+      );
       assert.ok((offset[i] ?? 0) >= 0 && (offset[i] ?? 0) < (box[i] ?? 0));
     }
     calmest = Math.min(calmest, look.wind);

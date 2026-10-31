@@ -33,9 +33,18 @@ const land = layout.land;
 const png = new PNG({ width: size, height: size, colorType: 2 });
 const cell = extent / size;
 // The map is centred a quarter of the extent along the migration, so most of it lies ahead.
-const ahead = { x: -Math.cos(layout.journey) * extent * 0.25, z: Math.sin(layout.journey) * extent * 0.25 };
-const toWorld = (px: number, py: number) => ({ x: ahead.x + (px + 0.5 - size / 2) * cell, z: ahead.z + (py + 0.5 - size / 2) * cell });
-const toPixel = (x: number, z: number) => ({ px: Math.round((x - ahead.x) / cell + size / 2 - 0.5), py: Math.round((z - ahead.z) / cell + size / 2 - 0.5) });
+const ahead = {
+  x: -Math.cos(layout.journey) * extent * 0.25,
+  z: Math.sin(layout.journey) * extent * 0.25,
+};
+const toWorld = (px: number, py: number) => ({
+  x: ahead.x + (px + 0.5 - size / 2) * cell,
+  z: ahead.z + (py + 0.5 - size / 2) * cell,
+});
+const toPixel = (x: number, z: number) => ({
+  px: Math.round((x - ahead.x) / cell + size / 2 - 0.5),
+  py: Math.round((z - ahead.z) / cell + size / 2 - 0.5),
+});
 
 function put(px: number, py: number, c: readonly [number, number, number]): void {
   if (px < 0 || py < 0 || px >= size || py >= size) return;
@@ -53,12 +62,22 @@ for (let py = 0; py < size; py++) {
     if (m > 0) {
       // Shaded by the smooth planet layout, so the map shows the continents' bulk rather than the coast noise.
       const t = Math.min(1, Math.max(0, land.planet.macroAt(x, z)));
-      put(px, py, [LAND[0] + (HIGH[0] - LAND[0]) * t, LAND[1] + (HIGH[1] - LAND[1]) * t, LAND[2] + (HIGH[2] - LAND[2]) * t]);
+      put(px, py, [
+        LAND[0] + (HIGH[0] - LAND[0]) * t,
+        LAND[1] + (HIGH[1] - LAND[1]) * t,
+        LAND[2] + (HIGH[2] - LAND[2]) * t,
+      ]);
     } else {
       const w = land.regions.weightsAt(x, z);
-      const sea = [0, 1, 2].map((c) => w.reduce((sum, wk, k) => sum + wk * (item(SEA, k)[c] ?? 0), 0)) as [number, number, number];
+      const sea = [0, 1, 2].map((c) =>
+        w.reduce((sum, wk, k) => sum + wk * (item(SEA, k)[c] ?? 0), 0),
+      ) as [number, number, number];
       const shallow = Math.max(0, 1 + m / 0.6);
-      put(px, py, [sea[0] + (SHALLOW[0] - sea[0]) * shallow, sea[1] + (SHALLOW[1] - sea[1]) * shallow, sea[2] + (SHALLOW[2] - sea[2]) * shallow]);
+      put(px, py, [
+        sea[0] + (SHALLOW[0] - sea[0]) * shallow,
+        sea[1] + (SHALLOW[1] - sea[1]) * shallow,
+        sea[2] + (SHALLOW[2] - sea[2]) * shallow,
+      ]);
     }
   }
 }
@@ -71,7 +90,13 @@ for (let s = -extent; s <= extent; s += cell * 2) {
 }
 
 if (minutes > 0) {
-  const mover = createWhaleMover(seed, layout.whaleHome, layout.viewYaw - Math.PI / 2, createSeafloor(seed, land).heightAt, layout.journey);
+  const mover = createWhaleMover(
+    seed,
+    layout.whaleHome,
+    layout.viewYaw - Math.PI / 2,
+    createSeafloor(seed, land).heightAt,
+    layout.journey,
+  );
   const m = mover.motion;
   land.nav.prefetch(m.x, m.z, 1100, Infinity);
   const dt = 1 / 30;
@@ -87,7 +112,14 @@ if (minutes > 0) {
 }
 
 const home = toPixel(layout.whaleHome.x, layout.whaleHome.z);
-for (let a = 0; a < 64; a++) put(home.px + Math.round(Math.cos((a / 64) * Math.PI * 2) * 6), home.py + Math.round(Math.sin((a / 64) * Math.PI * 2) * 6), [255, 255, 255]);
+for (let a = 0; a < 64; a++)
+  put(
+    home.px + Math.round(Math.cos((a / 64) * Math.PI * 2) * 6),
+    home.py + Math.round(Math.sin((a / 64) * Math.PI * 2) * 6),
+    [255, 255, 255],
+  );
 
 writeFileSync(out, PNG.sync.write(png));
-console.log(`seed ${String(seed)}: ${(extent / 1000).toFixed(0)} km map, ${(cell).toFixed(0)} m a pixel → ${out}`);
+console.log(
+  `seed ${String(seed)}: ${(extent / 1000).toFixed(0)} km map, ${cell.toFixed(0)} m a pixel → ${out}`,
+);

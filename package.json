@@ -10,7 +10,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "eslint . --max-warnings 0 && prettier --check .",
+    "format": "prettier --write .",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:browser": "npm run build && npx tsx tools/smoke.ts",
@@ -29,6 +30,7 @@
     "globals": "17.13.0",
     "playwright-core": "1.64.1",
     "pngjs": "7.0.0",
+    "prettier": "3.9.10",
     "tsx": "4.20.5",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.2",

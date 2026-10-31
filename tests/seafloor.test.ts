@@ -30,11 +30,18 @@ test('seafloor matches the land on land and on the shallow shelf, and is determi
       if (Math.abs(h - softDepth(base)) > 0.5) relief++;
     }
   }
-  assert.ok(onLand > 50 && shelf > 5 && relief > 100, `${String(onLand)} ${String(shelf)} ${String(relief)}`);
+  assert.ok(
+    onLand > 50 && shelf > 5 && relief > 100,
+    `${String(onLand)} ${String(shelf)} ${String(relief)}`,
+  );
   // A different seed gives different relief over the same land.
   const other = createSeafloor(7, land);
   let differs = 0;
-  for (let i = 0; i < 200; i++) if (other.heightAt(i * 37 - 3000, 2500 - i * 29) !== floor.heightAt(i * 37 - 3000, 2500 - i * 29)) differs++;
+  for (let i = 0; i < 200; i++)
+    if (
+      other.heightAt(i * 37 - 3000, 2500 - i * 29) !== floor.heightAt(i * 37 - 3000, 2500 - i * 29)
+    )
+      differs++;
   assert.ok(differs > 20);
 });
 
