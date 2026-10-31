@@ -9,7 +9,7 @@ import { item } from '../src/item.js';
  * above the sea horizon, straight away from the sun, which is how the land's haze matches the sky behind it. Run it
  * after a build, and again whenever a sky preset changes, then paste the printed arrays into the presets.
  *
- * The page opens without `finish=1`: the land's haze is a display colour that has to match the plainly tone mapped
+ * The page opens in the plain frame (`frame=plain`): the land's haze is a display colour that has to match the plainly tone mapped
  * sky, and the finish's grade later lifts land and sky alike. Reduced motion stills the day and the clouds, so each
  * preset is exactly itself. The water, land, ships and whale are hidden, and each angle is read at several nearby
  * azimuths, taking the median per channel, so a cloud, a star or a bird in one sample cannot move the colour.
