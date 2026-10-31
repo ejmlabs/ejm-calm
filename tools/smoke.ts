@@ -3,7 +3,6 @@ import type { Page } from 'playwright-core';
 import { withBrowser, openCalm, DESKTOP, MOBILE } from './browser.js';
 import { detailFor } from '../src/quality.js';
 import { LENGTH_SCALE } from '../src/whale-size.js';
-import { last } from '../src/item.js';
 import { STORAGE_KEY, validateMemory, type CalmMemory } from '../src/persistence.js';
 
 /** The settings the page saved, checked as the page checks them. */
@@ -230,7 +229,8 @@ await withBrowser(async (browser, base) => {
           if (step % 5 === 4) await new Promise((resolve) => setTimeout(resolve, 25));
         }
         ms.sort((a, b) => a - b);
-        return { steps: ms.length, worst: last(ms), p99: ms[Math.floor(ms.length * 0.99)] ?? 0, over: ms.filter((m) => m > 3).length / ms.length, ms: performance.now() - start };
+        // In the page: the scene's own helpers are not here.
+        return { steps: ms.length, worst: ms[ms.length - 1] ?? 0, p99: ms[Math.floor(ms.length * 0.99)] ?? 0, over: ms.filter((m) => m > 3).length / ms.length, ms: performance.now() - start };
       });
       const stats = await page.evaluate(read);
       const gaps = (stats['coverageMisses'] ?? 0) - (before['coverageMisses'] ?? 0);
