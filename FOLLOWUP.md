@@ -8,7 +8,7 @@
 - Mobile breach/spout camera still does not reliably fill 35–50% of screen width; needs a bbox-centred look and a screen-width check.
 - Land haze colours are the sky straight away from the sun, 0.3 to 16 degrees above the horizon, measured per preset by `tools/haze-measure.ts`; re-run it and paste the arrays whenever a sky preset or the sky shader changes. Between two presets the haze is a blend of two measured colours, which can sit up to about 40 sRGB levels off the sky while the sun moves fast (afternoon to golden, dusk to night). The night haze is a faint navy set by hand; the measured night sky is black.
 - Shallows fade out between 150 and 900 m and at grazing angles, so from boat height the turquoise shows only near a shore; a higher camera shows more.
-- Sail billow is visible up close; at distance a tall ship can still read as one pale panel.
+- Sail billow is visible up close and runs only within 400 m of the whale (`BILLOW` in `src/world-ships.ts`), where the cloth's motion shows; at distance a tall ship can still read as one pale panel.
 - Saved camera pitch/distance can override the portrait defaults after a refresh.
 - Real-device figures are still owed for the migration: the p99 stream frame (spec: under 3 ms on a phone-class device), the environment map refresh frame (spec: at most 8 ms over the average on the desktop profile), and frame time at cruise on a phone. Software GL numbers are recorded in `openspec/changes/add-ocean-migration/tasks.md` and are not those.
 - Forward progress on the planet layout: over an hour on seeds 1 to 50 and the test set net over path is 0.83 to 0.99 (median 0.95) and no ten minutes make under 7.2 km; seed 23 makes 1.3 km in its first five minutes (the opening's exit). `tools/seed-sweep.ts` is the gate.
