@@ -62,7 +62,7 @@ export interface SkyHandle {
   setDay: (day: number) => void;
   /** Rebuilds the reflection environment from the sky now; at most every ENV_REFRESH seconds on its own once enabled. */
   refreshEnvironment: () => void;
-  /** Turns the timed refresh on (medium and high) or off (low). */
+  /** Turns the timed refresh on (medium and high) or off (low); turned off, the environment is rebuilt once to be kept. */
   setEnvironmentRefresh: (on: boolean) => void;
   dispose: () => void;
 }
@@ -244,6 +244,8 @@ export function createSky(
   seed: number,
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
+  /** Whether the reflection environment follows the day (medium and high) or is built once and kept (low). */
+  environmentFollows = false,
 ): SkyHandle {
   const timeOfDay = pickTimeOfDay(seed);
   const start = DAY.indexOf(timeOfDay);
@@ -471,7 +473,9 @@ export function createSky(
   // Environment: rebuilt from the sky alone; a full scene would reflect the water and land in themselves.
   let pmrem: THREE.PMREMGenerator | null = null;
   let envTarget: THREE.WebGLRenderTarget | null = null;
-  let envEnabled = false;
+  let envEnabled = environmentFollows;
+  /** The sky's light when the environment was built: a kept one dims as the day darkens below it. */
+  let envLevel = 1;
   let envAge = 0;
   const hidden: THREE.Object3D[] = [];
 
@@ -491,7 +495,13 @@ export function createSky(
       const skyWasVisible = sky.visible;
       sky.visible = true;
       if (uniforms['showSunDisc']) uniforms['showSunDisc'].value = 0;
+      // An environment that is kept lights every time of day after it, so it leaves out the sunset's few minutes.
+      const glow = uniforms['skyGlow'] as THREE.IUniform<number> | undefined;
+      const glowNow = glow?.value ?? 0;
+      if (glow && !envEnabled) glow.value = 0;
       const next = pmrem.fromScene(scene, 0.04);
+      if (glow) glow.value = glowNow;
+      envLevel = handle.level;
       if (uniforms['showSunDisc']) uniforms['showSunDisc'].value = 1;
       sky.visible = skyWasVisible;
       const previous = envTarget;
@@ -507,6 +517,11 @@ export function createSky(
       envMs = performance.now() - began;
       envCount++;
     }
+  }
+
+  /** A followed environment carries the sky's own light; a kept one is dimmed to it, never brightened past how it was built. */
+  function lightEnvironment(): void {
+    scene.environmentIntensity = envEnabled ? 1 : Math.min(1, handle.level / Math.max(1e-3, envLevel));
   }
 
   const handle: SkyHandle = {
@@ -551,14 +566,19 @@ export function createSky(
       cycle += (dt * rate * DAY.length) / DAY_SECONDS;
       applyDay();
       if (envEnabled && envAge >= ENV_REFRESH) refreshEnvironment();
+      lightEnvironment();
     },
     setDay(day) {
       cycle = start + day * DAY.length;
       applyDay();
+      lightEnvironment();
     },
     refreshEnvironment,
     setEnvironmentRefresh(on) {
+      if (on === envEnabled) return;
       envEnabled = on;
+      if (!on) refreshEnvironment();
+      lightEnvironment();
     },
     dispose() {
       scene.remove(sky, sun, hemi, ambient);

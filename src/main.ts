@@ -238,7 +238,7 @@ let finish: ReturnType<typeof createFinish> | null = null;
 
 try {
   const buildStart = performance.now();
-  sky = createSky(seed, renderer, scene);
+  sky = createSky(seed, renderer, scene, environmentFollowsSky());
   layout = layoutWorld(seed, sky.sunAzimuthDeg);
   // yaw 0 marks a follow-camera framing; older orbit framings (yaw = view yaw) are ignored.
   const savedFraming = memory?.framing?.yaw === 0 ? memory.framing : null;
@@ -277,7 +277,6 @@ try {
   weather = createWeather(seed, sky.clearCover);
   // A visitor who asked for the indicator sees it on the first change of region, not at once.
   indicator.setEnabled(routeOn, world.land.regions.dominantAt(layout.whaleHome.x, layout.whaleHome.z), 0, false);
-  sky.setEnvironmentRefresh(environmentFollowsSky());
   // The whale's wake: its stern, bow and width follow the whale's size, and a deeper body still marks the water.
   wake = createWake({ surface, stern: 5 * LENGTH_SCALE, bow: 6 * LENGTH_SCALE, width: 0.8 * DEPTH_SCALE, depths: [-2.6 * DEPTH_SCALE, -0.9 * DEPTH_SCALE] });
   world.root.add(wake.group);
@@ -301,7 +300,7 @@ try {
   throw error;
 }
 
-/** The reflection environment follows the sky's light on medium and high; phones keep the opening sky's. */
+/** The reflection environment follows the sky's light on medium and high; phones keep the opening sky's, dimmed at night. */
 function environmentFollowsSky(): boolean {
   return quality.tier !== 'low';
 }

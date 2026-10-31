@@ -10,7 +10,7 @@
 - [x] 2.2 Water: constant reflection gain, haze in scene light, glitter, shallows, storm foam
 - [x] 2.3 Land: palette, sky-hued shade, sun-coloured light, a stronger key, softer cliff bands
 - [x] 2.4 Land tiles dissolve by coverage wherever the frame multisamples
-- [x] 2.5 Sky: a warm horizon belt at low sun, clearer golden and dusk presets, their haze re-measured by `tools/haze-measure.ts`
+- [x] 2.5 Sky: a warm horizon belt at low sun, clearer golden and dusk presets, their haze re-measured by `tools/haze-measure.ts`; the belt kept off the environment's underside, and out of the environment phones keep, which dims at night
 - [x] 2.6 Storm foam: a world-anchored lattice in the wind's frame, octaves fading by footprint; swell faces tinted by tilt
 - [x] 2.7 Whale: slate skin, no clear coat, reflection held down, rougher on phones; review `setDay` refreshes the reflections
 - [x] 2.8 Land grid: twice the cells from 512 m tiles up, unused vertices dropped, land triangles budgeted per tier in the smoke

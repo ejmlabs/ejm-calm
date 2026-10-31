@@ -118,6 +118,29 @@ test('the environment map refreshes at most every 90 s on medium and high, and n
   const high = run(true);
   assert.deepEqual(high.at, [90, 180, 270, 360], 'refreshed on the dot, never sooner');
   assert.equal(ENV_REFRESH, 90);
+  // A drop to low rebuilds the environment once, without the sunset, to keep for the rest of the visit.
+  const { sky } = makeSky(42);
+  sky.setEnvironmentRefresh(true);
+  const before = sky.environment().count;
+  sky.setEnvironmentRefresh(false);
+  assert.equal(sky.environment().count, before + 1);
+  sky.setEnvironmentRefresh(false);
+  assert.equal(sky.environment().count, before + 1, 'switching off twice builds once');
+});
+
+test('a kept environment dims with the night instead of lighting it like the day it was built in', () => {
+  const night = (DAY.indexOf('night') - DAY.indexOf(pickTimeOfDay(42)) + DAY.length) % DAY.length / DAY.length;
+  // Read through a call: the first assertion would otherwise narrow the field to its value.
+  const intensity = (made: { scene: THREE.Scene }): number => made.scene.environmentIntensity;
+  const kept = makeSky(42);
+  kept.sky.setDay(0);
+  assert.equal(intensity(kept), 1, 'by day it is as built');
+  kept.sky.setDay(night);
+  assert.ok(intensity(kept) < 0.3, `night keeps ${String(intensity(kept))} of it`);
+  const followed = makeSky(42);
+  followed.sky.setEnvironmentRefresh(true);
+  followed.sky.setDay(night);
+  assert.equal(intensity(followed), 1, 'a followed environment is the night sky itself');
 });
 
 test('reduced motion halves the cloud drift and slows the day', () => {
