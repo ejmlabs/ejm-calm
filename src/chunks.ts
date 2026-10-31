@@ -13,7 +13,8 @@ export function chunkKey(lod: number, cx: number, cz: number): string {
 
 export function parseChunkKey(key: string): { lod: number; cx: number; cz: number } {
   const [lod, cx, cz] = key.split(':').map(Number);
-  if (lod === undefined || cx === undefined || cz === undefined) throw new Error(`Malformed chunk key ${key}`);
+  if (lod === undefined || cx === undefined || cz === undefined)
+    throw new Error(`Malformed chunk key ${key}`);
   return { lod, cx, cz };
 }
 
@@ -28,7 +29,13 @@ export function cellDistance(x: number, z: number, cx: number, cz: number, size:
  * Cells of `size` within `radius` of (wx, wz), nearest first; ties break on
  * coordinates so the order never depends on anything but the inputs.
  */
-export function chunksAround(wx: number, wz: number, radius: number, size: number, lod = 0): string[] {
+export function chunksAround(
+  wx: number,
+  wz: number,
+  radius: number,
+  size: number,
+  lod = 0,
+): string[] {
   const x0 = chunkCoord(wx - radius, size);
   const x1 = chunkCoord(wx + radius, size);
   const z0 = chunkCoord(wz - radius, size);

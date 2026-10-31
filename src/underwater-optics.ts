@@ -23,7 +23,10 @@ export function airAngle(angle: number, n = WATER_IOR): number | null {
   return s >= 1 ? null : Math.asin(s);
 }
 
-export interface FogState { color: THREE.Color; density: number }
+export interface FogState {
+  color: THREE.Color;
+  density: number;
+}
 
 /**
  * Fog at submersion `s`: colour lerps linearly, density geometrically, because
@@ -66,7 +69,12 @@ export function seenLight(depth: number): number {
 }
 
 /** Underwater look keyed by daylight: shallow and deep display colours (sRGB hex) and fog densities. */
-export interface WaterLook { shallow: number; deep: number; density: number; deepDensity: number }
+export interface WaterLook {
+  shallow: number;
+  deep: number;
+  density: number;
+  deepDensity: number;
+}
 
 export const WATER_LOOK: WaterLook = {
   shallow: 0x2f8590,
@@ -84,12 +92,20 @@ const deepColor = new THREE.Color();
  * Absorption colour (display space, linear) and density at `depth`; darker and
  * bluer the deeper the eye. `daylight` dims everything for low suns.
  */
-export function waterTint(depth: number, daylight: number, out: FogState, look: WaterLook = WATER_LOOK): FogState {
+export function waterTint(
+  depth: number,
+  daylight: number,
+  out: FogState,
+  look: WaterLook = WATER_LOOK,
+): FogState {
   const k = 1 - Math.exp(-Math.max(0, depth) / 10);
   shallowColor.setHex(look.shallow, THREE.SRGBColorSpace);
   deepColor.setHex(look.deep, THREE.SRGBColorSpace);
   // The water itself darkens toward a deep navy as the light fails with depth.
-  out.color.copy(shallowColor).lerp(deepColor, k).multiplyScalar(clamp(daylight, 0.2, 1) * lerp(0.35, 1, seenLight(depth)));
+  out.color
+    .copy(shallowColor)
+    .lerp(deepColor, k)
+    .multiplyScalar(clamp(daylight, 0.2, 1) * lerp(0.35, 1, seenLight(depth)));
   out.density = look.density + (look.deepDensity - look.density) * k;
   return out;
 }

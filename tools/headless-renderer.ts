@@ -5,5 +5,9 @@ import * as THREE from 'three';
  * draws, so its environment refresh fails quietly as it would without WebGL.
  */
 export function headlessRenderer(): THREE.WebGLRenderer {
-  return { toneMapping: THREE.NoToneMapping, toneMappingExposure: 1, getPixelRatio: () => 1 } as unknown as THREE.WebGLRenderer;
+  return {
+    toneMapping: THREE.NoToneMapping,
+    toneMappingExposure: 1,
+    getPixelRatio: () => 1,
+  } as unknown as THREE.WebGLRenderer;
 }

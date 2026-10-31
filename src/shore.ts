@@ -10,7 +10,11 @@ export interface Shore {
   reach?: (x: number, z: number) => number;
 }
 
-export interface Circle { x: number; z: number; radius: number }
+export interface Circle {
+  x: number;
+  z: number;
+  radius: number;
+}
 
 /** Shore made of round islands. Used by tests and as a simple stand-in. */
 export function circleShore(circles: readonly Circle[]): Shore {
@@ -42,7 +46,12 @@ export function circleShore(circles: readonly Circle[]): Shore {
 }
 
 /** Push a point out to at least `margin` metres from land (as far as the water allows). */
-export function clampClearOfLand(x: number, z: number, shore: Shore, margin: number): { x: number; z: number } {
+export function clampClearOfLand(
+  x: number,
+  z: number,
+  shore: Shore,
+  margin: number,
+): { x: number; z: number } {
   let cx = x;
   let cz = z;
   let gap = shore.clearance(cx, cz);

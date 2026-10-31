@@ -12,16 +12,28 @@ import { item } from '../src/item.js';
  * usage: npx tsx tools/load-time.ts [build directory] [build directory to compare] [runs]    (defaults: dist, none, 5)
  */
 
-const NETWORK = { offline: false, latency: 170, downloadThroughput: (9e6 / 8) | 0, uploadThroughput: (1.5e6 / 8) | 0 };
+const NETWORK = {
+  offline: false,
+  latency: 170,
+  downloadThroughput: (9e6 / 8) | 0,
+  uploadThroughput: (1.5e6 / 8) | 0,
+};
 /** Phones also get a slower CPU, as in the usual mobile lab profile. */
 const CPU_SLOWDOWN: Record<string, number> = { desktop: 1, mobile: 4 };
 /** A change that adds this much to any median fails the comparison. */
 const LIMIT_MS = 1000;
 
-interface Sample { firstPaint: number; firstContentfulPaint: number; ready: number; kilobytes: number }
+interface Sample {
+  firstPaint: number;
+  firstContentfulPaint: number;
+  ready: number;
+  kilobytes: number;
+}
 type Row = Record<keyof Sample, number>;
 
-const builds = [process.argv[2] ?? 'dist', process.argv[3]].filter((b): b is string => Boolean(b)).map((b) => resolve(b));
+const builds = [process.argv[2] ?? 'dist', process.argv[3]]
+  .filter((b): b is string => Boolean(b))
+  .map((b) => resolve(b));
 const runs = Number(process.argv[4] ?? 5);
 
 async function sample(url: string, device: DeviceProfile): Promise<Sample> {
@@ -36,7 +48,11 @@ async function sample(url: string, device: DeviceProfile): Promise<Sample> {
         request((time) => {
           callback(time);
           // A frame can come before the body exists.
-          if ((document.body as HTMLElement | null)?.dataset['ready'] === 'true' && !performance.getEntriesByName('calm-first-frame').length) performance.mark('calm-first-frame');
+          if (
+            (document.body as HTMLElement | null)?.dataset['ready'] === 'true' &&
+            !performance.getEntriesByName('calm-first-frame').length
+          )
+            performance.mark('calm-first-frame');
         });
     });
     const page = await context.newPage();
@@ -51,24 +67,39 @@ async function sample(url: string, device: DeviceProfile): Promise<Sample> {
     await page.goto(`${url}?seed=42`, { waitUntil: 'commit' });
     // Paint entries are reported asynchronously and can land after the first frame.
     const entries = ['first-paint', 'first-contentful-paint', 'calm-first-frame'];
-    await page.waitForFunction((names) => names.every((name) => performance.getEntriesByName(name).length > 0), entries, { timeout: 120000 }).catch(async () => {
-      const seen = await page.evaluate((names) => names.filter((name) => performance.getEntriesByName(name).length > 0), entries).catch(() => []);
-      throw new Error(`${url} (${device.name}): not every load-time entry within 120 s (seen: ${seen.join(', ') || 'none'})`);
-    });
+    await page
+      .waitForFunction(
+        (names) => names.every((name) => performance.getEntriesByName(name).length > 0),
+        entries,
+        { timeout: 120000 },
+      )
+      .catch(async () => {
+        const seen = await page
+          .evaluate(
+            (names) => names.filter((name) => performance.getEntriesByName(name).length > 0),
+            entries,
+          )
+          .catch(() => []);
+        throw new Error(
+          `${url} (${device.name}): not every load-time entry within 120 s (seen: ${seen.join(', ') || 'none'})`,
+        );
+      });
     // No helper functions inside: the page cannot see the names the TypeScript loader adds to them.
     const [firstPaint, firstContentfulPaint, ready] = await page.evaluate(() => [
       performance.getEntriesByName('first-paint')[0]?.startTime,
       performance.getEntriesByName('first-contentful-paint')[0]?.startTime,
       performance.getEntriesByName('calm-first-frame')[0]?.startTime,
     ]);
-    if (firstPaint === undefined || firstContentfulPaint === undefined || ready === undefined) throw new Error(`${url} (${device.name}): a paint or first-frame entry is missing`);
+    if (firstPaint === undefined || firstContentfulPaint === undefined || ready === undefined)
+      throw new Error(`${url} (${device.name}): a paint or first-frame entry is missing`);
     return { firstPaint, firstContentfulPaint, ready, kilobytes: bytes / 1024 };
   } finally {
     await browser.close();
   }
 }
 
-const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
+const median = (values: number[]) =>
+  [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
 
 const summarise = (samples: Sample[]): Row => ({
   firstPaint: median(samples.map((s) => s.firstPaint)),
@@ -84,10 +115,14 @@ async function measure(roots: string[]): Promise<Record<string, Row>[]> {
     const out: Record<string, Row>[] = roots.map(() => ({}));
     for (const device of [DESKTOP, MOBILE]) {
       const samples: Sample[][] = roots.map(() => []);
-      for (let n = 0; n < runs; n++) for (let b = 0; b < apps.length; b++) item(samples, b).push(await sample(item(apps, b).url, device));
+      for (let n = 0; n < runs; n++)
+        for (let b = 0; b < apps.length; b++)
+          item(samples, b).push(await sample(item(apps, b).url, device));
       roots.forEach((root, b) => {
         item(out, b)[device.name] = summarise(item(samples, b));
-        console.log(JSON.stringify({ build: root, device: device.name, runs, ...item(out, b)[device.name] }));
+        console.log(
+          JSON.stringify({ build: root, device: device.name, runs, ...item(out, b)[device.name] }),
+        );
       });
     }
     return out;
@@ -103,7 +138,9 @@ if (results.length === 2) {
   for (const device of Object.keys(base)) {
     for (const metric of ['firstPaint', 'firstContentfulPaint', 'ready'] as const) {
       const added = item(next, device)[metric] - item(base, device)[metric];
-      console.log(`${device} ${metric}: ${item(base, device)[metric].toFixed(0)} → ${item(next, device)[metric].toFixed(0)} ms (${added >= 0 ? '+' : ''}${added.toFixed(0)})`);
+      console.log(
+        `${device} ${metric}: ${item(base, device)[metric].toFixed(0)} → ${item(next, device)[metric].toFixed(0)} ms (${added >= 0 ? '+' : ''}${added.toFixed(0)})`,
+      );
       if (added >= LIMIT_MS) slower.push(`${device} ${metric} +${added.toFixed(0)} ms`);
     }
   }

@@ -1,0 +1,10 @@
+# Prettier formats this repository's code: TypeScript and its own ESLint config.
+# Synced from ejmlabs/.github; edit it there.
+eslint.strict.mjs
+# Not code: docs (some synced), data, config and the static page.
+*.md
+*.json
+*.jsonc
+*.yaml
+*.html
+*.css

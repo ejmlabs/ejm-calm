@@ -54,7 +54,8 @@ export function createSeafloor(
   return {
     heightAt(x, z) {
       const base = land.heightAt(x, z);
-      const floor = depthAt && base < 0 ? Math.min(softDepth(base), -depthAt(x, z)) : softDepth(base);
+      const floor =
+        depthAt && base < 0 ? Math.min(softDepth(base), -depthAt(x, z)) : softDepth(base);
       // The land's depth is never shallower than its eased floor, so without a bathymetry this is -base.
       const depth = Math.max(-base, -floor);
       if (!(depth > RELIEF_START)) return floor;
@@ -68,7 +69,12 @@ export function createSeafloor(
       const swale = fbm2(swaleNoise, x / 45, z / 45, 2) * 1.4;
       // Never shallower than RELIEF_START - 1, so relief cannot breach the shelf.
       const lift = Math.min((ridges + knoll + swale) * w, Math.max(0, depth - RELIEF_START) * 0.7);
-      const hills = depth > HILLS_FROM ? fbm2(hillNoise, x / 5000, z / 5000, 3) * HILLS * smoothstep(HILLS_FROM, HILLS_FULL, depth) : 0;
+      const hills =
+        depth > HILLS_FROM
+          ? fbm2(hillNoise, x / 5000, z / 5000, 3) *
+            HILLS *
+            smoothstep(HILLS_FROM, HILLS_FULL, depth)
+          : 0;
       return floor + lift + hills;
     },
   };

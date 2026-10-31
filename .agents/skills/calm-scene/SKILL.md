@@ -17,7 +17,8 @@ structure.
 ## Code
 
 - Types extend `@tsconfig/strictest` and lint is the synced strict layer (`eslint.strict.mjs`)
-  with zero warnings. No `any`, no `!`, and no `as` that quiets the checker; an `as` that widens
+  with zero warnings. Prettier formats the code (`npm run format`; `npm run lint` checks it), so
+  never hand-format against it. No `any`, no `!`, and no `as` that quiets the checker; an `as` that widens
   a library's too-narrow type (three's `mergeGeometries` can return null) says why beside it.
 - Reading arrays: a numeric array read inside its own loop bounds uses `values[i] ?? 0`, which
   keeps hot loops free of calls. Any other list or keyed lookup uses `item(list, index)` or

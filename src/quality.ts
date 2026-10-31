@@ -30,7 +30,12 @@ export interface QualityState {
   changed: string | null;
 }
 
-export function selectQualityTier({ mobile = false, software = false, cores = 8, memory = 8 }: QualityOptions = {}): QualityTier {
+export function selectQualityTier({
+  mobile = false,
+  software = false,
+  cores = 8,
+  memory = 8,
+}: QualityOptions = {}): QualityTier {
   if (mobile || software) return 'low';
   return cores <= 4 || memory <= 4 ? 'medium' : 'high';
 }
@@ -39,7 +44,13 @@ export function selectQualityTier({ mobile = false, software = false, cores = 8,
  * What the added world detail may spend per tier: birds updated, ships at full detail, trees, rocks and houses per
  * land tile, people and animals drawn, and the land's bump detail.
  */
-export interface DetailBudget { birds: number; ships: number; objects: number; walkers: number; microNormal: 'off' | 'near' | 'full' }
+export interface DetailBudget {
+  birds: number;
+  ships: number;
+  objects: number;
+  walkers: number;
+  microNormal: 'off' | 'near' | 'full';
+}
 
 const detailTable: Record<QualityTier, DetailBudget> = {
   low: { birds: 10, ships: 4, objects: 36, walkers: 64, microNormal: 'off' },

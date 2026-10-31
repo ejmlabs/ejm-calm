@@ -43,7 +43,13 @@ for (const seed of seeds) {
   const layout = layoutWorld(seed);
   const land = layout.land;
   const floor = createSeafloor(seed, land);
-  const mover = createWhaleMover(seed, layout.whaleHome, layout.viewYaw - Math.PI / 2, floor.heightAt, layout.journey);
+  const mover = createWhaleMover(
+    seed,
+    layout.whaleHome,
+    layout.viewYaw - Math.PI / 2,
+    floor.heightAt,
+    layout.journey,
+  );
   const m = mover.motion;
   const scene = new THREE.Scene();
   const renderer = headlessRenderer();
@@ -51,14 +57,27 @@ for (const seed of seeds) {
   sky.setEnvironmentRefresh(true);
   const weather = createWeather(seed, sky.clearCover);
   const regionLook = createRegionLook(land.regions);
-  const stream = createLandStream(land, { segments: 48, sunDirection: sky.sunDirection, hazeColor: sky.hazeColor });
+  const stream = createLandStream(land, {
+    segments: 48,
+    sunDirection: sky.sunDirection,
+    hazeColor: sky.hazeColor,
+  });
   const parent = new THREE.Group();
-  const ships = createShipStream({ seed, maskAt: land.maskAt, startSpecs: layout.ships, parent, cap: 8, shoreReady: land.nav.ready });
+  const ships = createShipStream({
+    seed,
+    maskAt: land.maskAt,
+    startSpecs: layout.ships,
+    parent,
+    cap: 8,
+    shoreReady: land.nav.ready,
+  });
   const origin = createWorldOrigin();
   const birds = createBirds(seed, 'high');
   const wake = createWake();
   const camera = new THREE.PerspectiveCamera(48, 1.6, 0.5, 12000);
-  const rig = new FollowCamera(camera, { groundAt: (x, z) => floor.heightAt(x + origin.x, z + origin.z) });
+  const rig = new FollowCamera(camera, {
+    groundAt: (x, z) => floor.heightAt(x + origin.x, z + origin.z),
+  });
   let recentres = 0;
   origin.onRecenter((dx, dz) => {
     recentres++;
@@ -96,7 +115,14 @@ for (const seed of seeds) {
     sky.update(DT);
     swell += DT * swellRate(m.speed / TRAVEL_MAX);
     const state = { x: m.x, y: m.pose.y, z: m.z, heading: m.heading, speed: m.speed };
-    birds.update(time, m.x, m.z, DT, { x: camera.position.x + origin.x, y: camera.position.y, z: camera.position.z + origin.z }, false);
+    birds.update(
+      time,
+      m.x,
+      m.z,
+      DT,
+      { x: camera.position.x + origin.x, y: camera.position.y, z: camera.position.z + origin.z },
+      false,
+    );
     wake.update(state, DT);
     rig.setTarget({ x: m.x - origin.x, y: m.pose.y, z: m.z - origin.z, heading: m.heading });
     rig.update(DT, time);
@@ -145,7 +171,8 @@ for (const seed of seeds) {
   const net = Math.hypot(m.x - layout.whaleHome.x, m.z - layout.whaleHome.z);
   const from = Math.min(2, heaps.length - 1);
   const growth = heaps.length > 2 ? last(heaps) - (heaps[from] ?? 0) : 0;
-  const slope = heaps.length > 3 ? (last(heaps) - (heaps[from] ?? 0)) / ((heaps.length - 1 - from) * 10) : 0;
+  const slope =
+    heaps.length > 3 ? (last(heaps) - (heaps[from] ?? 0)) / ((heaps.length - 1 - from) * 10) : 0;
   console.log(
     JSON.stringify({
       seed,

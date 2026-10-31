@@ -38,10 +38,14 @@ function edt1(f: Float64Array, d: Float64Array, n: number, v: Int32Array, zb: Fl
   zb[0] = -INF;
   zb[1] = INF;
   for (let q = 1; q < n; q++) {
-    let s = ((f[q] ?? 0) + q * q - ((f[v[k] ?? 0] ?? 0) + (v[k] ?? 0) * (v[k] ?? 0))) / (2 * q - 2 * (v[k] ?? 0));
+    let s =
+      ((f[q] ?? 0) + q * q - ((f[v[k] ?? 0] ?? 0) + (v[k] ?? 0) * (v[k] ?? 0))) /
+      (2 * q - 2 * (v[k] ?? 0));
     while (s <= (zb[k] ?? 0)) {
       k--;
-      s = ((f[q] ?? 0) + q * q - ((f[v[k] ?? 0] ?? 0) + (v[k] ?? 0) * (v[k] ?? 0))) / (2 * q - 2 * (v[k] ?? 0));
+      s =
+        ((f[q] ?? 0) + q * q - ((f[v[k] ?? 0] ?? 0) + (v[k] ?? 0) * (v[k] ?? 0))) /
+        (2 * q - 2 * (v[k] ?? 0));
     }
     k++;
     v[k] = q;
@@ -55,7 +59,10 @@ function edt1(f: Float64Array, d: Float64Array, n: number, v: Int32Array, zb: Fl
   }
 }
 
-export function createDepthField(maskAt: (x: number, z: number) => number, options: DepthFieldOptions = {}): DepthField {
+export function createDepthField(
+  maskAt: (x: number, z: number) => number,
+  options: DepthFieldOptions = {},
+): DepthField {
   const cell = options.cell ?? 250;
   const T = options.tile ?? 64;
   const reach = options.reach ?? 14000;
@@ -79,7 +86,8 @@ export function createDepthField(maskAt: (x: number, z: number) => number, optio
     // The mask goes into its own buffer: the transform's scratch is shared, so it runs in one go at the end.
     const mask = new Uint8Array(W * W);
     for (let j = 0; j < W; j++) {
-      for (let i = 0; i < W; i++) mask[j * W + i] = maskAt(x0 + i * cell, z0 + j * cell) > landAbove ? 1 : 0;
+      for (let i = 0; i < W; i++)
+        mask[j * W + i] = maskAt(x0 + i * cell, z0 + j * cell) > landAbove ? 1 : 0;
       if (j % 8 === 7) yield;
     }
     for (let k = 0; k < W * W; k++) grid[k] = mask[k] ? 0 : INF;
@@ -95,7 +103,8 @@ export function createDepthField(maskAt: (x: number, z: number) => number, optio
     }
     const out = new Float32Array((T + 1) * (T + 1));
     for (let j = 0; j <= T; j++) {
-      for (let i = 0; i <= T; i++) out[j * (T + 1) + i] = Math.min(reach, Math.sqrt(grid[(j + P) * W + i + P] ?? 0) * cell);
+      for (let i = 0; i <= T; i++)
+        out[j * (T + 1) + i] = Math.min(reach, Math.sqrt(grid[(j + P) * W + i + P] ?? 0) * cell);
     }
     trimOldest(tiles, maxTiles - 1);
     tiles.set(`${String(tx)},${String(tz)}`, out);
@@ -158,10 +167,14 @@ export function createDepthField(maskAt: (x: number, z: number) => number, optio
         if (!pending) {
           let next: [number, number] | null = null;
           for (let dz = -1; dz <= 1 && !next; dz++) {
-            for (let dx = -1; dx <= 1 && !next; dx++) if (!tiles.has(`${String(tx + dx)},${String(tz + dz)}`)) next = [tx + dx, tz + dz];
+            for (let dx = -1; dx <= 1 && !next; dx++)
+              if (!tiles.has(`${String(tx + dx)},${String(tz + dz)}`)) next = [tx + dx, tz + dz];
           }
           if (!next) return true;
-          pending = { key: `${String(next[0])},${String(next[1])}`, steps: build(next[0], next[1]) };
+          pending = {
+            key: `${String(next[0])},${String(next[1])}`,
+            steps: build(next[0], next[1]),
+          };
         }
         if (pending.steps.next().done) pending = null;
       }

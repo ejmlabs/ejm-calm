@@ -30,12 +30,84 @@ export interface WeatherLook {
 }
 
 export const WEATHER: Record<WeatherState, WeatherLook> = {
-  clear: { coverage: 0.17, density: 0.15, fog: 1, haze: 1, sun: 1, grey: 0, rain: 0, wind: 0.12, dark: 0, sea: 0, flash: 0 },
-  hazy: { coverage: 0.34, density: 0.2, fog: 1.7, haze: 1.2, sun: 0.78, grey: 0.12, rain: 0, wind: 0.2, dark: 0, sea: 0.12, flash: 0 },
-  overcast: { coverage: 0.82, density: 0.45, fog: 1.25, haze: 1.05, sun: 0.38, grey: 0.5, rain: 0, wind: 0.4, dark: 0.15, sea: 0.35, flash: 0 },
-  rain: { coverage: 0.9, density: 0.6, fog: 1.9, haze: 1.3, sun: 0.22, grey: 0.62, rain: 0.7, wind: 0.62, dark: 0.35, sea: 0.62, flash: 0 },
-  storm: { coverage: 0.95, density: 0.75, fog: 2.2, haze: 1.45, sun: 0.1, grey: 0.7, rain: 1, wind: 1, dark: 0.62, sea: 1, flash: 0 },
-  fog: { coverage: 0.92, density: 0.7, fog: 9, haze: 14, sun: 0.4, grey: 0.85, rain: 0, wind: 0.05, dark: 0.05, sea: 0.05, flash: 0 },
+  clear: {
+    coverage: 0.17,
+    density: 0.15,
+    fog: 1,
+    haze: 1,
+    sun: 1,
+    grey: 0,
+    rain: 0,
+    wind: 0.12,
+    dark: 0,
+    sea: 0,
+    flash: 0,
+  },
+  hazy: {
+    coverage: 0.34,
+    density: 0.2,
+    fog: 1.7,
+    haze: 1.2,
+    sun: 0.78,
+    grey: 0.12,
+    rain: 0,
+    wind: 0.2,
+    dark: 0,
+    sea: 0.12,
+    flash: 0,
+  },
+  overcast: {
+    coverage: 0.82,
+    density: 0.45,
+    fog: 1.25,
+    haze: 1.05,
+    sun: 0.38,
+    grey: 0.5,
+    rain: 0,
+    wind: 0.4,
+    dark: 0.15,
+    sea: 0.35,
+    flash: 0,
+  },
+  rain: {
+    coverage: 0.9,
+    density: 0.6,
+    fog: 1.9,
+    haze: 1.3,
+    sun: 0.22,
+    grey: 0.62,
+    rain: 0.7,
+    wind: 0.62,
+    dark: 0.35,
+    sea: 0.62,
+    flash: 0,
+  },
+  storm: {
+    coverage: 0.95,
+    density: 0.75,
+    fog: 2.2,
+    haze: 1.45,
+    sun: 0.1,
+    grey: 0.7,
+    rain: 1,
+    wind: 1,
+    dark: 0.62,
+    sea: 1,
+    flash: 0,
+  },
+  fog: {
+    coverage: 0.92,
+    density: 0.7,
+    fog: 9,
+    haze: 14,
+    sun: 0.4,
+    grey: 0.85,
+    rain: 0,
+    wind: 0.05,
+    dark: 0.05,
+    sea: 0.05,
+    flash: 0,
+  },
 };
 
 /** The ladder the weather walks, a rung at a time; fog is a bank of its own on top. */
@@ -97,7 +169,13 @@ export function weatherTrack(seed: number): WeatherTrack {
       const roll = unit(seed, 5003, at);
       const up = last === 0 ? UP + 0.07 : UP;
       const down = last === LADDER.length - 1 ? DOWN + 0.18 : DOWN;
-      rungs.push(roll < up ? Math.min(LADDER.length - 1, last + 1) : roll < up + down ? Math.max(0, last - 1) : last);
+      rungs.push(
+        roll < up
+          ? Math.min(LADDER.length - 1, last + 1)
+          : roll < up + down
+            ? Math.max(0, last - 1)
+            : last,
+      );
     }
     return rungs[k] ?? 0;
   };
@@ -109,8 +187,10 @@ export function weatherTrack(seed: number): WeatherTrack {
   return {
     span,
     ladder: (clock) => sampled(clock, span, (k) => rung(k) / (LADDER.length - 1)),
-    bank: (clock) => sampled(clock, span * 1.6, (k) => (k > 0 && unit(seed, 5007, k) < 0.2 ? 1 : 0)),
-    swell: (clock) => sampled(clock, span * 2.3, (k) => (k > 0 ? 0.45 * unit(seed, 5011, k) ** 2 : 0)),
+    bank: (clock) =>
+      sampled(clock, span * 1.6, (k) => (k > 0 && unit(seed, 5007, k) < 0.2 ? 1 : 0)),
+    swell: (clock) =>
+      sampled(clock, span * 2.3, (k) => (k > 0 ? 0.45 * unit(seed, 5011, k) ** 2 : 0)),
   };
 }
 
@@ -123,7 +203,12 @@ export function severityAt(track: WeatherTrack, clock: number, weights: RegionWe
 }
 
 /** Fog bank strength now: the region's odds, and gone when the wind gets up. */
-export function fogAt(track: WeatherTrack, clock: number, weights: RegionWeights, severity: number): number {
+export function fogAt(
+  track: WeatherTrack,
+  clock: number,
+  weights: RegionWeights,
+  severity: number,
+): number {
   let odds = 0;
   for (let r = 0; r < 4; r++) odds += (weights[r] ?? 0) * (FOG_ODDS[r] ?? 0);
   return track.bank(clock) * odds * (1 - smoothstep(0.35, 0.65, severity));
@@ -141,7 +226,8 @@ export function flashAt(seed: number, clock: number, storm: number): number {
   const since = clock - (cell * FLASH_CELL + unit(seed, 7002, cell) * (FLASH_CELL - FLASH_LENGTH));
   if (since < 0 || since > FLASH_LENGTH) return 0;
   const strength = 0.5 + 0.5 * unit(seed, 7003, cell);
-  const shape = since < FLASH_RISE ? since / FLASH_RISE : Math.exp(-(since - FLASH_RISE) * FLASH_FADE);
+  const shape =
+    since < FLASH_RISE ? since / FLASH_RISE : Math.exp(-(since - FLASH_RISE) * FLASH_FADE);
   return strength * shape * (1 - smoothstep(FLASH_LENGTH - 0.3, FLASH_LENGTH, since));
 }
 

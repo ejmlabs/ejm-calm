@@ -3,9 +3,27 @@ import type { SkyHandle } from './sky.js';
 import type { QualityTier } from './quality.js';
 import { clamp, lerp } from './math.js';
 import { hash } from './rng.js';
-import { WATER_LEVEL, underwaterUniforms, waterSignal, type FloatingOrigin, type WaterSignal } from './seams.js';
-import { WATER_IOR, blendFog, depthLight, seenLight, waterTint, type FogState } from './underwater-optics.js';
-import { DRAW_AS_AUTHORED_GLSL, SCENE_FROM_DISPLAY_GLSL, displayExposure, radianceFor } from './tone.js';
+import {
+  WATER_LEVEL,
+  underwaterUniforms,
+  waterSignal,
+  type FloatingOrigin,
+  type WaterSignal,
+} from './seams.js';
+import {
+  WATER_IOR,
+  blendFog,
+  depthLight,
+  seenLight,
+  waterTint,
+  type FogState,
+} from './underwater-optics.js';
+import {
+  DRAW_AS_AUTHORED_GLSL,
+  SCENE_FROM_DISPLAY_GLSL,
+  displayExposure,
+  radianceFor,
+} from './tone.js';
 import { createFloorPatch } from './underwater-floor.js';
 import { createSeafloor, type DepthAt, type Seafloor } from './seafloor.js';
 import { createUnderwaterLife } from './underwater-life.js';
@@ -45,7 +63,12 @@ export interface UnderwaterOptions {
 
 export interface UnderwaterHandle {
   /** `whale` (world metres) keeps scenery out of the camera's line to it and makes swarms part around it. */
-  update: (dt: number, time: number, camera: THREE.PerspectiveCamera, whale?: { x: number; y: number; z: number }) => WaterSignal;
+  update: (
+    dt: number,
+    time: number,
+    camera: THREE.PerspectiveCamera,
+    whale?: { x: number; y: number; z: number },
+  ) => WaterSignal;
   readonly signal: WaterSignal;
   /** Seafloor relief (world coords) that the floor, life and feed sites all stand on. */
   seafloor: Seafloor;
@@ -63,7 +86,11 @@ const TIER = {
   high: { rays: 16, snow: 380, floorCells: 96, floorStep: 1.8, caustics: 2, budget: 1400 },
 } as const;
 
-export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRenderer, options: UnderwaterOptions): UnderwaterHandle {
+export function createUnderwater(
+  scene: THREE.Scene,
+  renderer: THREE.WebGLRenderer,
+  options: UnderwaterOptions,
+): UnderwaterHandle {
   const { sky, origin } = options;
   const tier = TIER[options.tier];
   const seed = options.seed ?? 1;
@@ -72,7 +99,10 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
 
   // Above-water state to blend from and restore to.
   const fog = scene.fog instanceof THREE.FogExp2 ? scene.fog : null;
-  const above: FogState = { color: fog ? fog.color.clone() : sky.horizonColor.clone(), density: fog?.density ?? 0.00034 };
+  const above: FogState = {
+    color: fog ? fog.color.clone() : sky.horizonColor.clone(),
+    density: fog?.density ?? 0.00034,
+  };
   let writtenDensity = NaN;
   const writtenColor = new THREE.Color(-1, -1, -1);
   const clearBase = renderer.getClearColor(new THREE.Color());
@@ -134,9 +164,13 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   /** What the window overhead shows, from the sky as it is now. */
   function lookUp(): void {
     radianceFor(sky.hazeGradient[0] ?? sky.hazeColor, exposure(), skyHorizon);
-    zenithDisplay.copy(sky.hazeGradient[sky.hazeGradient.length - 1] ?? sky.hazeColor).lerp(zenithBlue, 0.45);
+    zenithDisplay
+      .copy(sky.hazeGradient[sky.hazeGradient.length - 1] ?? sky.hazeColor)
+      .lerp(zenithBlue, 0.45);
     radianceFor(zenithDisplay, exposure(), skyZenith);
-    radianceFor(sunGlowDisplay, exposure(), sunGlow).multiplyScalar(1.4 * clamp(sky.sunDirection.y * 4, 0, 1));
+    radianceFor(sunGlowDisplay, exposure(), sunGlow).multiplyScalar(
+      1.4 * clamp(sky.sunDirection.y * 4, 0, 1),
+    );
   }
   lookUp();
 
@@ -238,7 +272,12 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   const rayColor = display(0xd8f1ea);
   const rayMaterial = new THREE.ShaderMaterial({
     name: 'underwater-rays',
-    uniforms: { ...shared, uRayColor: { value: rayColor }, uIntensity: { value: 0 }, displayExposure },
+    uniforms: {
+      ...shared,
+      uRayColor: { value: rayColor },
+      uIntensity: { value: 0 },
+      displayExposure,
+    },
     vertexShader: /* glsl */ `
       uniform vec3 uSunWater;
       uniform float uTime;
@@ -376,7 +415,14 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
 
   const life = createUnderwaterLife(seed, seafloor.heightAt, options.tier, UNDERWATER_LAYER);
   group.add(life.group);
-  const swarms = createSwarms(seed, seafloor.heightAt, options.tier, UNDERWATER_LAYER, shared, (hex) => radianceFor(display(hex), exposure()));
+  const swarms = createSwarms(
+    seed,
+    seafloor.heightAt,
+    options.tier,
+    UNDERWATER_LAYER,
+    shared,
+    (hex) => radianceFor(display(hex), exposure()),
+  );
   group.add(swarms.group);
   const whaleRender = new THREE.Vector3();
   let pointScale = 400;
@@ -436,7 +482,12 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   function nearSpan(): [number, number] {
     let lo = Infinity;
     let hi = -Infinity;
-    for (const [x, y] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    for (const [x, y] of [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ] as const) {
       nearCorner.set(x, y, -1).applyMatrix4(nearMatrix);
       lo = Math.min(lo, nearCorner.y);
       hi = Math.max(hi, nearCorner.y);
@@ -464,7 +515,12 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   };
   let resting = false;
 
-  function update(dt: number, time: number, camera: THREE.PerspectiveCamera, whale?: { x: number; y: number; z: number }): WaterSignal {
+  function update(
+    dt: number,
+    time: number,
+    camera: THREE.PerspectiveCamera,
+    whale?: { x: number; y: number; z: number },
+  ): WaterSignal {
     camera.layers.enable(UNDERWATER_LAYER);
     waterSignal(camera.position.y, signal);
     // sky.update rewrites the density each frame; anything else is our own write from last frame.
@@ -531,7 +587,10 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     scene.environmentIntensity = sky.environmentLevel * light * lerp(1, SKY_IN_DEEP_WATER, deepen);
     for (const l of lights) {
       l.light.intensity = l.base.intensity * light;
-      l.light.color.copy(l.base.color).lerp(lightTint, s * 0.55).lerp(tinted.copy(l.base.color).multiply(depthTint), deepen);
+      l.light.color
+        .copy(l.base.color)
+        .lerp(lightTint, s * 0.55)
+        .lerp(tinted.copy(l.base.color).multiply(depthTint), deepen);
     }
 
     // Exponential-fog equivalent of the FogExp2 visibility, for shaders that fade linearly.
@@ -544,7 +603,13 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     const below0 = depth > 0;
     sky.sky.visible = !below0;
     // The clear shows where nothing is drawn, so it is the colour everything else fades to.
-    if (below0) renderer.setClearColor(options.clearInScene ? radianceFor(tint.color, exposure(), clearColor) : clearColor.copy(tint.color), 1);
+    if (below0)
+      renderer.setClearColor(
+        options.clearInScene
+          ? radianceFor(tint.color, exposure(), clearColor)
+          : clearColor.copy(tint.color),
+        1,
+      );
     else renderer.setClearColor(clearBase, clearAlpha);
 
     shared.uTime.value = time;
@@ -561,8 +626,14 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       surface.position.set(camera.position.x, WATER_LEVEL, camera.position.z);
       const reflect = item(surfaceMaterial.uniforms, 'uReflect').value as THREE.Color;
       reflect.copy(below.color).multiplyScalar(0.8);
-      item(rayMaterial.uniforms, 'uIntensity').value = 0.22 * smoothstep01(depth / 0.8) * daylight * (0.35 + 0.65 * clamp(sky.sunDirection.y * 2.5, 0, 1));
-      pointScale = (renderer.getDrawingBufferSize(tmpSize).y * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5);
+      item(rayMaterial.uniforms, 'uIntensity').value =
+        0.22 *
+        smoothstep01(depth / 0.8) *
+        daylight *
+        (0.35 + 0.65 * clamp(sky.sunDirection.y * 2.5, 0, 1));
+      pointScale =
+        (renderer.getDrawingBufferSize(tmpSize).y * 0.5) /
+        Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5);
       item(snowMaterial.uniforms, 'uScale').value = pointScale;
     }
     floor.update(camWorldX, camWorldZ, origin, below0);
@@ -594,7 +665,12 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     },
     stats() {
       const l = life.stats();
-      return { lifeCells: l.cells, lifeInstances: l.instances, schools: l.schools, swarms: swarms.sites.length };
+      return {
+        lifeCells: l.cells,
+        lifeInstances: l.instances,
+        schools: l.schools,
+        swarms: swarms.sites.length,
+      };
     },
     dispose() {
       restoreState();

@@ -23,14 +23,21 @@ export function validateMemory(value: unknown): value is CalmMemory {
   if (!Number.isInteger(data.seed) || data.seed < 0 || data.seed > 0xffffffff) return false;
   if (data.sound) {
     if (typeof data.sound.enabled !== 'boolean') return false;
-    if (typeof data.sound.volume !== 'number' || !Number.isFinite(data.sound.volume) || data.sound.volume < 0 || data.sound.volume > 1) return false;
+    if (
+      typeof data.sound.volume !== 'number' ||
+      !Number.isFinite(data.sound.volume) ||
+      data.sound.volume < 0 ||
+      data.sound.volume > 1
+    )
+      return false;
   }
   if (data.route !== undefined && typeof data.route !== 'boolean') return false;
   if (data.dives !== undefined && typeof data.dives !== 'boolean') return false;
   if (data.pace !== undefined && !isPace(data.pace)) return false;
   if (data.framing) {
     const { yaw, pitch, distance } = data.framing;
-    if (![yaw, pitch, distance].every((n) => typeof n === 'number' && Number.isFinite(n))) return false;
+    if (![yaw, pitch, distance].every((n) => typeof n === 'number' && Number.isFinite(n)))
+      return false;
     if (pitch < 0 || pitch > 1.2 || distance < 5 || distance > 200) return false;
   }
   return true;

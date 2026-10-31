@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import type { WorldLayout } from './terrain.js';
-import { farShelf, farShelfSteps, navShelfSteps, nearShelf, type Land, type ShelfMap } from './land.js';
+import {
+  farShelf,
+  farShelfSteps,
+  navShelfSteps,
+  nearShelf,
+  type Land,
+  type ShelfMap,
+} from './land.js';
 import { createOcean, type OceanHandle } from './ocean.js';
 import { createLandStream, type Dissolve, type LandStream } from './landmesh.js';
 import { createShipStream } from './world-ships.js';
@@ -55,7 +62,13 @@ export interface World {
     setVisible: (visible: boolean) => void;
   };
   /** Streams land, ships and shelves around the whale and recentres the origin if needed. */
-  update: (whaleWorldX: number, whaleWorldZ: number, camera: THREE.Camera, dt: number, time: number) => void;
+  update: (
+    whaleWorldX: number,
+    whaleWorldZ: number,
+    camera: THREE.Camera,
+    dt: number,
+    time: number,
+  ) => void;
   stats: () => Record<string, number | number[]>;
   dispose: () => void;
 }
@@ -84,7 +97,12 @@ const FAR_STEP = 1280;
 /** Shelf map centres lie on this lattice (the navigation field's own tile grid is finer). */
 const SHELF_SNAP = 256;
 
-export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scene, options: WorldOptions): World {
+export function createWorld(
+  seed: number,
+  layout: WorldLayout,
+  scene: THREE.Scene,
+  options: WorldOptions,
+): World {
   const land = layout.land;
   const origin = createWorldOrigin();
   const root = new THREE.Group();
@@ -145,7 +163,12 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
   if (options.worker && typeof Worker !== 'undefined') {
     try {
       worker = new Worker(new URL('./world-worker.ts', import.meta.url), { type: 'module' });
-      const init: WorkerRequest = { type: 'init', seed: land.seed, viewYaw: land.viewYaw, offset: land.offset };
+      const init: WorkerRequest = {
+        type: 'init',
+        seed: land.seed,
+        viewYaw: land.viewYaw,
+        offset: land.offset,
+      };
       worker.postMessage(init);
       worker.onmessage = (event: MessageEvent<{ type: string; id: number; shelf: ShelfMap }>) => {
         if (event.data.type === 'far' && event.data.id === farId) {
@@ -188,16 +211,30 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
   function bakeShelves(x: number, z: number): void {
     const cx = snapShelf(x);
     const cz = snapShelf(z);
-    if (!nearJob && Math.hypot((whale[0] ?? 0) - nearAt.x, (whale[1] ?? 0) - nearAt.z) > NEAR_STEP) {
+    if (
+      !nearJob &&
+      Math.hypot((whale[0] ?? 0) - nearAt.x, (whale[1] ?? 0) - nearAt.z) > NEAR_STEP
+    ) {
       nearAt = { x: cx, z: cz };
       nearJob = nearSteps(cx, cz);
     }
-    if (!farJob && !farWaiting && Math.hypot((whale[0] ?? 0) - farAt.x, (whale[1] ?? 0) - farAt.z) > FAR_STEP) {
+    if (
+      !farJob &&
+      !farWaiting &&
+      Math.hypot((whale[0] ?? 0) - farAt.x, (whale[1] ?? 0) - farAt.z) > FAR_STEP
+    ) {
       farAt = { x: cx, z: cz };
       if (worker) {
         farId++;
         farWaiting = true;
-        const request: WorkerRequest = { type: 'far', id: farId, size: FAR_SIZE, extent: FAR_EXTENT, cx, cz };
+        const request: WorkerRequest = {
+          type: 'far',
+          id: farId,
+          size: FAR_SIZE,
+          extent: FAR_EXTENT,
+          cx,
+          cz,
+        };
         worker.postMessage(request);
       } else {
         farJob = farSteps(cx, cz);
@@ -254,7 +291,8 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
       cameraWorld.copy(camera.position);
       cameraWorld.x += origin.x;
       cameraWorld.z += origin.z;
-      if (Math.hypot(cameraWorld.x - wx, cameraWorld.z - wz) > CAMERA_LEASH) cameraWorld.set(wx, 0, wz);
+      if (Math.hypot(cameraWorld.x - wx, cameraWorld.z - wz) > CAMERA_LEASH)
+        cameraWorld.set(wx, 0, wz);
       origin.maybeRecenter(wx, wz);
       landStream.update(cameraWorld.x, cameraWorld.z, dt, vx, vz);
       walkerClock += dt;

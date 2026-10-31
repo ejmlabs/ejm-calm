@@ -12,11 +12,15 @@ import { ORBIT_DISTANCE, createViewControls } from '../src/view-controls.js';
 /** Just enough of a canvas for OrbitControls to attach its listeners. */
 function stubCanvas(): HTMLCanvasElement {
   const el = Object.assign(new EventTarget(), { style: {}, clientWidth: 800, clientHeight: 600 });
-  return Object.assign(el, { getRootNode: () => el, ownerDocument: el }) as unknown as HTMLCanvasElement;
+  return Object.assign(el, {
+    getRootNode: () => el,
+    ownerDocument: el,
+  }) as unknown as HTMLCanvasElement;
 }
 
 function key(canvas: HTMLCanvasElement, name: string, times = 1): void {
-  for (let i = 0; i < times; i++) canvas.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: name }));
+  for (let i = 0; i < times; i++)
+    canvas.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key: name }));
 }
 
 function setup() {
@@ -30,14 +34,15 @@ function setup() {
   const swim = { speed: 0 };
   const run = (seconds: number, reducedMotion = false) => {
     for (let i = 0; i < seconds * 60; i++) {
-      target.x -= Math.cos(target.heading) * swim.speed / 60;
-      target.z += Math.sin(target.heading) * swim.speed / 60;
+      target.x -= (Math.cos(target.heading) * swim.speed) / 60;
+      target.z += (Math.sin(target.heading) * swim.speed) / 60;
       rig.setTarget(target);
       view.update(reducedMotion);
       rig.update(1 / 60, 0, reducedMotion);
     }
   };
-  const distance = () => camera.position.distanceTo(new THREE.Vector3(target.x, target.y, target.z));
+  const distance = () =>
+    camera.position.distanceTo(new THREE.Vector3(target.x, target.y, target.z));
   return { camera, rig, canvas, view, changes, target, swim, run, distance };
 }
 
@@ -72,10 +77,19 @@ test('pace scales the cruising speed and the whale still breathes', () => {
   const slow = mean(PACES.slow);
   const normal = mean(PACES.normal);
   const fast = mean(PACES.fast);
-  assert.ok(slow.speed < normal.speed * 0.75, `slow ${String(slow.speed)} vs ${String(normal.speed)}`);
-  assert.ok(fast.speed > normal.speed * 1.3, `fast ${String(fast.speed)} vs ${String(normal.speed)}`);
+  assert.ok(
+    slow.speed < normal.speed * 0.75,
+    `slow ${String(slow.speed)} vs ${String(normal.speed)}`,
+  );
+  assert.ok(
+    fast.speed > normal.speed * 1.3,
+    `fast ${String(fast.speed)} vs ${String(normal.speed)}`,
+  );
   assert.ok(fast.top < TRAVEL_MAX * PACES.fast + 6, `fast top ${String(fast.top)}`);
-  assert.ok(fast.breaths >= 2 && slow.breaths >= 2, `breaths ${String(slow.breaths)} ${String(fast.breaths)}`);
+  assert.ok(
+    fast.breaths >= 2 && slow.breaths >= 2,
+    `breaths ${String(slow.breaths)} ${String(fast.breaths)}`,
+  );
 });
 
 test('the follow camera stays the default until the user orbits', () => {
@@ -118,7 +132,10 @@ test('the pitch never goes under the water or over the top', () => {
   run(1);
   key(canvas, 'ArrowDown', 60);
   run(3);
-  assert.ok(camera.position.y >= WATER_LEVEL + EYE_CLEARANCE - 1e-6, `eye ${String(camera.position.y)}`);
+  assert.ok(
+    camera.position.y >= WATER_LEVEL + EYE_CLEARANCE - 1e-6,
+    `eye ${String(camera.position.y)}`,
+  );
   key(canvas, 'ArrowUp', 80);
   run(3);
   const flat = Math.hypot(camera.position.x - target.x, camera.position.z - target.z);
@@ -132,7 +149,8 @@ test('after letting go the view keeps its angle to the turning whale', () => {
   key(canvas, 'ArrowLeft', 13);
   run(3);
   const relative = () => {
-    const a = Math.atan2(camera.position.x - target.x, camera.position.z - target.z) - target.heading;
+    const a =
+      Math.atan2(camera.position.x - target.x, camera.position.z - target.z) - target.heading;
     return Math.atan2(Math.sin(a), Math.cos(a));
   };
   const before = relative();

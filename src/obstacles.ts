@@ -13,9 +13,15 @@ import type { ShipHandle } from './ships.js';
 
 export type ObstacleKind = 'whale' | 'ship' | 'rock' | 'prop';
 
-export interface Obstacle { kind: ObstacleKind; capsule: Capsule }
+export interface Obstacle {
+  kind: ObstacleKind;
+  capsule: Capsule;
+}
 
-export interface FeelerHit { obstacle: Obstacle; distance: number }
+export interface FeelerHit {
+  obstacle: Obstacle;
+  distance: number;
+}
 
 export interface Obstacles {
   /** Forgets every obstacle; movers are added again each frame, after they move. Allocates nothing once warm. */
@@ -28,7 +34,13 @@ export interface Obstacles {
    * metres, with the distance it travels before touching; null when the way is clear. The hit is the same object on
    * every call.
    */
-  feeler: (origin: THREE.Vector3, direction: THREE.Vector3, length: number, radius?: number, ignore?: Obstacle) => FeelerHit | null;
+  feeler: (
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+    length: number,
+    radius?: number,
+    ignore?: Obstacle,
+  ) => FeelerHit | null;
   readonly size: number;
 }
 
@@ -149,7 +161,13 @@ const oc = new THREE.Vector3();
  * Distance along the ray (origin `ro`, unit direction `rd`) to the capsule pa–pb of radius `r`, or −1 on a miss; 0 when
  * the ray starts inside. Ported from a published MIT-licensed intersector; source in THIRD_PARTY_NOTICES.
  */
-export function rayCapsule(ro: THREE.Vector3, rd: THREE.Vector3, pa: THREE.Vector3, pb: THREE.Vector3, r: number): number {
+export function rayCapsule(
+  ro: THREE.Vector3,
+  rd: THREE.Vector3,
+  pa: THREE.Vector3,
+  pb: THREE.Vector3,
+  r: number,
+): number {
   ba.subVectors(pb, pa);
   oa.subVectors(ro, pa);
   const baba = ba.dot(ba);
@@ -182,7 +200,10 @@ export function rayCapsule(ro: THREE.Vector3, rd: THREE.Vector3, pa: THREE.Vecto
 export const WHALE_RADIUS = 1.3;
 
 /** The whale's capsule: head to fluke tips along its heading and pitch, written into `out`. */
-export function whaleCapsule(state: Pick<WhaleState, 'x' | 'y' | 'z' | 'heading' | 'pitch'>, out = new Capsule()): Capsule {
+export function whaleCapsule(
+  state: Pick<WhaleState, 'x' | 'y' | 'z' | 'heading' | 'pitch'>,
+  out = new Capsule(),
+): Capsule {
   // The head is on the model's −X: yaw, then nose-up pitch, carry it to this direction.
   const cp = Math.cos(state.pitch);
   const fx = -Math.cos(state.heading) * cp;
@@ -199,7 +220,10 @@ export function whaleCapsule(state: Pick<WhaleState, 'x' | 'y' | 'z' | 'heading'
 const shipAxis = new THREE.Vector3();
 
 /** A ship's capsule: bow to stern along the hull, half the beam wide, at the waterline; written into `out`. */
-export function shipCapsule(ship: Pick<ShipHandle, 'group' | 'size'>, out = new Capsule()): Capsule {
+export function shipCapsule(
+  ship: Pick<ShipHandle, 'group' | 'size'>,
+  out = new Capsule(),
+): Capsule {
   const { position, quaternion, scale } = ship.group;
   const radius = (ship.size.beam / 2) * scale.x;
   const half = Math.max(0, (ship.size.length / 2) * scale.x - radius);
@@ -244,7 +268,9 @@ export function groundClearance(surfaces: Pick<Surfaces, 'groundAt'>, capsule: C
 }
 
 /** Registers the whale and the ships afloat where they are now; call once a frame, after they move. */
-export function createMoverSync(obstacles: Obstacles): (whale: WhaleState, ships: readonly ShipHandle[]) => void {
+export function createMoverSync(
+  obstacles: Obstacles,
+): (whale: WhaleState, ships: readonly ShipHandle[]) => void {
   const whaleObstacle: Obstacle = { kind: 'whale', capsule: new Capsule() };
   const shipObstacles = new WeakMap<ShipHandle, Obstacle>();
   return (whale, ships) => {

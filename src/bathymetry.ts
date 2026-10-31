@@ -39,7 +39,10 @@ export function depthForCoastDistance(metres: number, profile: ShelfProfile = CO
 
 /** Depth from the distances to the nearest continental coast and to the nearest coast of any land: the shallower profile wins. */
 export function seabedDepth(continent: number, coast: number = continent): number {
-  return Math.min(depthForCoastDistance(continent, CONTINENT), depthForCoastDistance(coast, ISLAND));
+  return Math.min(
+    depthForCoastDistance(continent, CONTINENT),
+    depthForCoastDistance(coast, ISLAND),
+  );
 }
 
 /** Smooth minimum: within a few RISE of the lower value it follows it; never above it. */

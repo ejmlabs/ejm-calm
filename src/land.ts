@@ -144,21 +144,26 @@ function channels(seed: number): Channels {
 export function createLand(seed: number, options: LandOptions): Land {
   const n = channels(seed);
   // A landmark stands only in open water: no natural coast within a kilometre, so it never narrows a way through.
-  const landmarks = createLandmarks(seed, options.landmarks === false ? () => false : (mark) => {
-    const saved = { held, lifted, raised, headland, wx, wz };
-    let open = true;
-    for (const ring of [0, 400, 1000]) {
-      const around = ring === 0 ? 1 : 16;
-      for (let k = 0; k < around && open; k++) {
-        const x = mark.x + Math.cos((k / around) * Math.PI * 2) * ring;
-        const z = mark.z + Math.sin((k / around) * Math.PI * 2) * ring;
-        warp(x, z);
-        if (maskWarped(x, z) > -0.05) open = false;
-      }
-    }
-    ({ held, lifted, raised, headland, wx, wz } = saved);
-    return open;
-  });
+  const landmarks = createLandmarks(
+    seed,
+    options.landmarks === false
+      ? () => false
+      : (mark) => {
+          const saved = { held, lifted, raised, headland, wx, wz };
+          let open = true;
+          for (const ring of [0, 400, 1000]) {
+            const around = ring === 0 ? 1 : 16;
+            for (let k = 0; k < around && open; k++) {
+              const x = mark.x + Math.cos((k / around) * Math.PI * 2) * ring;
+              const z = mark.z + Math.sin((k / around) * Math.PI * 2) * ring;
+              warp(x, z);
+              if (maskWarped(x, z) > -0.05) open = false;
+            }
+          }
+          ({ held, lifted, raised, headland, wx, wz } = saved);
+          return open;
+        },
+  );
   const blend: RegionWeights = [0, 0, 0, 0];
   const jitter = (hash(seed, 'land-anchor') / 0x100000000 - 0.5) * 0.7;
   const anchorYaw = options.viewYaw + jitter;
@@ -172,7 +177,10 @@ export function createLand(seed: number, options: LandOptions): Land {
   // One channel of open water leaves the opening bay to the side of the view, so no start sea is closed in.
   const exitSide = hash(seed, 'land-exit') & 1 ? 1 : -1;
   const exitTurn = exitSide * (0.95 + (hash(seed, 'land-exit-turn') / 0x100000000) * 0.6);
-  const exit = { x: look.x * Math.cos(exitTurn) - look.z * Math.sin(exitTurn), z: look.x * Math.sin(exitTurn) + look.z * Math.cos(exitTurn) };
+  const exit = {
+    x: look.x * Math.cos(exitTurn) - look.z * Math.sin(exitTurn),
+    z: look.x * Math.sin(exitTurn) + look.z * Math.cos(exitTurn),
+  };
   const bank = { x: -Math.sin(bankYaw) * bankDist, z: -Math.cos(bankYaw) * bankDist, r: 60 };
   // The migration leaves by the exit and follows the current from there.
   const planet = createPlanet(seed, Math.atan2(exit.z, -exit.x));
@@ -219,7 +227,11 @@ export function createLand(seed: number, options: LandOptions): Land {
     // Far land rises toward the horizon ahead, so a second, hazier range sits behind the coast.
     const ahead = r > 1 ? (x * look.x + z * look.z) / r : 0;
     // Bounded to the start area: out on the journey the continents speak for themselves.
-    const distant = 0.32 * smoothstep(3600, 5400, r) * smoothstep(0.25, 0.8, ahead) * (1 - smoothstep(9000, 14000, r));
+    const distant =
+      0.32 *
+      smoothstep(3600, 5400, r) *
+      smoothstep(0.25, 0.8, ahead) *
+      (1 - smoothstep(9000, 14000, r));
     // Away from the opening the planet's layout decides: continents, open ocean and archipelagos.
     const thin = smoothstep(REGION_FROM, REGION_FULL, r);
     let isletGain = 1;
@@ -229,7 +241,10 @@ export function createLand(seed: number, options: LandOptions): Land {
       const along = x * exit.x + z * exit.z;
       if (along > 0) {
         const across = Math.abs(x * -exit.z + z * exit.x);
-        channel = (1 - smoothstep(EXIT_WIDTH, EXIT_WIDTH * 2.3, across)) * smoothstep(450, 800, r) * (1 - smoothstep(REGION_FULL, REGION_FULL + 2000, r));
+        channel =
+          (1 - smoothstep(EXIT_WIDTH, EXIT_WIDTH * 2.3, across)) *
+          smoothstep(450, 800, r) *
+          (1 - smoothstep(REGION_FULL, REGION_FULL + 2000, r));
       }
     }
     const macro = thin > 0 ? planet.macroAt(wx - ox, wz - oz) : 0;
@@ -247,7 +262,9 @@ export function createLand(seed: number, options: LandOptions): Land {
     // Offshore islets: blobs that only rise in the water off the coast.
     const isl = fbm2(n.islet, x / 340, z / 340, 2);
     const band =
-      smoothstep(-0.45, -0.15, m) * (1 - smoothstep(-0.04, 0.06, m)) * smoothstep(HARBOUR_RADIUS + 40, HARBOUR_RADIUS + 140, r);
+      smoothstep(-0.45, -0.15, m) *
+      (1 - smoothstep(-0.04, 0.06, m)) *
+      smoothstep(HARBOUR_RADIUS + 40, HARBOUR_RADIUS + 140, r);
     lifted = Math.max(0, isl - 0.36) * 1.5 * band * isletGain;
     // A rock or islet of the cell, ragged by the same noise; none in the opening, where the view is composed.
     raised = thin > 0 ? landmarks.at(x, z, isletGain) * thin * (0.9 + 0.35 * isl) : 0;
@@ -371,7 +388,12 @@ export function createLand(seed: number, options: LandOptions): Land {
     // Spurs and gullies down every slope with real relief, finer as `lod` falls: far tiles' shading maps sample
     // more of them than their own vertices can hold.
     const relief = smoothstep(30, 400, h);
-    if (relief > 0) h += (ridged2(n.erode, wx / 640, wz / 640, Math.max(1, 6 - lod), 2.1, 0.5) - 0.4) * relief * Math.min(h, 900) * 0.3;
+    if (relief > 0)
+      h +=
+        (ridged2(n.erode, wx / 640, wz / 640, Math.max(1, 6 - lod), 2.1, 0.5) - 0.4) *
+        relief *
+        Math.min(h, 900) *
+        0.3;
     // Cliff faces (land only, so the coast mask and the sea are untouched): gullies and buttresses
     // break the top edge.
     const face = steep * smoothstep(0.0, 0.03, m) * (1 - smoothstep(0.12, 0.2, m));
@@ -393,7 +415,9 @@ export function createLand(seed: number, options: LandOptions): Land {
     const bx = x - bank.x;
     const bz = z - bank.z;
     const lobe = fbm2(n.shoal, x / 60 + 3.3, z / 60 - 1.7, 2) * 0.35;
-    const main = smoothstep(0.15, 0.6, Math.exp(-(bx * bx + bz * bz) / (bank.r * bank.r)) + lobe) * (1 - smoothstep(1400, 1700, r));
+    const main =
+      smoothstep(0.15, 0.6, Math.exp(-(bx * bx + bz * bz) / (bank.r * bank.r)) + lobe) *
+      (1 - smoothstep(1400, 1700, r));
     return Math.max(patches, main);
   }
 
@@ -407,7 +431,10 @@ export function createLand(seed: number, options: LandOptions): Land {
     // The route plan reads 3.4 km around the whale, the next shelf bake 2.3 km around the origin.
     maxTiles: 256,
     // Reuse the start grid's samples once it exists.
-    known: (i, j) => (grid && i >= 0 && j >= 0 && i < gridSize && j < gridSize ? grid.mask[j * gridSize + i] : undefined),
+    known: (i, j) =>
+      grid && i >= 0 && j >= 0 && i < gridSize && j < gridSize
+        ? grid.mask[j * gridSize + i]
+        : undefined,
   });
 
   // Metres to the nearest land of any kind, islets and rocks included, out to where island flanks reach the plain.
@@ -422,7 +449,10 @@ export function createLand(seed: number, options: LandOptions): Land {
   function depthAt(x: number, z: number): number {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
     warp(x, z);
-    const continent = Math.max(0, planet.openAt(wx - ox, wz - oz) - COAST_DETAIL_REACH - WARP_REACH);
+    const continent = Math.max(
+      0,
+      planet.openAt(wx - ox, wz - oz) - COAST_DETAIL_REACH - WARP_REACH,
+    );
     return seabedDepth(continent, depthField.coastDistanceAt(x, z));
   }
 
@@ -449,13 +479,23 @@ export function createLand(seed: number, options: LandOptions): Land {
     // Near the start the exit from the bay is a channel narrower than a coarse cell: the most open of five samples across the cell lets a plan through it.
     reach: (x, z) =>
       -(x * x + z * z < 8000 * 8000
-        ? Math.min(maskAt(x, z), maskAt(x + 220, z), maskAt(x - 220, z), maskAt(x, z + 220), maskAt(x, z - 220))
+        ? Math.min(
+            maskAt(x, z),
+            maskAt(x + 220, z),
+            maskAt(x - 220, z),
+            maskAt(x, z + 220),
+            maskAt(x, z - 220),
+          )
         : maskAt(x, z)) * 500,
     away: nav.away,
   };
 }
 
-function buildGrid(maskAt: (x: number, z: number) => number, size: number, extent: number): LandGrid {
+function buildGrid(
+  maskAt: (x: number, z: number) => number,
+  size: number,
+  extent: number,
+): LandGrid {
   const cell = (extent * 2) / (size - 1);
   const min = -extent;
   const mask = new Float32Array(size * size);
@@ -475,7 +515,8 @@ function buildGrid(maskAt: (x: number, z: number) => number, size: number, exten
   // Signed: positive at sea (metres to land), negative on land (metres to sea).
   const distance = new Float32Array(size * size);
   for (let i = 0; i < distance.length; i++) {
-    distance[i] = (toLand[i] ?? 0) > 0 ? Math.sqrt(toLand[i] ?? 0) * cell : -Math.sqrt(toSea[i] ?? 0) * cell;
+    distance[i] =
+      (toLand[i] ?? 0) > 0 ? Math.sqrt(toLand[i] ?? 0) * cell : -Math.sqrt(toSea[i] ?? 0) * cell;
   }
   return { min, cell, size, mask, distance };
 }
@@ -528,7 +569,12 @@ function openEdges(data: Uint8Array, size: number): void {
   }
 }
 
-function shelfFromDistance(distance: ArrayLike<number>, size: number, min: number, extent: number): ShelfMap {
+function shelfFromDistance(
+  distance: ArrayLike<number>,
+  size: number,
+  min: number,
+  extent: number,
+): ShelfMap {
   const data = new Uint8Array(size * size);
   for (let i = 0; i < data.length; i++) data[i] = shelfTexel(distance[i] ?? 0);
   openEdges(data, size);
@@ -542,7 +588,13 @@ export function nearShelf(land: Land): ShelfMap {
   return shelf;
 }
 
-export function farShelf(land: Pick<Land, 'maskAt'>, size = 384, extent = 6400, cx = 0, cz = 0): ShelfMap {
+export function farShelf(
+  land: Pick<Land, 'maskAt'>,
+  size = 384,
+  extent = 6400,
+  cx = 0,
+  cz = 0,
+): ShelfMap {
   const steps = farShelfSteps(land, size, extent, cx, cz);
   for (;;) {
     const next = steps.next();
@@ -551,7 +603,13 @@ export function farShelf(land: Pick<Land, 'maskAt'>, size = 384, extent = 6400, 
 }
 
 /** farShelf in slices of a few rows. */
-export function* farShelfSteps(land: Pick<Land, 'maskAt'>, size = 384, extent = 6400, cx = 0, cz = 0): Generator<void, ShelfMap> {
+export function* farShelfSteps(
+  land: Pick<Land, 'maskAt'>,
+  size = 384,
+  extent = 6400,
+  cx = 0,
+  cz = 0,
+): Generator<void, ShelfMap> {
   // Too coarse for an exact distance field: estimate it from the coast mask slope.
   const distance = new Float32Array(size * size);
   const cell = (extent * 2) / (size - 1);
@@ -578,7 +636,12 @@ export function navShelf(land: Land, cx: number, cz: number, size = 320): ShelfM
 }
 
 /** navShelf in slices: yields every few rows so a bake never holds up a frame. */
-export function* navShelfSteps(land: Land, cx: number, cz: number, size = 320): Generator<void, ShelfMap> {
+export function* navShelfSteps(
+  land: Land,
+  cx: number,
+  cz: number,
+  size = 320,
+): Generator<void, ShelfMap> {
   const nav = land.nav;
   const i0 = Math.round((cx - nav.min) / nav.cell) - (size >> 1);
   const j0 = Math.round((cz - nav.min) / nav.cell) - (size >> 1);
@@ -604,7 +667,10 @@ export function* navShelfSteps(land: Land, cx: number, cz: number, size = 320): 
 function addSandBanks(land: Land, shelf: ShelfMap, minX: number, minZ: number, cell: number): void {
   const size = shelf.size;
   // Banks only lie within ~1.7 km of the start.
-  const far = Math.hypot(Math.max(0, Math.abs(minX + (size * cell) / 2) - (size * cell) / 2), Math.max(0, Math.abs(minZ + (size * cell) / 2) - (size * cell) / 2));
+  const far = Math.hypot(
+    Math.max(0, Math.abs(minX + (size * cell) / 2) - (size * cell) / 2),
+    Math.max(0, Math.abs(minZ + (size * cell) / 2) - (size * cell) / 2),
+  );
   if (far > 1700) return;
   const bank = Math.round(clamp(1 - 2 / 40, 0, 1) * 255);
   for (let iz = 1; iz < size - 1; iz++) {
@@ -614,7 +680,11 @@ function addSandBanks(land: Land, shelf: ShelfMap, minX: number, minZ: number, c
       if (x * x + z * z > 1700 * 1700) continue;
       const i = iz * size + ix;
       const t = land.shoalAt(x, z);
-      if (t > 0) shelf.data[i] = Math.max(shelf.data[i] ?? 0, Math.round((shelf.data[i] ?? 0) + (bank - (shelf.data[i] ?? 0)) * t));
+      if (t > 0)
+        shelf.data[i] = Math.max(
+          shelf.data[i] ?? 0,
+          Math.round((shelf.data[i] ?? 0) + (bank - (shelf.data[i] ?? 0)) * t),
+        );
     }
   }
 }

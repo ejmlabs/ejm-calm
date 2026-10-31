@@ -1,6 +1,12 @@
 import type * as THREE from 'three';
 import { hash, random } from './rng.js';
-import { SHIP_CELL, cellDistance, chunksAround, createChunkStreamer, parseChunkKey } from './chunks.js';
+import {
+  SHIP_CELL,
+  cellDistance,
+  chunksAround,
+  createChunkStreamer,
+  parseChunkKey,
+} from './chunks.js';
 import { createShip, createShips, type ShipHandle } from './ships.js';
 import type { ShipSpec } from './terrain.js';
 import type { Shore } from './shore.js';
@@ -30,7 +36,12 @@ const SALT_ID = 0x5351;
 const START_CLEAR = 1700;
 
 /** Open water by the coast mask alone (cheap, valid anywhere): the point and a ring around it are at sea. */
-function openWater(maskAt: (x: number, z: number) => number, x: number, z: number, radius: number): boolean {
+function openWater(
+  maskAt: (x: number, z: number) => number,
+  x: number,
+  z: number,
+  radius: number,
+): boolean {
   const m = maskAt(x, z);
   // Coast masks change ~0.0025 per metre.
   if (!(m < -radius * 0.0025)) return false;
@@ -42,7 +53,13 @@ function openWater(maskAt: (x: number, z: number) => number, x: number, z: numbe
 }
 
 /** 0–2 ships for a ship cell: a pure function of (seed, cx, cz); `density` scales how many (1 is the open-sea norm). */
-export function shipSpecsForCell(seed: number, cx: number, cz: number, maskAt: (x: number, z: number) => number, density = 1): ShipSpec[] {
+export function shipSpecsForCell(
+  seed: number,
+  cx: number,
+  cz: number,
+  maskAt: (x: number, z: number) => number,
+  density = 1,
+): ShipSpec[] {
   const roll = hash(seed, SALT_COUNT, cx, cz) / 0x100000000;
   const count = roll < 1 - 0.58 * density ? 0 : roll < 1 - 0.14 * density ? 1 : 2;
   const rng = random(hash(seed, SALT_PLACE, cx, cz));
@@ -57,14 +74,25 @@ export function shipSpecsForCell(seed: number, cx: number, cz: number, maskAt: (
       if (Math.hypot(x, z) < START_CLEAR) continue;
       if (specs.some((s) => Math.hypot(s.x - x, s.z - z) < 160)) continue;
       if (!openWater(maskAt, x, z, 140)) continue;
-      specs.push({ id: hash(seed, SALT_ID, cx, cz, k), x, z, heading, scale, kind, seed: hash(seed, SALT_SEED, cx, cz, k) });
+      specs.push({
+        id: hash(seed, SALT_ID, cx, cz, k),
+        x,
+        z,
+        heading,
+        scale,
+        kind,
+        seed: hash(seed, SALT_SEED, cx, cz, k),
+      });
       break;
     }
   }
   return specs;
 }
 
-interface Ship { handle: ShipHandle; vis: number }
+interface Ship {
+  handle: ShipHandle;
+  vis: number;
+}
 
 export interface ShipStream {
   /** Ships currently afloat and at least partly visible (same array every call). */
@@ -72,7 +100,15 @@ export interface ShipStream {
   /** Every loaded ship, visible or not. */
   all: () => readonly ShipHandle[];
   /** Cells stream around (aheadX, aheadZ), a point the whale is heading for; ships show by distance from the whale. */
-  update: (dt: number, time: number, whaleX: number, whaleZ: number, shore: Shore, aheadX?: number, aheadZ?: number) => void;
+  update: (
+    dt: number,
+    time: number,
+    whaleX: number,
+    whaleZ: number,
+    shore: Shore,
+    aheadX?: number,
+    aheadZ?: number,
+  ) => void;
   setVisible: (visible: boolean) => void;
   stats: () => { cells: number; ships: number; visible: number };
   dispose: () => void;
@@ -109,11 +145,25 @@ export function createShipStream(options: {
     build(key) {
       const made =
         key === START_KEY
-          ? createShips(options.startSpecs, { anchor: { x: 0, z: 0 }, leash: 280, shoreReady: options.shoreReady })
+          ? createShips(options.startSpecs, {
+              anchor: { x: 0, z: 0 },
+              leash: 280,
+              shoreReady: options.shoreReady,
+            })
           : (() => {
               const { cx, cz } = parseChunkKey(key);
-              return shipSpecsForCell(seed, cx, cz, maskAt, options.density?.((cx + 0.5) * SHIP_CELL, (cz + 0.5) * SHIP_CELL)).map((spec) =>
-                createShip(spec, { anchor: { x: spec.x, z: spec.z }, leash: 90, shoreReady: options.shoreReady }),
+              return shipSpecsForCell(
+                seed,
+                cx,
+                cz,
+                maskAt,
+                options.density?.((cx + 0.5) * SHIP_CELL, (cz + 0.5) * SHIP_CELL),
+              ).map((spec) =>
+                createShip(spec, {
+                  anchor: { x: spec.x, z: spec.z },
+                  leash: 90,
+                  shoreReady: options.shoreReady,
+                }),
               );
             })();
       // A ship built after the first frame starts sunk and rises as the whale nears.
@@ -187,4 +237,3 @@ export function createShipStream(options: {
     },
   };
 }
-

@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { clamp, lerp, smoothstep } from './math.js';
 import { DEPTH_SCALE, WHALE_LENGTH } from './whale-size.js';
 
-export type WhalePhase = 'swim' | 'surface' | 'spout' | 'roll' | 'dive' | 'deep' | 'breach' | 'splash';
+export type WhalePhase =
+  'swim' | 'surface' | 'spout' | 'roll' | 'dive' | 'deep' | 'breach' | 'splash';
 
 export const PHASE_LEN: Record<WhalePhase, number> = {
   swim: 18,
@@ -19,7 +20,21 @@ export const PHASE_LEN: Record<WhalePhase, number> = {
  * A surfacing is a string of blows, each a rise, a spout and a roll back under; the last blow ends in the
  * fluke-up dive and the long stretch at depth. Now and then a breach follows the dive.
  */
-export const PHASE_ORDER: WhalePhase[] = ['deep', 'surface', 'spout', 'roll', 'surface', 'spout', 'dive', 'breach', 'splash', 'roll', 'surface', 'spout', 'dive'];
+export const PHASE_ORDER: WhalePhase[] = [
+  'deep',
+  'surface',
+  'spout',
+  'roll',
+  'surface',
+  'spout',
+  'dive',
+  'breach',
+  'splash',
+  'roll',
+  'surface',
+  'spout',
+  'dive',
+];
 
 /**
  * Body-origin heights and resting trim. Near the surface the whale rides
@@ -62,7 +77,10 @@ export const BREACH_APEX = (BREACH_EXIT + BREACH_LAND) * 0.5;
 export const BREACH_CONTACT_Y = 1 * DEPTH_SCALE;
 /** Phase time of that strike: the re-entry splash fires here. */
 export const BREACH_SPLASH =
-  BREACH_EXIT + (BREACH_V0 + Math.sqrt(BREACH_V0 ** 2 - 2 * GRAVITY * (BREACH_CONTACT_Y - BREACH_EXIT_Y))) / GRAVITY / PHASE_LEN.breach;
+  BREACH_EXIT +
+  (BREACH_V0 + Math.sqrt(BREACH_V0 ** 2 - 2 * GRAVITY * (BREACH_CONTACT_Y - BREACH_EXIT_Y))) /
+    GRAVITY /
+    PHASE_LEN.breach;
 const BREACH_LOW = BREACH_LAND + 0.08;
 const BREACH_END_Y = -2.2 * DEPTH_SCALE;
 const BREACH_LOW_Y = -4.6 * DEPTH_SCALE;
@@ -98,14 +116,37 @@ export interface WhalePose {
 }
 
 export function emptyPose(): WhalePose {
-  return { y: 0, pitch: 0, roll: 0, arch: 0, stroke: 1, rate: 1, flipLift: 0, flipSweep: 0, bob: 1, surge: 0 };
+  return {
+    y: 0,
+    pitch: 0,
+    roll: 0,
+    arch: 0,
+    stroke: 1,
+    rate: 1,
+    flipLift: 0,
+    flipSweep: 0,
+    bob: 1,
+    surge: 0,
+  };
 }
 
-function hermite(y0: number, v0: number, y1: number, v1: number, duration: number, s: number): number {
+function hermite(
+  y0: number,
+  v0: number,
+  y1: number,
+  v1: number,
+  duration: number,
+  s: number,
+): number {
   const t = clamp(s, 0, 1);
   const t2 = t * t;
   const t3 = t2 * t;
-  return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * v0 * duration + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * v1 * duration;
+  return (
+    (2 * t3 - 3 * t2 + 1) * y0 +
+    (t3 - 2 * t2 + t) * v0 * duration +
+    (-2 * t3 + 3 * t2) * y1 +
+    (t3 - t2) * v1 * duration
+  );
 }
 
 /** Smooth 0→1→0 bump that is flat at both ends. */
@@ -116,15 +157,30 @@ function bump(t: number, a: number, b: number, c: number, d: number): number {
 /** Breach body height. Exactly ballistic between exit and re-entry. */
 export function breachHeight(t: number): number {
   const T = PHASE_LEN.breach;
-  if (t < BREACH_EXIT) return hermite(DEEP_Y, -DIVE_SINK, BREACH_EXIT_Y, BREACH_V0, BREACH_EXIT * T, t / BREACH_EXIT);
+  if (t < BREACH_EXIT)
+    return hermite(DEEP_Y, -DIVE_SINK, BREACH_EXIT_Y, BREACH_V0, BREACH_EXIT * T, t / BREACH_EXIT);
   if (t <= BREACH_LAND) {
     const s = (t - BREACH_EXIT) * T;
     return BREACH_EXIT_Y + BREACH_V0 * s - 0.5 * GRAVITY * s * s;
   }
   if (t < BREACH_LOW) {
-    return hermite(BREACH_EXIT_Y, -BREACH_V0, BREACH_LOW_Y, 0, (BREACH_LOW - BREACH_LAND) * T, (t - BREACH_LAND) / (BREACH_LOW - BREACH_LAND));
+    return hermite(
+      BREACH_EXIT_Y,
+      -BREACH_V0,
+      BREACH_LOW_Y,
+      0,
+      (BREACH_LOW - BREACH_LAND) * T,
+      (t - BREACH_LAND) / (BREACH_LOW - BREACH_LAND),
+    );
   }
-  return hermite(BREACH_LOW_Y, 0, BREACH_END_Y, 0, (1 - BREACH_LOW) * T, (t - BREACH_LOW) / (1 - BREACH_LOW));
+  return hermite(
+    BREACH_LOW_Y,
+    0,
+    BREACH_END_Y,
+    0,
+    (1 - BREACH_LOW) * T,
+    (t - BREACH_LOW) / (1 - BREACH_LOW),
+  );
 }
 
 /** True while the body is clear of the water's grip and following its arc. */
@@ -137,7 +193,12 @@ export function breachAirborne(t: number): boolean {
  * one in PHASE_ORDER begins, so the cycle needs no smoothing to stay continuous.
  */
 /** `lift` scales how high a fluke-up dive raises the flukes (1 full, toward 0 a dive that keeps them under). */
-export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPose(), lift = 1): WhalePose {
+export function whalePose(
+  phase: WhalePhase,
+  t: number,
+  out: WhalePose = emptyPose(),
+  lift = 1,
+): WhalePose {
   const x = clamp(t, 0, 1);
   out.roll = 0;
   out.arch = 0;
@@ -178,7 +239,8 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
     case 'roll': {
       // After a blow the head dips first and the back rolls over, fin last, then the body glides just under.
       out.y = lerp(SURFACE_Y, SHALLOW_Y, smoothstep(0.1, 0.7, x));
-      out.pitch = SURFACE_PITCH * (1 - smoothstep(0, 0.25, x)) - 0.1 * bump(x, 0.1, 0.35, 0.5, 0.85);
+      out.pitch =
+        SURFACE_PITCH * (1 - smoothstep(0, 0.25, x)) - 0.1 * bump(x, 0.1, 0.35, 0.5, 0.85);
       // The back humps as the head goes down while the tail stock still hangs low: the flukes stay
       // under (only the last dive lifts them out).
       out.arch = REST_ARCH * (1 - smoothstep(0.3, 0.85, x)) + 0.3 * bump(x, 0.05, 0.3, 0.45, 0.8);
@@ -190,10 +252,22 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
     case 'dive': {
       // Fluke-up: the back humps high, the tail stock arches out and the flukes lift clear,
       // then the whale slides under and keeps sinking into the long dive.
-      const sink = x < 0.45 ? 0 : hermite(0, 0, DEEP_Y - SURFACE_Y + 1.2 * DEPTH_SCALE, -DIVE_SINK, 0.55 * PHASE_LEN.dive, (x - 0.45) / 0.55);
+      const sink =
+        x < 0.45
+          ? 0
+          : hermite(
+              0,
+              0,
+              DEEP_Y - SURFACE_Y + 1.2 * DEPTH_SCALE,
+              -DIVE_SINK,
+              0.55 * PHASE_LEN.dive,
+              (x - 0.45) / 0.55,
+            );
       out.y = SURFACE_Y - 1.2 * DEPTH_SCALE * smoothstep(0.08, 0.5, x) + sink;
-      out.pitch = SURFACE_PITCH * (1 - smoothstep(0, 0.15, x)) - 0.62 * lift * bump(x, 0.05, 0.4, 0.6, 0.97);
-      out.arch = REST_ARCH * (1 - smoothstep(0, 0.15, x)) + 0.8 * lift * bump(x, 0.04, 0.38, 0.55, 0.95);
+      out.pitch =
+        SURFACE_PITCH * (1 - smoothstep(0, 0.15, x)) - 0.62 * lift * bump(x, 0.05, 0.4, 0.6, 0.97);
+      out.arch =
+        REST_ARCH * (1 - smoothstep(0, 0.15, x)) + 0.8 * lift * bump(x, 0.04, 0.38, 0.55, 0.95);
       // The flukes hang still while they are out of the water, then drive the body down.
       out.stroke = lerp(0.6, 1, smoothstep(0.6, 1, x)) * (1 - 0.7 * bump(x, 0.2, 0.35, 0.55, 0.7));
       out.rate = 1 - 0.4 * bump(x, 0.2, 0.35, 0.55, 0.75);
@@ -206,8 +280,13 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
       // Sound down from the dive, glide along at depth with a slow undulation, then climb back to the glide depth.
       const down = smoothstep(0, 0.2, x);
       const up = smoothstep(0.75, 1, x);
-      out.y = lerp(lerp(DEEP_Y, DEEP_DIVE_Y, down), SHALLOW_Y, up) + 0.9 * DEPTH_SCALE * Math.sin(Math.PI * 4 * x) * bump(x, 0.12, 0.3, 0.7, 0.88);
-      out.pitch = -0.22 * bump(x, 0, 0.06, 0.12, 0.22) + 0.24 * bump(x, 0.78, 0.86, 0.92, 1) - 0.05 * Math.cos(Math.PI * 4 * x) * bump(x, 0.12, 0.3, 0.7, 0.88);
+      out.y =
+        lerp(lerp(DEEP_Y, DEEP_DIVE_Y, down), SHALLOW_Y, up) +
+        0.9 * DEPTH_SCALE * Math.sin(Math.PI * 4 * x) * bump(x, 0.12, 0.3, 0.7, 0.88);
+      out.pitch =
+        -0.22 * bump(x, 0, 0.06, 0.12, 0.22) +
+        0.24 * bump(x, 0.78, 0.86, 0.92, 1) -
+        0.05 * Math.cos(Math.PI * 4 * x) * bump(x, 0.12, 0.3, 0.7, 0.88);
       const glide = bump(x, 0.18, 0.3, 0.7, 0.82);
       out.stroke = 1 - 0.3 * glide;
       out.rate = 1 - 0.25 * glide;
@@ -217,7 +296,13 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
     }
     case 'breach': {
       out.y = breachHeight(x);
-      const air = bump(x, BREACH_EXIT - 0.06, BREACH_EXIT + 0.03, BREACH_SPLASH - 0.02, BREACH_SPLASH + 0.08);
+      const air = bump(
+        x,
+        BREACH_EXIT - 0.06,
+        BREACH_EXIT + 0.03,
+        BREACH_SPLASH - 0.02,
+        BREACH_SPLASH + 0.08,
+      );
       if (x < BREACH_EXIT) {
         out.pitch = EXIT_PITCH * smoothstep(0.01, BREACH_EXIT * 0.92, x);
       } else if (x <= BREACH_SPLASH) {
@@ -229,11 +314,15 @@ export function whalePose(phase: WhalePhase, t: number, out: WhalePose = emptyPo
         out.pitch = LAND_PITCH * (1 - smoothstep(BREACH_LOW, 0.85, x));
       }
       // Roll onto the side in the air; unroll only once well under.
-      out.roll = BREACH_ROLL * smoothstep(BREACH_EXIT - 0.02, BREACH_SPLASH, x) * (1 - smoothstep(BREACH_LOW, 1, x));
+      out.roll =
+        BREACH_ROLL *
+        smoothstep(BREACH_EXIT - 0.02, BREACH_SPLASH, x) *
+        (1 - smoothstep(BREACH_LOW, 1, x));
       out.surge = BREACH_SURGE * bump(x, 0.02, 0.1, BREACH_SPLASH - 0.04, BREACH_LOW);
       out.arch = -0.12 * air;
       // Hard strokes on the way up, near-still in the air, easing back afterwards.
-      const powered = 1 + 1.1 * bump(x, 0, 0.05, 0.12, BREACH_EXIT) - 0.2 * smoothstep(BREACH_LAND, 1, x);
+      const powered =
+        1 + 1.1 * bump(x, 0, 0.05, 0.12, BREACH_EXIT) - 0.2 * smoothstep(BREACH_LAND, 1, x);
       out.stroke = lerp(powered, 0.25, air);
       out.rate = 1 + 0.9 * bump(x, 0, 0.04, 0.12, BREACH_EXIT);
       out.flipLift = -0.95 * air;
@@ -271,7 +360,18 @@ export function floorLimit(y: number, floorY: number | undefined): number {
   return limit + ((u + FLOOR_SOFT) * (u + FLOOR_SOFT)) / (4 * FLOOR_SOFT);
 }
 
-export const POSE_KEYS: (keyof WhalePose)[] = ['y', 'pitch', 'roll', 'arch', 'stroke', 'rate', 'flipLift', 'flipSweep', 'bob', 'surge'];
+export const POSE_KEYS: (keyof WhalePose)[] = [
+  'y',
+  'pitch',
+  'roll',
+  'arch',
+  'stroke',
+  'rate',
+  'flipLift',
+  'flipSweep',
+  'bob',
+  'surge',
+];
 
 /* ---------------------------------------------------------------- spine */
 
@@ -281,15 +381,25 @@ const TAIL_ARCH = [0.05, 0.09, 0.13, 0.15, 0.06];
 const HEAD_AMP = [0.012, 0.008];
 const WAVE_LAG = 0.62;
 
-export interface SpineAngles { head: number[]; tail: number[] }
+export interface SpineAngles {
+  head: number[];
+  tail: number[];
+}
 
 /**
  * Bend angles about the body Z axis for a travelling wave that runs head → fluke.
  * Positive tail angles lift the tail; positive head angles drop the head.
  */
-export function spineAngles(strokePhase: number, stroke: number, arch: number, out: SpineAngles = { head: [0, 0], tail: [0, 0, 0, 0, 0] }): SpineAngles {
+export function spineAngles(
+  strokePhase: number,
+  stroke: number,
+  arch: number,
+  out: SpineAngles = { head: [0, 0], tail: [0, 0, 0, 0, 0] },
+): SpineAngles {
   for (let i = 0; i < TAIL_AMP.length; i++) {
-    out.tail[i] = stroke * (TAIL_AMP[i] ?? 0) * Math.sin(strokePhase - (i + 1) * WAVE_LAG) + arch * (TAIL_ARCH[i] ?? 0);
+    out.tail[i] =
+      stroke * (TAIL_AMP[i] ?? 0) * Math.sin(strokePhase - (i + 1) * WAVE_LAG) +
+      arch * (TAIL_ARCH[i] ?? 0);
   }
   for (let i = 0; i < HEAD_AMP.length; i++) {
     out.head[i] = -stroke * (HEAD_AMP[i] ?? 0) * Math.sin(strokePhase + 0.4) + arch * 0.12;
@@ -308,7 +418,12 @@ const qa = new THREE.Quaternion();
  * Yaw about world Y (head along whaleForward(heading)), then nose-up pitch, then
  * roll about the body's own long axis.
  */
-export function whaleOrientation(heading: number, pitch: number, roll: number, out = new THREE.Quaternion()): THREE.Quaternion {
+export function whaleOrientation(
+  heading: number,
+  pitch: number,
+  roll: number,
+  out = new THREE.Quaternion(),
+): THREE.Quaternion {
   out.setFromAxisAngle(Y_AXIS, heading);
   // Head is on −X, so nose-up is a negative turn about Z.
   out.multiply(qa.setFromAxisAngle(Z_AXIS, -pitch));

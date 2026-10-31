@@ -57,12 +57,17 @@ await mkdir(directory, { recursive: true });
 const seed = Number(process.argv[3] ?? 42);
 const start = DAY.indexOf(pickTimeOfDay(seed));
 
-const stats = (page: Page) => page.evaluate(() => (window as unknown as { __calmReview: CalmReview }).__calmReview.stats());
-const call = <K extends Exclude<keyof CalmReview, 'stats'>>(page: Page, hook: K, ...args: Parameters<CalmReview[K]>) =>
-  page.evaluate(`window.__calmReview.${hook}(...${JSON.stringify(args)})`);
+const stats = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __calmReview: CalmReview }).__calmReview.stats());
+const call = <K extends Exclude<keyof CalmReview, 'stats'>>(
+  page: Page,
+  hook: K,
+  ...args: Parameters<CalmReview[K]>
+) => page.evaluate(`window.__calmReview.${hook}(...${JSON.stringify(args)})`);
 
 /** Day fraction (of a full day from the seed's own start) that lands on the preset. */
-const dayFor = (name: (typeof DAY)[number]) => (((DAY.indexOf(name) - start + DAY.length) % DAY.length) / DAY.length);
+const dayFor = (name: (typeof DAY)[number]) =>
+  ((DAY.indexOf(name) - start + DAY.length) % DAY.length) / DAY.length;
 
 /** For each region, the first point along the migration's lane well inside it. */
 function regionCentres(): { id: number; x: number; z: number }[] {
@@ -87,7 +92,12 @@ const round = (v: number) => Math.round(v * 100) / 100;
 async function cruise(page: Page): Promise<Stats> {
   // Swim on until the whale is travelling at pace and at the surface, then let real frames settle.
   let s = await stats(page);
-  for (let i = 0; i < 40 && !(s.behavior === 'travel' && s.speed > 14 && ((s['whale'] as number[])[1] ?? 0) > -1.5); i++) {
+  for (
+    let i = 0;
+    i < 40 &&
+    !(s.behavior === 'travel' && s.speed > 14 && ((s['whale'] as number[])[1] ?? 0) > -1.5);
+    i++
+  ) {
     await call(page, 'travel', 4);
     s = await stats(page);
   }
@@ -96,19 +106,46 @@ async function cruise(page: Page): Promise<Stats> {
 }
 
 async function settle(page: Page, ms = 6000): Promise<void> {
-  await page.waitForFunction(() => (window as unknown as { __calmReview: CalmReview }).__calmReview.stats().chunksPending === 0, undefined, { timeout: 60000 }).catch(() => {
-    // Settling is best effort: the shot is taken either way.
-  });
+  await page
+    .waitForFunction(
+      () =>
+        (window as unknown as { __calmReview: CalmReview }).__calmReview.stats().chunksPending ===
+        0,
+      undefined,
+      { timeout: 60000 },
+    )
+    .catch(() => {
+      // Settling is best effort: the shot is taken either way.
+    });
   await page.waitForTimeout(ms);
 }
 
 async function shot(page: Page, device: DeviceProfile, label: string): Promise<void> {
   const s = await stats(page);
-  await page.screenshot({ path: resolve(directory, `${device.name}-${label}.jpg`), type: 'jpeg', quality: 78, scale: 'css' });
+  await page.screenshot({
+    path: resolve(directory, `${device.name}-${label}.jpg`),
+    type: 'jpeg',
+    quality: 78,
+    scale: 'css',
+  });
   const entry = {
-    shot: `${device.name}-${label}`, region: s.regionName, day: s.dayPhase, weather: s.weather, behavior: s.behavior, speed: round(s.speed),
-    fov: round(s.fov), wake: round(s.wakeLength), wakeDraws: s.wakeDraws, added: s.addedDraws, stars: round(s.stars), draws: s.draws, triangles: s.triangles,
-    sun: round(s.sunElevation), cloud: round(s.cloudCover), fog: Number(s.fogDensity.toPrecision(3)), route: s.route,
+    shot: `${device.name}-${label}`,
+    region: s.regionName,
+    day: s.dayPhase,
+    weather: s.weather,
+    behavior: s.behavior,
+    speed: round(s.speed),
+    fov: round(s.fov),
+    wake: round(s.wakeLength),
+    wakeDraws: s.wakeDraws,
+    added: s.addedDraws,
+    stars: round(s.stars),
+    draws: s.draws,
+    triangles: s.triangles,
+    sun: round(s.sunElevation),
+    cloud: round(s.cloudCover),
+    fog: Number(s.fogDensity.toPrecision(3)),
+    route: s.route,
   };
   log.push(entry);
   console.log(JSON.stringify(entry));
@@ -116,7 +153,10 @@ async function shot(page: Page, device: DeviceProfile, label: string): Promise<v
 
 await withBrowser(async (browser, base) => {
   for (const device of [DESKTOP, MOBILE]) {
-    const { page, context, errors } = await openCalm(browser, base, device, { seed, query: { debug: '1', frame: 'finish' } });
+    const { page, context, errors } = await openCalm(browser, base, device, {
+      seed,
+      query: { debug: '1', frame: 'finish' },
+    });
     try {
       await page.waitForTimeout(3000);
       // The opening, then the whale cruising near home.
@@ -168,7 +208,8 @@ await withBrowser(async (browser, base) => {
       await shot(page, device, 'indicator-on');
       await page.waitForTimeout(6500);
       const gone = await stats(page);
-      if (gone.route !== '') problems.push(`${device.name}: the indicator is still showing after six seconds`);
+      if (gone.route !== '')
+        problems.push(`${device.name}: the indicator is still showing after six seconds`);
       await call(page, 'setRoute', false);
       if (errors.length) problems.push(`${device.name}: ${errors.join(' | ')}`);
     } finally {

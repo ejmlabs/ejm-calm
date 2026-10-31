@@ -5,7 +5,9 @@ import { CONTINENT, ISLAND, PLAIN, depthForCoastDistance, seabedDepth } from '..
 import { ABYSS, createSeafloor, softDepth } from '../src/seafloor.js';
 
 const slopeDeg = (a: number, b: number, profile = CONTINENT) =>
-  (Math.atan((depthForCoastDistance(b, profile) - depthForCoastDistance(a, profile)) / (b - a)) * 180) / Math.PI;
+  (Math.atan((depthForCoastDistance(b, profile) - depthForCoastDistance(a, profile)) / (b - a)) *
+    180) /
+  Math.PI;
 
 test('the profile runs from the coast over a shelf and a slope onto the abyssal plain', () => {
   assert.equal(depthForCoastDistance(0), 0);
@@ -30,7 +32,10 @@ test('the profile is continuous and never shallower further out', () => {
       const depth = depthForCoastDistance(d, profile);
       assert.ok(depth >= prev - 1e-9, String(d));
       // At most the steepest slope (15°) per step, so no jumps.
-      assert.ok(depth - prev <= 25 * Math.tan((16 * Math.PI) / 180), `${String(d)}: ${String(prev)} → ${String(depth)}`);
+      assert.ok(
+        depth - prev <= 25 * Math.tan((16 * Math.PI) / 180),
+        `${String(d)}: ${String(prev)} → ${String(depth)}`,
+      );
       prev = depth;
     }
   }
@@ -42,8 +47,16 @@ test('island flanks drop steeply but the shallower profile always wins', () => {
   assert.ok(seabedDepth(400000, 0) === 0);
   // On the continental shelf the water stays shallow even far from any islet.
   assert.ok(seabedDepth(CONTINENT.width / 2, 400000) < 80);
-  for (const [c, i] of [[0, 0], [20000, 3000], [90000, 90000], [500000, 12000]] as const) {
-    assert.equal(seabedDepth(c, i), Math.min(depthForCoastDistance(c), depthForCoastDistance(i, ISLAND)));
+  for (const [c, i] of [
+    [0, 0],
+    [20000, 3000],
+    [90000, 90000],
+    [500000, 12000],
+  ] as const) {
+    assert.equal(
+      seabedDepth(c, i),
+      Math.min(depthForCoastDistance(c), depthForCoastDistance(i, ISLAND)),
+    );
   }
 });
 
@@ -51,7 +64,9 @@ test('the seafloor follows a bathymetry: never shallower than the eased land, de
   const land = layoutWorld(42, 140).land;
   const plain = createSeafloor(42, land);
   // A synthetic coast distance: open ocean east of x = 0, a shelf and slope toward it.
-  const deep = createSeafloor(42, land, (x, z) => (land.maskAt(x, z) > 0 ? 0 : seabedDepth(Math.max(0, x * 60))));
+  const deep = createSeafloor(42, land, (x, z) =>
+    land.maskAt(x, z) > 0 ? 0 : seabedDepth(Math.max(0, x * 60)),
+  );
   let deeper = 0;
   for (let i = 0; i < 3000; i++) {
     const x = ((i * 7919) % 6000) - 3000;
@@ -61,7 +76,11 @@ test('the seafloor follows a bathymetry: never shallower than the eased land, de
     assert.ok(Number.isFinite(h));
     if (base >= 0) assert.equal(h, plain.heightAt(x, z));
     // Relief lifts at most about 17 m, abyssal hills at most 300 m.
-    else assert.ok(h <= softDepth(base) + 17 + (h < -1700 ? 300 : 0), `${String(base)} → ${String(h)}`);
+    else
+      assert.ok(
+        h <= softDepth(base) + 17 + (h < -1700 ? 300 : 0),
+        `${String(base)} → ${String(h)}`,
+      );
     if (h < -ABYSS - 3) deeper++;
   }
   assert.ok(deeper > 500, String(deeper));
@@ -74,6 +93,7 @@ test('the seafloor follows a bathymetry: never shallower than the eased land, de
   for (let x = 0; x < 3000; x += 7) {
     const a = deep.heightAt(x, 1234);
     const b = deep.heightAt(x + 1, 1234);
-    if (land.maskAt(x, 1234) <= 0 && land.maskAt(x + 1, 1234) <= 0) assert.ok(Math.abs(a - b) < 60, `${String(x)}: ${String(a)} ${String(b)}`);
+    if (land.maskAt(x, 1234) <= 0 && land.maskAt(x + 1, 1234) <= 0)
+      assert.ok(Math.abs(a - b) < 60, `${String(x)}: ${String(a)} ${String(b)}`);
   }
 });

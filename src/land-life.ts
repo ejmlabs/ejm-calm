@@ -26,10 +26,34 @@ const TOWN_HOME = 4500;
 export const TREE = { conifer: 0, broadleaf: 1, palm: 2, shrub: 3, boulder: 4 } as const;
 export const WALKER = { person: 0, sheep: 1, cow: 2, deer: 3, reindeer: 4, goat: 5 } as const;
 
-export interface House { x: number; z: number; yaw: number; width: number; depth: number; height: number; wall: number; roof: number; tower: boolean }
+export interface House {
+  x: number;
+  z: number;
+  yaw: number;
+  width: number;
+  depth: number;
+  height: number;
+  wall: number;
+  roof: number;
+  tower: boolean;
+}
 /** A person or an animal: where it stands, the line it paces along (`range` metres each way), and its look. */
-export interface Walker { kind: number; x: number; z: number; yaw: number; range: number; phase: number; tint: number }
-export interface Town { x: number; z: number; region: number; houses: House[]; people: Walker[] }
+export interface Walker {
+  kind: number;
+  x: number;
+  z: number;
+  yaw: number;
+  range: number;
+  phase: number;
+  tint: number;
+}
+export interface Town {
+  x: number;
+  z: number;
+  region: number;
+  houses: House[];
+  people: Walker[];
+}
 
 export interface Biome {
   /** Highest trees, in metres. */
@@ -44,7 +68,14 @@ export interface LandLife {
   seed: number;
   biome: (weights: RegionWeights) => Biome;
   /** Forest cover in [0, 1] at a point of the drawn surface (height in metres, `slopeY` the normal's Y, `cliff` the land's cliff face weight). */
-  forestAt: (x: number, z: number, height: number, slopeY: number, cliff: number, biome: Biome) => number;
+  forestAt: (
+    x: number,
+    z: number,
+    height: number,
+    slopeY: number,
+    cliff: number,
+    biome: Biome,
+  ) => number;
   /** The town of a town cell, or null. */
   town: (ci: number, cj: number) => Town | null;
   /** The herd of a herd cell (empty when none). */
@@ -82,10 +113,23 @@ export function createLandLife(land: LifeLand): LandLife {
     };
   }
 
-  function forestAt(x: number, z: number, height: number, slopeY: number, cliff: number, b: Biome): number {
+  function forestAt(
+    x: number,
+    z: number,
+    height: number,
+    slopeY: number,
+    cliff: number,
+    b: Biome,
+  ): number {
     const patches = fbm2(forestNoise, x / 650, z / 650, 3) + (b.cover - 0.5) * 0.8;
-    const altitude = smoothstep(3.5, 10, height) * (1 - smoothstep(b.treeline * 0.65, b.treeline, height));
-    return smoothstep(-0.12, 0.3, patches) * altitude * smoothstep(0.74, 0.9, slopeY) * (1 - smoothstep(0.05, 0.25, cliff));
+    const altitude =
+      smoothstep(3.5, 10, height) * (1 - smoothstep(b.treeline * 0.65, b.treeline, height));
+    return (
+      smoothstep(-0.12, 0.3, patches) *
+      altitude *
+      smoothstep(0.74, 0.9, slopeY) *
+      (1 - smoothstep(0.05, 0.25, cliff))
+    );
   }
 
   /** Height, cliff weight and the largest rise over `span` metres around (x, z). */
@@ -93,7 +137,13 @@ export function createLandLife(land: LifeLand): LandLife {
     const h = land.surfaceAt(x, z, 0, surface);
     const cliff = surface.cliff;
     let rise = 0;
-    for (const [dx, dz] of [[span, 0], [-span, 0], [0, span], [0, -span]] as const) rise = Math.max(rise, Math.abs(land.surfaceAt(x + dx, z + dz, 0, surface) - h));
+    for (const [dx, dz] of [
+      [span, 0],
+      [-span, 0],
+      [0, span],
+      [0, -span],
+    ] as const)
+      rise = Math.max(rise, Math.abs(land.surfaceAt(x + dx, z + dz, 0, surface) - h));
     return { h, cliff, rise };
   }
 
@@ -185,7 +235,15 @@ export function createLandLife(land: LifeLand): LandLife {
       const pz = z + az * t + bz * (r(230 + n) - 0.5) * 6;
       if (land.maskAt(px, pz) < 0.006) continue;
       const still = r(240 + n) < 0.25;
-      people.push({ kind: WALKER.person, x: px, z: pz, yaw: Math.atan2(ax, az) + (r(250 + n) < 0.5 ? 0 : Math.PI) + (r(255 + n) - 0.5) * 0.5, range: still ? 0 : 2 + r(260 + n) * 7, phase: r(270 + n) * 6.283, tint: Math.floor(r(280 + n) * 6) });
+      people.push({
+        kind: WALKER.person,
+        x: px,
+        z: pz,
+        yaw: Math.atan2(ax, az) + (r(250 + n) < 0.5 ? 0 : Math.PI) + (r(255 + n) - 0.5) * 0.5,
+        range: still ? 0 : 2 + r(260 + n) * 7,
+        phase: r(270 + n) * 6.283,
+        tint: Math.floor(r(280 + n) * 6),
+      });
     }
     return { x, z, region, houses, people };
   }
@@ -223,7 +281,11 @@ export function createLandLife(land: LifeLand): LandLife {
         if (t && Math.hypot(t.x - x, t.z - z) < 900) farm = true;
       }
     }
-    const kind = farm ? (r(3) < 0.65 ? WALKER.sheep : WALKER.cow) : item([WALKER.deer, WALKER.goat, WALKER.reindeer, WALKER.goat], region);
+    const kind = farm
+      ? r(3) < 0.65
+        ? WALKER.sheep
+        : WALKER.cow
+      : item([WALKER.deer, WALKER.goat, WALKER.reindeer, WALKER.goat], region);
     const out: Walker[] = [];
     const count = 3 + Math.floor(r(4) * 6);
     const heading = r(5) * Math.PI * 2;
@@ -234,7 +296,15 @@ export function createLandLife(land: LifeLand): LandLife {
       const pz = z + Math.sin(a) * d;
       if (land.maskAt(px, pz) < 0.02) continue;
       // A herd faces roughly one way and drifts while it grazes.
-      out.push({ kind, x: px, z: pz, yaw: heading + (r(30 + n) - 0.5) * 1.6, range: r(40 + n) * 1.5, phase: r(50 + n) * 6.283, tint: Math.floor(r(60 + n) * 3) });
+      out.push({
+        kind,
+        x: px,
+        z: pz,
+        yaw: heading + (r(30 + n) - 0.5) * 1.6,
+        range: r(40 + n) * 1.5,
+        phase: r(50 + n) * 6.283,
+        tint: Math.floor(r(60 + n) * 3),
+      });
     }
     return out;
   }

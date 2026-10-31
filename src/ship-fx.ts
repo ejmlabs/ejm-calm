@@ -26,7 +26,11 @@ function softMap(size: number, power: number): THREE.DataTexture {
     for (let x = 0; x < size; x++) {
       const u = (x - (size - 1) / 2) / (size / 2);
       const v = (y - (size - 1) / 2) / (size / 2);
-      data.fill(Math.round(255 * Math.max(0, 1 - u * u - v * v) ** power), (y * size + x) * 4, (y * size + x) * 4 + 4);
+      data.fill(
+        Math.round(255 * Math.max(0, 1 - u * u - v * v) ** power),
+        (y * size + x) * 4,
+        (y * size + x) * 4 + 4,
+      );
     }
   }
   const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
@@ -43,7 +47,16 @@ export function createShipFx(surface: (x: number, z: number) => number = () => 0
   const lampMap = softMap(16, 2);
   const flat = new THREE.PlaneGeometry(1, 1);
   flat.rotateX(-Math.PI / 2);
-  const foamMaterial = drawAsAuthored(new THREE.MeshBasicMaterial({ color: 0xffffff, alphaMap: foamMap, transparent: true, opacity: 0.5, depthWrite: false, fog: false }));
+  const foamMaterial = drawAsAuthored(
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      alphaMap: foamMap,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      fog: false,
+    }),
+  );
   const foam = new THREE.InstancedMesh(flat, foamMaterial, SHIP_FX_CAPACITY * 2);
   foam.frustumCulled = false;
   foam.renderOrder = 1;
@@ -51,18 +64,23 @@ export function createShipFx(surface: (x: number, z: number) => number = () => 0
 
   const lampPositions = new Float32Array(SHIP_FX_CAPACITY * 4 * 3);
   const lampGeometry = new THREE.BufferGeometry();
-  lampGeometry.setAttribute('position', new THREE.BufferAttribute(lampPositions, 3).setUsage(THREE.DynamicDrawUsage));
-  const lampMaterial = drawAsAuthored(new THREE.PointsMaterial({
-    color: 0xffc878,
-    size: 7,
-    sizeAttenuation: false,
-    alphaMap: lampMap,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    fog: false,
-  }));
+  lampGeometry.setAttribute(
+    'position',
+    new THREE.BufferAttribute(lampPositions, 3).setUsage(THREE.DynamicDrawUsage),
+  );
+  const lampMaterial = drawAsAuthored(
+    new THREE.PointsMaterial({
+      color: 0xffc878,
+      size: 7,
+      sizeAttenuation: false,
+      alphaMap: lampMap,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+    }),
+  );
   const lamps = new THREE.Points(lampGeometry, lampMaterial);
   lamps.frustumCulled = false;
   lamps.visible = false;
@@ -112,7 +130,11 @@ export function createShipFx(surface: (x: number, z: number) => number = () => 0
           const ship = item(ships, i);
           const size = ship.spec.scale * SHIP_SIZE;
           for (const local of ship.lanterns) {
-            lamp.copy(local).multiplyScalar(size).applyQuaternion(ship.group.quaternion).add(ship.group.position);
+            lamp
+              .copy(local)
+              .multiplyScalar(size)
+              .applyQuaternion(ship.group.quaternion)
+              .add(ship.group.position);
             lampPositions.set([lamp.x, lamp.y, lamp.z], count * 3);
             count++;
           }

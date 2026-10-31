@@ -3,7 +3,12 @@ import { item } from './item.js';
  * The swell shared by everything that floats: the water surface, ships, the whale and the wakes all ride it, so they
  * agree on where the sea is. Its waves are fixed; only their heights follow the sea level, from glassy to rough.
  */
-export interface SwellWave { wavelength: number; amplitude: number; heading: number; speed: number }
+export interface SwellWave {
+  wavelength: number;
+  amplitude: number;
+  heading: number;
+  speed: number;
+}
 
 /** Wavelengths 40, 17 and 9 m, amplitudes 0.18, 0.07 and 0.03 m: the calm sea, matching the mirror-like water. */
 export const SWELL_WAVES: readonly SwellWave[] = [
@@ -68,10 +73,19 @@ export function seaLevel(): number {
   return sea.level;
 }
 
-export interface SwellSample { height: number; slopeX: number; slopeZ: number }
+export interface SwellSample {
+  height: number;
+  slopeX: number;
+  slopeZ: number;
+}
 
 /** Surface height (m) and slope (dh/dx, dh/dz) at world (x, z) and time `t` seconds. Writes into `out` when given. */
-export function swellAt(x: number, z: number, t: number, out: SwellSample = { height: 0, slopeX: 0, slopeZ: 0 }): SwellSample {
+export function swellAt(
+  x: number,
+  z: number,
+  t: number,
+  out: SwellSample = { height: 0, slopeX: 0, slopeZ: 0 },
+): SwellSample {
   let height = 0;
   let slopeX = 0;
   let slopeZ = 0;
@@ -97,11 +111,18 @@ export function swellAt(x: number, z: number, t: number, out: SwellSample = { he
  * The waves for a shader, four floats each: direction times wavenumber (x, z), height, and phase at render (0, 0)
  * for a world origin and time, reduced to one turn in double precision so the GPU never sees large numbers.
  */
-export function packWaves(originX: number, originZ: number, t: number, out: Float32Array): Float32Array {
+export function packWaves(
+  originX: number,
+  originZ: number,
+  t: number,
+  out: Float32Array,
+): Float32Array {
   const turn = Math.PI * 2;
   for (let i = 0; i < SEA_WAVES; i++) {
     const k = sea.k[i] ?? 0;
-    const phase = k * (originX * (sea.dirX[i] ?? 0) + originZ * (sea.dirZ[i] ?? 0)) - k * (sea.speed[i] ?? 0) * t;
+    const phase =
+      k * (originX * (sea.dirX[i] ?? 0) + originZ * (sea.dirZ[i] ?? 0)) -
+      k * (sea.speed[i] ?? 0) * t;
     out[i * 4] = (sea.dirX[i] ?? 0) * k;
     out[i * 4 + 1] = (sea.dirZ[i] ?? 0) * k;
     out[i * 4 + 2] = sea.amplitude[i] ?? 0;

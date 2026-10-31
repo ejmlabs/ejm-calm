@@ -32,9 +32,13 @@ await mkdir(directory, { recursive: true });
 const seeds = process.argv.slice(3).map(Number);
 if (!seeds.length) seeds.push(42);
 
-const call = <K extends Exclude<keyof CalmReview, 'stats'>>(page: Page, hook: K, ...args: Parameters<CalmReview[K]>) =>
-  page.evaluate(`window.__calmReview.${hook}(...${JSON.stringify(args)})`);
-const stats = (page: Page) => page.evaluate(() => (window as unknown as { __calmReview: CalmReview }).__calmReview.stats());
+const call = <K extends Exclude<keyof CalmReview, 'stats'>>(
+  page: Page,
+  hook: K,
+  ...args: Parameters<CalmReview[K]>
+) => page.evaluate(`window.__calmReview.${hook}(...${JSON.stringify(args)})`);
+const stats = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __calmReview: CalmReview }).__calmReview.stats());
 
 /** Share of a disc of `radius` around (x, z) that is land, on a 250 m lattice. */
 function landShare(land: Land, x: number, z: number, radius: number): number {
@@ -50,7 +54,11 @@ function landShare(land: Land, x: number, z: number, radius: number): number {
   return hit / n;
 }
 
-interface Spot { name: string; x: number; z: number }
+interface Spot {
+  name: string;
+  x: number;
+  z: number;
+}
 
 /** Points along the lane, a few kilometres before each kind of place, so the whale swims toward it. */
 function spots(seed: number): Spot[] {
@@ -58,7 +66,11 @@ function spots(seed: number): Spot[] {
   const renderer = headlessRenderer();
   const layout = layoutWorld(seed, createSky(seed, renderer, new THREE.Scene()).sunAzimuthDeg);
   // Natural land only: the open sea's rocks would count as land everywhere.
-  const land = createLand(seed, { viewYaw: layout.viewYaw, offset: layout.land.offset, landmarks: false });
+  const land = createLand(seed, {
+    viewYaw: layout.viewYaw,
+    offset: layout.land.offset,
+    landmarks: false,
+  });
   const planet = land.planet;
   const found: Spot[] = [];
   const want = new Set(['open-ocean', 'continent', 'archipelago']);
@@ -66,15 +78,25 @@ function spots(seed: number): Spot[] {
     const here = planet.laneCentre(s);
     const ahead = planet.laneCentre(s + 5000);
     const before = planet.laneCentre(s - 5000);
-    if (want.has('open-ocean') && landShare(land, here.x, here.z, 9000) === 0 && landShare(land, ahead.x, ahead.z, 6000) === 0) {
+    if (
+      want.has('open-ocean') &&
+      landShare(land, here.x, here.z, 9000) === 0 &&
+      landShare(land, ahead.x, ahead.z, 6000) === 0
+    ) {
       found.push({ name: 'open-ocean', ...before });
       want.delete('open-ocean');
     }
     // A continent (not one of the lane's islands) filling most of a disc just off the lane.
-    if (want.has('continent') && [-11000, 11000].some((q) => {
-      const c = { x: here.x + q * Math.sin(planet.heading), z: here.z + q * Math.cos(planet.heading) };
-      return planet.openAt(c.x, c.z) < 0 && landShare(land, c.x, c.z, 4000) > 0.6;
-    })) {
+    if (
+      want.has('continent') &&
+      [-11000, 11000].some((q) => {
+        const c = {
+          x: here.x + q * Math.sin(planet.heading),
+          z: here.z + q * Math.cos(planet.heading),
+        };
+        return planet.openAt(c.x, c.z) < 0 && landShare(land, c.x, c.z, 4000) > 0.6;
+      })
+    ) {
       found.push({ name: 'continent', ...planet.laneCentre(s - 6000) });
       want.delete('continent');
     }
@@ -95,11 +117,16 @@ const problems: string[] = [];
 await withBrowser(async (browser, base) => {
   for (const seed of seeds) {
     const places = spots(seed);
-    console.log(`seed ${String(seed)}: ${places.map((p) => `${p.name} at ${String(Math.round(p.x))}, ${String(Math.round(p.z))}`).join('; ')}`);
+    console.log(
+      `seed ${String(seed)}: ${places.map((p) => `${p.name} at ${String(Math.round(p.x))}, ${String(Math.round(p.z))}`).join('; ')}`,
+    );
     const start = DAY.indexOf(pickTimeOfDay(seed));
     const afternoon = ((DAY.indexOf('afternoon') - start + DAY.length) % DAY.length) / DAY.length;
     for (const device of [DESKTOP, MOBILE] as DeviceProfile[]) {
-      const { page, context, errors } = await openCalm(browser, base, device, { seed, query: { debug: '1', frame: 'finish' } });
+      const { page, context, errors } = await openCalm(browser, base, device, {
+        seed,
+        query: { debug: '1', frame: 'finish' },
+      });
       try {
         await page.waitForTimeout(2000);
         for (const place of places) {
@@ -113,18 +140,41 @@ await withBrowser(async (browser, base) => {
             if (s['behavior'] === 'travel' && ((s['whale'] as number[])[1] ?? 0) > -1.5) break;
             await call(page, 'travel', 4);
           }
-          await page.waitForFunction(() => (window as unknown as { __calmReview: CalmReview }).__calmReview.stats()['chunksPending'] === 0, undefined, { timeout: 60000 }).catch(() => {
-    // Settling is best effort: the shot is taken either way.
-  });
+          await page
+            .waitForFunction(
+              () =>
+                (window as unknown as { __calmReview: CalmReview }).__calmReview.stats()[
+                  'chunksPending'
+                ] === 0,
+              undefined,
+              { timeout: 60000 },
+            )
+            .catch(() => {
+              // Settling is best effort: the shot is taken either way.
+            });
           await page.waitForTimeout(4000);
           const s = await stats(page);
           const file = `world-${device.name}-${String(seed)}-${place.name}.jpg`;
-          await page.screenshot({ path: resolve(directory, file), type: 'jpeg', quality: 80, scale: 'css' });
-          const entry = { file, seed, place: place.name, region: s['regionName'], landNear: s['landNear'], draws: s['draws'], triangles: s['triangles'] };
+          await page.screenshot({
+            path: resolve(directory, file),
+            type: 'jpeg',
+            quality: 80,
+            scale: 'css',
+          });
+          const entry = {
+            file,
+            seed,
+            place: place.name,
+            region: s['regionName'],
+            landNear: s['landNear'],
+            draws: s['draws'],
+            triangles: s['triangles'],
+          };
           log.push(entry);
           console.log(JSON.stringify(entry));
         }
-        if (errors.length) problems.push(`${device.name} seed ${String(seed)}: ${errors.join(' | ')}`);
+        if (errors.length)
+          problems.push(`${device.name} seed ${String(seed)}: ${errors.join(' | ')}`);
       } finally {
         await context.close();
       }

@@ -1,12 +1,28 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { DEFAULT_FRAMING, DIVE_BELOW, FRAMING_DISTANCE, MIN_DISTANCE, WHALE_HALF } from '../src/camera.js';
+import {
+  DEFAULT_FRAMING,
+  DIVE_BELOW,
+  FRAMING_DISTANCE,
+  MIN_DISTANCE,
+  WHALE_HALF,
+} from '../src/camera.js';
 import { ORBIT_DISTANCE } from '../src/view-controls.js';
-import { FLIPPER_LENGTH, FLUKE_HALF_SPAN, WHALE_LOD, buildWhaleGeometry } from '../src/whale-model.js';
+import {
+  FLIPPER_LENGTH,
+  FLUKE_HALF_SPAN,
+  WHALE_LOD,
+  buildWhaleGeometry,
+} from '../src/whale-model.js';
 import { BREACH_APEX_Y, SHALLOW_Y, SURFACE_Y } from '../src/whale-motion.js';
 import { BODY_DEPTH, DEPTH_SCALE, LENGTH_SCALE, WHALE_LENGTH } from '../src/whale-size.js';
 
-const near = (a: number, b: number, what: string) => { assert.ok(Math.abs(a - b) < 1e-9 * Math.max(1, Math.abs(b)), `${what}: ${String(a)} vs ${String(b)}`); };
+const near = (a: number, b: number, what: string) => {
+  assert.ok(
+    Math.abs(a - b) < 1e-9 * Math.max(1, Math.abs(b)),
+    `${what}: ${String(a)} vs ${String(b)}`,
+  );
+};
 
 test('every size derives from the whale length and body depth', () => {
   near(LENGTH_SCALE, WHALE_LENGTH / 12, 'length scale');
@@ -25,7 +41,8 @@ test('every size derives from the whale length and body depth', () => {
   // Anatomy and detail levels are shares of the length.
   near(FLIPPER_LENGTH / WHALE_LENGTH, 0.13, 'flipper');
   near(FLUKE_HALF_SPAN / WHALE_LENGTH, 0.13, 'fluke span');
-  for (const levels of Object.values(WHALE_LOD)) for (const level of levels) assert.ok(level.distance === 0 || level.distance > MIN_DISTANCE);
+  for (const levels of Object.values(WHALE_LOD))
+    for (const level of levels) assert.ok(level.distance === 0 || level.distance > MIN_DISTANCE);
 });
 
 test('the built whale is as long as WHALE_LENGTH', () => {

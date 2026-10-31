@@ -5,13 +5,22 @@ import { createSpring, nearestAngle, springSet, springStep, type Spring } from '
 import { DEPTH_SCALE, LENGTH_SCALE, WHALE_LENGTH } from './whale-size.js';
 
 /** Persisted framing. `yaw` is always 0: the chase camera is locked to the whale's heading. */
-export interface CameraFraming { yaw: number; pitch: number; distance: number }
+export interface CameraFraming {
+  yaw: number;
+  pitch: number;
+  distance: number;
+}
 
 /**
  * Debug review view around the target. `yaw` is relative to the whale's heading
  * (0 = straight behind, −π/2 ≈ broadside on its left), `pitch` lifts the eye.
  */
-export interface ReviewView { yaw: number; pitch: number; distance: number; minLookY?: number }
+export interface ReviewView {
+  yaw: number;
+  pitch: number;
+  distance: number;
+  minLookY?: number;
+}
 
 export type CameraMode = 'chase' | 'under' | 'review';
 
@@ -54,7 +63,8 @@ const SPEED_CAP = 28;
 const SPEED_DISTANCE = PULL_BACK / SPEED_CAP;
 
 /** How far the framing distance is pulled back at this speed, as a share of it (0 to PULL_BACK). */
-export const pullBackAt = (speed: number): number => SPEED_DISTANCE * Math.min(Math.max(speed, 0), SPEED_CAP);
+export const pullBackAt = (speed: number): number =>
+  SPEED_DISTANCE * Math.min(Math.max(speed, 0), SPEED_CAP);
 const SPEED_LOOK_AHEAD = 0.6;
 /** Below about this speed the camera holds its bearing instead of following the heading. */
 const COUPLING_SPEED: readonly [number, number] = [0.6, 3];
@@ -155,7 +165,11 @@ export class FollowCamera {
     this.framing = {
       yaw: 0,
       pitch: clamp(saved?.pitch ?? DEFAULT_FRAMING.pitch, FRAMING_PITCH[0], FRAMING_PITCH[1]),
-      distance: clamp(saved?.distance ?? DEFAULT_FRAMING.distance, FRAMING_DISTANCE[0], FRAMING_DISTANCE[1]),
+      distance: clamp(
+        saved?.distance ?? DEFAULT_FRAMING.distance,
+        FRAMING_DISTANCE[0],
+        FRAMING_DISTANCE[1],
+      ),
     };
   }
 
@@ -198,7 +212,11 @@ export class FollowCamera {
 
   /** Wheel zoom; persisted through `framing.distance`. */
   zoom(delta: number): void {
-    this.framing.distance = clamp(this.framing.distance * Math.exp(delta * 0.001), FRAMING_DISTANCE[0], FRAMING_DISTANCE[1]);
+    this.framing.distance = clamp(
+      this.framing.distance * Math.exp(delta * 0.001),
+      FRAMING_DISTANCE[0],
+      FRAMING_DISTANCE[1],
+    );
   }
 
   /** The eye right now as an orbit view: yaw from behind the smoothed heading, pitch above the whale, distance. */
@@ -210,7 +228,11 @@ export class FollowCamera {
     const dz = p.z - t.z;
     const flat = Math.hypot(dx, dz);
     const yaw = Math.atan2(dx, dz) - this.heading.x - Math.PI / 2;
-    return { yaw: Math.atan2(Math.sin(yaw), Math.cos(yaw)), pitch: Math.atan2(dy, flat), distance: Math.hypot(flat, dy) };
+    return {
+      yaw: Math.atan2(Math.sin(yaw), Math.cos(yaw)),
+      pitch: Math.atan2(dy, flat),
+      distance: Math.hypot(flat, dy),
+    };
   }
 
   /** Keep the eye above the water through the whale's dives (the viewer's choice, or reduced motion). */
@@ -270,7 +292,10 @@ export class FollowCamera {
     const sx = this.track(this.px, t.x);
     const sz = this.track(this.pz, t.z);
     this.track(this.py, t.y);
-    const speed = Math.max(0, snap ? this.speed.x : springStep(this.speed, Math.hypot(this.px.v, this.pz.v), W_SPEED, step));
+    const speed = Math.max(
+      0,
+      snap ? this.speed.x : springStep(this.speed, Math.hypot(this.px.v, this.pz.v), W_SPEED, step),
+    );
     const climb = Math.abs(this.py.v);
 
     // Follow the whale under after a short dwell; come back up as soon as it rises.
@@ -300,7 +325,12 @@ export class FollowCamera {
     const toHeading = nearestAngle(t.heading, this.heading.x);
     const h = snap
       ? springSet(this.heading, toHeading)
-      : springStep(this.heading, this.heading.x + (toHeading - this.heading.x) * coupling, W_HEADING, step);
+      : springStep(
+          this.heading,
+          this.heading.x + (toHeading - this.heading.x) * coupling,
+          W_HEADING,
+          step,
+        );
     const fast = Math.min(speed, SPEED_CAP);
     let distGoal = this.framing.distance * (this.portrait ? 1.12 : 1) * (1 + pullBackAt(fast));
     if (this.under) distGoal = Math.min(distGoal * UNDER_DISTANCE, UNDER_MAX_DISTANCE);
@@ -321,7 +351,9 @@ export class FollowCamera {
       : WATER_LEVEL + dist * Math.sin(pitch) + Math.max(0, t.y) * 0.5 + Math.sin(peekPitch) * back;
     goalY += this.lift.x;
     const ground = this.groundAt ? this.groundAt(eyeX, eyeZ) : -Infinity;
-    const minY = Number.isFinite(ground) ? ground + (this.under ? FLOOR_CLEARANCE : LAND_CLEARANCE) : -Infinity;
+    const minY = Number.isFinite(ground)
+      ? ground + (this.under ? FLOOR_CLEARANCE : LAND_CLEARANCE)
+      : -Infinity;
     goalY = this.bandClamp(Math.max(goalY, minY));
 
     // Vertical stiffness follows the whale's vertical speed, so fast dives and resurfacing stay in step.
@@ -332,9 +364,15 @@ export class FollowCamera {
     } else {
       const nearBand = Math.abs(this.eyeY.x - WATER_LEVEL) < EYE_CLEARANCE + 1.5;
       const omega = Math.min(W_EYE_Y_CROSS, W_EYE_Y + 0.5 * climb);
-      eyeY = springStep(this.eyeY, goalY, this.crossing && nearBand ? W_EYE_Y_CROSS + 0.3 * climb : omega, step);
+      eyeY = springStep(
+        this.eyeY,
+        goalY,
+        this.crossing && nearBand ? W_EYE_Y_CROSS + 0.3 * climb : omega,
+        step,
+      );
       const side = eyeY - WATER_LEVEL;
-      if (this.crossing && (this.under ? side < -EYE_CLEARANCE : side > EYE_CLEARANCE)) this.crossing = false;
+      if (this.crossing && (this.under ? side < -EYE_CLEARANCE : side > EYE_CLEARANCE))
+        this.crossing = false;
       if (!this.crossing) {
         // Settled on one side: never below the ground, never drift back into the band.
         const held = this.bandClamp(Math.max(eyeY, minY));
@@ -362,7 +400,9 @@ export class FollowCamera {
       const flat = Math.cos(v.pitch) * v.distance;
       const ox = t.x + Math.sin(a) * flat;
       const oz = t.z + Math.cos(a) * flat;
-      const floor = this.groundAt ? this.groundAt(ox, oz) + (this.under ? FLOOR_CLEARANCE : LAND_CLEARANCE) : -Infinity;
+      const floor = this.groundAt
+        ? this.groundAt(ox, oz) + (this.under ? FLOOR_CLEARANCE : LAND_CLEARANCE)
+        : -Infinity;
       const oy = this.bandClamp(Math.max(t.y + Math.sin(v.pitch) * v.distance, floor));
       eyeX += (ox - eyeX) * s;
       eyeY += (oy - eyeY) * s;
@@ -381,7 +421,10 @@ export class FollowCamera {
       const focusY = Math.max(v.minLookY ?? 1.2, t.y * 0.7 + 1.4);
       const rx = t.x + Math.sin(a) * Math.cos(v.pitch) * v.distance;
       const rz = t.z + Math.cos(a) * Math.cos(v.pitch) * v.distance;
-      const ry = Math.max(WATER_LEVEL + EYE_CLEARANCE, focusY + Math.sin(v.pitch) * v.distance * 0.35 + 1.2);
+      const ry = Math.max(
+        WATER_LEVEL + EYE_CLEARANCE,
+        focusY + Math.sin(v.pitch) * v.distance * 0.35 + 1.2,
+      );
       eyeX += (rx - eyeX) * s;
       eyeY += (ry - eyeY) * s;
       eyeZ += (rz - eyeZ) * s;
@@ -459,14 +502,23 @@ export class FollowCamera {
       aim = this.aim.x = hard;
       this.aim.v = Math.max(0, this.aim.v);
     }
-    this.lookAt.set(lookX + (t.x - lookX) * aim, lookAtY + (t.y - lookAtY) * aim, lookZ + (t.z - lookZ) * aim);
+    this.lookAt.set(
+      lookX + (t.x - lookX) * aim,
+      lookAtY + (t.y - lookAtY) * aim,
+      lookZ + (t.z - lookZ) * aim,
+    );
     this.camera.position.set(eyeX, eyeY, eyeZ);
     this.camera.lookAt(this.lookAt);
 
     // Speed feels like a wider view and a lean into the turn; neither under water, in the orbit or review view, or with reduced motion.
-    const feel = reducedMotion || this.under || b > 1e-4 || o > 1e-4 ? 0 : smoothstep(6, SPEED_CAP, speed);
+    const feel =
+      reducedMotion || this.under || b > 1e-4 || o > 1e-4 ? 0 : smoothstep(6, SPEED_CAP, speed);
     const lift = go(this.fovLift, FOV_LIFT * feel, W_FEEL);
-    const lean = go(this.lean, clamp(this.heading.v * LEAN_GAIN, -LEAN_MAX, LEAN_MAX) * feel, W_FEEL);
+    const lean = go(
+      this.lean,
+      clamp(this.heading.v * LEAN_GAIN, -LEAN_MAX, LEAN_MAX) * feel,
+      W_FEEL,
+    );
     const fov = FOV[this.portrait ? 1 : 0] + lift;
     if (Math.abs(this.camera.fov - fov) > 1e-3) {
       this.camera.fov = fov;
@@ -477,7 +529,9 @@ export class FollowCamera {
 
   /** Keep a height out of the surface band, on the side the camera is following. */
   private bandClamp(y: number): number {
-    return this.under ? Math.min(y, WATER_LEVEL - EYE_CLEARANCE) : Math.max(y, WATER_LEVEL + EYE_CLEARANCE);
+    return this.under
+      ? Math.min(y, WATER_LEVEL - EYE_CLEARANCE)
+      : Math.max(y, WATER_LEVEL + EYE_CLEARANCE);
   }
 
   /** Largest NDC coordinate of the whale points seen from the eye toward the look point. */
@@ -515,14 +569,43 @@ export class FollowCamera {
   }
 
   /** Smallest aim ≥ `from` whose look point keeps the whale within `limit` (bisection). */
-  private aimFor(ex: number, ey: number, ez: number, lx: number, ly: number, lz: number, from: number, limit: number): number {
+  private aimFor(
+    ex: number,
+    ey: number,
+    ez: number,
+    lx: number,
+    ly: number,
+    lz: number,
+    from: number,
+    limit: number,
+  ): number {
     const t = this.target;
-    if (this.framingError(ex, ey, ez, lx + (t.x - lx) * from, ly + (t.y - ly) * from, lz + (t.z - lz) * from) <= limit) return from;
+    if (
+      this.framingError(
+        ex,
+        ey,
+        ez,
+        lx + (t.x - lx) * from,
+        ly + (t.y - ly) * from,
+        lz + (t.z - lz) * from,
+      ) <= limit
+    )
+      return from;
     let lo = from;
     let hi = 1;
     for (let i = 0; i < 10; i++) {
       const mid = (lo + hi) / 2;
-      if (this.framingError(ex, ey, ez, lx + (t.x - lx) * mid, ly + (t.y - ly) * mid, lz + (t.z - lz) * mid) <= limit) hi = mid;
+      if (
+        this.framingError(
+          ex,
+          ey,
+          ez,
+          lx + (t.x - lx) * mid,
+          ly + (t.y - ly) * mid,
+          lz + (t.z - lz) * mid,
+        ) <= limit
+      )
+        hi = mid;
       else lo = mid;
     }
     return hi;

@@ -14,14 +14,18 @@ test('swell is deterministic, bounded and its slope matches the height', () => {
   const b = swellAt(120.5, -33, 7.25);
   assert.deepEqual(a, b);
   let peak = 0;
-  for (let i = 0; i < 4000; i++) peak = Math.max(peak, Math.abs(swellAt(i * 3.7, i * -1.9, i * 0.05).height));
+  for (let i = 0; i < 4000; i++)
+    peak = Math.max(peak, Math.abs(swellAt(i * 3.7, i * -1.9, i * 0.05).height));
   assert.ok(peak <= SWELL_MAX + 1e-9 && peak > SWELL_MAX * 0.6, `peak ${String(peak)}`);
   const e = 0.01;
   const slope = swellAt(50, 20, 3);
   const dx = (swellAt(50 + e, 20, 3).height - swellAt(50 - e, 20, 3).height) / (2 * e);
   const dz = (swellAt(50, 20 + e, 3).height - swellAt(50, 20 - e, 3).height) / (2 * e);
   assert.ok(Math.abs(slope.slopeX - dx) < 1e-4 && Math.abs(slope.slopeZ - dz) < 1e-4);
-  assert.ok(Math.hypot(slope.slopeX, slope.slopeZ) < 0.1, 'gentle enough for a ship to roll under 4 degrees');
+  assert.ok(
+    Math.hypot(slope.slopeX, slope.slopeZ) < 0.1,
+    'gentle enough for a ship to roll under 4 degrees',
+  );
 });
 
 test('LOD selection steps with hysteresis and does not thrash', () => {
@@ -43,7 +47,13 @@ test('LOD selection steps with hysteresis and does not thrash', () => {
 });
 
 test('detail follows the quality tier and steps down with it', () => {
-  assert.deepEqual(detailFor('low'), { birds: 10, ships: 4, objects: 36, walkers: 64, microNormal: 'off' });
+  assert.deepEqual(detailFor('low'), {
+    birds: 10,
+    ships: 4,
+    objects: 36,
+    walkers: 64,
+    microNormal: 'off',
+  });
   assert.equal(detailFor('medium').birds, 16);
   assert.equal(detailFor('high').birds, 24);
   const state = createQuality({ software: false, cores: 16, memory: 16, dpr: 2 });
@@ -55,7 +65,14 @@ test('detail follows the quality tier and steps down with it', () => {
 
 function flock(count: number): Boid[] {
   return Array.from({ length: count }, (_, i) => ({
-    x: Math.cos(i) * 40, y: 20 + (i % 4), z: Math.sin(i) * 40, vx: 5, vy: 0, vz: 5, group: 0, size: 1,
+    x: Math.cos(i) * 40,
+    y: 20 + (i % 4),
+    z: Math.sin(i) * 40,
+    vx: 5,
+    vy: 0,
+    vz: 5,
+    group: 0,
+    size: 1,
   }));
 }
 
@@ -69,7 +86,13 @@ test('a flock stays bounded, above the water, and follows its leader without tel
     leader.x = step * 0.2;
     const before = boids.map((b) => [b.x, b.z]);
     stepFlock(boids, [leader], params, 0.1);
-    boids.forEach((b, i) => { assert.ok(Math.hypot(b.x - (item(before, i)[0] ?? 0), b.z - (item(before, i)[1] ?? 0)) < 20 * 0.1 + 1e-6, 'no jump'); });
+    boids.forEach((b, i) => {
+      assert.ok(
+        Math.hypot(b.x - (item(before, i)[0] ?? 0), b.z - (item(before, i)[1] ?? 0)) <
+          20 * 0.1 + 1e-6,
+        'no jump',
+      );
+    });
     for (const b of boids) {
       assert.ok(b.y >= 5 && b.y <= 70);
       farthest = Math.max(farthest, Math.hypot(b.x - leader.x, b.z - leader.z));
@@ -80,10 +103,15 @@ test('a flock stays bounded, above the water, and follows its leader without tel
 
 test('boids keep apart', () => {
   const boids = flock(2);
-  item(boids, 0).x = 0; item(boids, 0).z = 0; item(boids, 1).x = 0.5; item(boids, 1).z = 0;
+  item(boids, 0).x = 0;
+  item(boids, 0).z = 0;
+  item(boids, 1).x = 0.5;
+  item(boids, 1).z = 0;
   item(boids, 0).y = item(boids, 1).y = 20;
   stepFlock(boids, [{ x: 0, y: 20, z: 0 }], { speeds: [9], minHeight: 5, maxHeight: 70 }, 0.5);
-  assert.ok(Math.hypot(item(boids, 0).x - item(boids, 1).x, item(boids, 0).z - item(boids, 1).z) > 0.5);
+  assert.ok(
+    Math.hypot(item(boids, 0).x - item(boids, 1).x, item(boids, 0).z - item(boids, 1).z) > 0.5,
+  );
 });
 
 test('bird meshes have three levels of detail with a wing weight and no lines or points', () => {
@@ -96,8 +124,14 @@ test('bird meshes have three levels of detail with a wing weight and no lines or
       assert.equal(max, 1, 'wing tips carry full weight');
       return triangleCount(geometry);
     });
-    assert.ok((counts[0] ?? 0) > (counts[1] ?? 0) && (counts[1] ?? 0) > (counts[2] ?? 0), `${species.name}: ${String(counts)}`);
-    assert.ok((counts[0] ?? 0) <= 200 && (counts[2] ?? 0) >= 8, `${species.name}: ${String(counts)}`);
+    assert.ok(
+      (counts[0] ?? 0) > (counts[1] ?? 0) && (counts[1] ?? 0) > (counts[2] ?? 0),
+      `${species.name}: ${String(counts)}`,
+    );
+    assert.ok(
+      (counts[0] ?? 0) <= 200 && (counts[2] ?? 0) >= 8,
+      `${species.name}: ${String(counts)}`,
+    );
   }
 });
 
@@ -111,7 +145,8 @@ test('birds fade out on a tier step-down and rejoin their leaders on step-up', (
       birds.update(t, cx, 0, 1 / 30, camera, false);
     }
   };
-  const instances = () => birds.group.children.reduce((n, mesh) => n + (mesh as THREE.InstancedMesh).count, 0);
+  const instances = () =>
+    birds.group.children.reduce((n, mesh) => n + (mesh as THREE.InstancedMesh).count, 0);
   run(2, 0);
   assert.equal(instances(), 24);
   birds.setTier('medium');
@@ -132,6 +167,9 @@ test('birds fade out on a tier step-down and rejoin their leaders on step-up', (
       xs.push(matrix.elements[12]);
     }
   }
-  assert.ok(Math.max(...xs) - Math.min(...xs) < 400, `flock spans ${String(Math.max(...xs) - Math.min(...xs))} m`);
+  assert.ok(
+    Math.max(...xs) - Math.min(...xs) < 400,
+    `flock spans ${String(Math.max(...xs) - Math.min(...xs))} m`,
+  );
   birds.dispose();
 });

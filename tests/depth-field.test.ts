@@ -10,22 +10,40 @@ const islands = [
   { x: 30000, z: 30000, r: 50 },
 ];
 /** A mask about 1 per 500 m from each island's shore, > 0 on land. */
-const mask = (x: number, z: number) => Math.max(...islands.map((i) => (i.r - Math.hypot(x - i.x, z - i.z)) / 500));
-const trueDistance = (x: number, z: number) => Math.max(0, Math.min(...islands.map((i) => Math.hypot(x - i.x, z - i.z) - i.r)));
+const mask = (x: number, z: number) =>
+  Math.max(...islands.map((i) => (i.r - Math.hypot(x - i.x, z - i.z)) / 500));
+const trueDistance = (x: number, z: number) =>
+  Math.max(0, Math.min(...islands.map((i) => Math.hypot(x - i.x, z - i.z) - i.r)));
 
 test('the depth field is the distance to the nearest land, clamped at its reach', () => {
   const field = createDepthField(mask, { cell: 100, tile: 32, reach: 6000 });
-  for (const [x, z] of [[2000, -1500], [2600, -1500], [0, 0], [-6000, 1000], [-9000, 9000], [12000, -12000], [29000, 30500]] as const) {
+  for (const [x, z] of [
+    [2000, -1500],
+    [2600, -1500],
+    [0, 0],
+    [-6000, 1000],
+    [-9000, 9000],
+    [12000, -12000],
+    [29000, 30500],
+  ] as const) {
     const expected = Math.min(6000, trueDistance(x, z));
     // A lattice point counts as land within about 200 m of the shore (the land threshold), give or take a cell.
-    assert.ok(Math.abs(field.coastDistanceAt(x, z) - Math.max(0, expected - 200)) < 250, `${String(x)},${String(z)}: ${String(field.coastDistanceAt(x, z))} vs ${String(expected)}`);
+    assert.ok(
+      Math.abs(field.coastDistanceAt(x, z) - Math.max(0, expected - 200)) < 250,
+      `${String(x)},${String(z)}: ${String(field.coastDistanceAt(x, z))} vs ${String(expected)}`,
+    );
   }
   assert.equal(field.coastDistanceAt(NaN, 0), 6000);
 });
 
 test('prefetch builds the tiles around a point in small slices', () => {
   let t = 0;
-  const field = createDepthField(mask, { cell: 100, tile: 32, reach: 3000, now: () => (t += 0.01) });
+  const field = createDepthField(mask, {
+    cell: 100,
+    tile: 32,
+    reach: 3000,
+    now: () => (t += 0.01),
+  });
   let calls = 0;
   // The fake clock moves 0.01 ms a reading: a 0.02 ms budget is a step or two of rows per call.
   while (!field.prefetch(0, 0, 0.02) && calls < 100000) calls++;

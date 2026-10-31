@@ -25,7 +25,10 @@ export const WHALE_BREACH_SPLASH = 4;
 export const WHALE_DIVE = 8;
 export const WHALE_SURFACE = 16;
 
-export interface WhaleMoment { phase: WhalePhase; phaseT: number }
+export interface WhaleMoment {
+  phase: WhalePhase;
+  phaseT: number;
+}
 
 /**
  * Lookback, in normalised phase time, when a phase starts or jumps backwards. A
@@ -90,7 +93,11 @@ export function oceanGain(clearance: number): number {
   return 0.7 - 0.25 * (1 - smoothstep(30, 300, Math.max(0, clearance)));
 }
 
-export interface Muffle { cutoff: number; above: number; below: number }
+export interface Muffle {
+  cutoff: number;
+  above: number;
+  below: number;
+}
 
 export const MUFFLE_OPEN = 18000;
 export const MUFFLE_CLOSED = 500;
@@ -100,7 +107,10 @@ export const MUFFLE_CLOSED = 500;
  * closes through a lowpass from MUFFLE_OPEN to MUFFLE_CLOSED Hz on an exponential
  * sweep and drops to a dull residue while the underwater bed rises.
  */
-export function muffle(submersion: number, out: Muffle = { cutoff: MUFFLE_OPEN, above: 1, below: 0 }): Muffle {
+export function muffle(
+  submersion: number,
+  out: Muffle = { cutoff: MUFFLE_OPEN, above: 1, below: 0 },
+): Muffle {
   const s = clamp(submersion, 0, 1);
   out.cutoff = MUFFLE_OPEN * (MUFFLE_CLOSED / MUFFLE_OPEN) ** s;
   out.above = Math.cos(s * Math.PI * 0.5) * 0.7 + 0.3;
@@ -112,7 +122,10 @@ export const SHIP_RANGE = 650;
 
 /** Engine hum from a ship `distance` metres away. */
 export function engineGain(distance: number): number {
-  return clamp(1 / (1 + (distance / 45) ** 2), 0, 1) * (1 - smoothstep(SHIP_RANGE * 0.6, SHIP_RANGE, distance));
+  return (
+    clamp(1 / (1 + (distance / 45) ** 2), 0, 1) *
+    (1 - smoothstep(SHIP_RANGE * 0.6, SHIP_RANGE, distance))
+  );
 }
 
 /** Bow wash only carries a short way. */
@@ -125,7 +138,11 @@ export function hornGain(distance: number): number {
   return clamp(0.9 / (1 + distance / 220), 0, 0.9);
 }
 
-export interface ShipPoint { id: number; x: number; z: number }
+export interface ShipPoint {
+  id: number;
+  x: number;
+  z: number;
+}
 
 /**
  * Indices into `ships` of the nearest `max` within `range` of (x, z), nearest

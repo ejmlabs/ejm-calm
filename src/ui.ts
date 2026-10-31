@@ -20,7 +20,13 @@ export interface UIActions {
 export interface UIController {
   ready: () => void;
   error: (message: string) => void;
-  sync: (state: { seed: number; sound: boolean; route: boolean; dives: boolean; pace: Pace }) => void;
+  sync: (state: {
+    seed: number;
+    sound: boolean;
+    route: boolean;
+    dives: boolean;
+    pace: Pace;
+  }) => void;
   /** Shows the reset view control while the user's own view is on. */
   showReset: (visible: boolean) => void;
   /** Shows or hides the route indicator and sets its text. */
@@ -97,25 +103,43 @@ export function createUI(actions: UIActions): UIController {
     wake();
   };
 
-  listen(aboutBtn, 'click', () => { setAbout(!aboutOpen); });
-  listen(aboutClose, 'click', () => { setAbout(false); });
+  listen(aboutBtn, 'click', () => {
+    setAbout(!aboutOpen);
+  });
+  listen(aboutClose, 'click', () => {
+    setAbout(false);
+  });
   listen(shareBtn, 'click', (event) => {
     event.preventDefault();
     const url = actions.share();
     navigator.clipboard.writeText(url).then(
-      () => { announce('link copied'); },
-      () => { announce(url); },
+      () => {
+        announce('link copied');
+      },
+      () => {
+        announce(url);
+      },
     );
   });
-  listen(seedBtn, 'click', () => { actions.newSeed(); });
-  listen(soundBtn, 'click', () => { actions.sound(); });
-  listen(routeToggle, 'change', () => { actions.route(Boolean(routeToggle?.checked)); });
-  listen(diveToggle, 'change', () => { actions.dives(Boolean(diveToggle?.checked)); });
+  listen(seedBtn, 'click', () => {
+    actions.newSeed();
+  });
+  listen(soundBtn, 'click', () => {
+    actions.sound();
+  });
+  listen(routeToggle, 'change', () => {
+    actions.route(Boolean(routeToggle?.checked));
+  });
+  listen(diveToggle, 'change', () => {
+    actions.dives(Boolean(diveToggle?.checked));
+  });
   listen(paceChoice, 'change', (event) => {
     const value = (event.target as HTMLInputElement).value;
     if (isPace(value)) actions.pace(value);
   });
-  listen(resetBtn, 'click', () => { actions.resetView(); });
+  listen(resetBtn, 'click', () => {
+    actions.resetView();
+  });
   listen(document, 'keydown', (event) => {
     const e = event as KeyboardEvent;
     if (e.key === 'Escape' && aboutOpen) setAbout(false);

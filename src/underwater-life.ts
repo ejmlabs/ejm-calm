@@ -4,7 +4,13 @@ import type { FloatingOrigin } from './seams.js';
 import { hash } from './rng.js';
 import { makeNoise2D } from './noise.js';
 import { clamp, smoothstep } from './math.js';
-import { cellDistance, chunksAround, createChunkStreamer, parseChunkKey, type ChunkStreamer } from './chunks.js';
+import {
+  cellDistance,
+  chunksAround,
+  createChunkStreamer,
+  parseChunkKey,
+  type ChunkStreamer,
+} from './chunks.js';
 import { GLSL_SCENERY } from './underwater-glsl.js';
 import { item } from './item.js';
 
@@ -42,7 +48,16 @@ export interface LifeInstance {
   tint: number;
 }
 
-export interface School { id: number; x: number; y: number; z: number; loop: number; speed: number; phase: number; spread: number }
+export interface School {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  loop: number;
+  speed: number;
+  phase: number;
+  spread: number;
+}
 
 type Floor = (x: number, z: number) => number;
 
@@ -62,7 +77,14 @@ export function createHabitat(seed: number): (x: number, z: number) => number {
  * Life in one cell. `candidates` caps how many sites are tried (tier density);
  * the first candidates are the same at every tier, so lower tiers are subsets.
  */
-export function lifeInCell(seed: number, cx: number, cz: number, floorAt: Floor, habitat: (x: number, z: number) => number, candidates: number): LifeInstance[] {
+export function lifeInCell(
+  seed: number,
+  cx: number,
+  cz: number,
+  floorAt: Floor,
+  habitat: (x: number, z: number) => number,
+  candidates: number,
+): LifeInstance[] {
   const out: LifeInstance[] = [];
   for (let i = 0; i < candidates; i++) {
     const r = (k: number) => hash(seed, LIFE_SALT, cx, cz, i, k) / 0x100000000;
@@ -84,7 +106,13 @@ export function lifeInCell(seed: number, cx: number, cz: number, floorAt: Floor,
     } else if (roll < 0.14 + 0.5 * smoothstep(0.25, 0.8, slope)) {
       const size = 0.4 + 1.6 * r(6) * r(6);
       const coral = depth < 16 && r(8) < 0.45;
-      out.push({ ...base, kind: 'rock', width: size, height: size * (coral ? 0.8 : 0.55), tint: coral ? 1 + Math.floor(r(9) * 3) : 0 });
+      out.push({
+        ...base,
+        kind: 'rock',
+        width: size,
+        height: size * (coral ? 0.8 : 0.55),
+        tint: coral ? 1 + Math.floor(r(9) * 3) : 0,
+      });
     }
   }
   return out;
@@ -101,7 +129,16 @@ export function schoolInCell(seed: number, cx: number, cz: number, floorAt: Floo
   // Needs room for the school's spread above the floor and below the surface.
   if (!(floor < -(2 * spread + 8))) return null;
   const y = clamp(-4 - 10 * r(3), floor + spread + 3, -spread - 2.5);
-  return { id: hash(seed, SCHOOL_SALT, cx, cz), x, y, z, loop: 8 + 14 * r(4), speed: (0.08 + 0.06 * r(5)) * (r(7) < 0.5 ? -1 : 1), phase: r(8) * Math.PI * 2, spread };
+  return {
+    id: hash(seed, SCHOOL_SALT, cx, cz),
+    x,
+    y,
+    z,
+    loop: 8 + 14 * r(4),
+    speed: (0.08 + 0.06 * r(5)) * (r(7) < 0.5 ? -1 : 1),
+    phase: r(8) * Math.PI * 2,
+    spread,
+  };
 }
 
 /** TS mirror of GLSL sceneryFade: 0 hides an instance, 1 shows it in full. */
@@ -115,11 +152,20 @@ export function sceneryFade(
   const abx = whale.x - cam.x;
   const aby = whale.y - cam.y;
   const abz = whale.z - cam.z;
-  const t = clamp(((base.x - cam.x) * abx + (base.z - cam.z) * abz) / Math.max(abx * abx + abz * abz, 1e-4), 0, 1);
+  const t = clamp(
+    ((base.x - cam.x) * abx + (base.z - cam.z) * abz) / Math.max(abx * abx + abz * abz, 1e-4),
+    0,
+    1,
+  );
   const px = base.x;
   const py = clamp(cam.y + aby * t, base.y, base.y + height);
   const pz = base.z;
-  const s = clamp(((px - cam.x) * abx + (py - cam.y) * aby + (pz - cam.z) * abz) / Math.max(abx * abx + aby * aby + abz * abz, 1e-4), 0, 1);
+  const s = clamp(
+    ((px - cam.x) * abx + (py - cam.y) * aby + (pz - cam.z) * abz) /
+      Math.max(abx * abx + aby * aby + abz * abz, 1e-4),
+    0,
+    1,
+  );
   const line = Math.hypot(px - (cam.x + abx * s), py - (cam.y + aby * s), pz - (cam.z + abz * s));
   const corridor = smoothstep(2, 4.5, line);
   const near = smoothstep(4, 7, Math.hypot(px - cam.x, py - cam.y, pz - cam.z));
@@ -139,7 +185,10 @@ function kelpGeometry(): THREE.BufferGeometry {
     pos.setX(i, pos.getX(i) * (0.35 + 1.4 * Math.sin(Math.PI * Math.min(1, y * 1.05)) ** 0.7));
   }
   const b = a.clone().rotateY(Math.PI / 3);
-  const c = a.clone().rotateY((2 * Math.PI) / 3).translate(0.12, 0, 0.08);
+  const c = a
+    .clone()
+    .rotateY((2 * Math.PI) / 3)
+    .translate(0.12, 0, 0.08);
   return mergeGeometries([a, b, c]);
 }
 
@@ -148,10 +197,17 @@ function grassGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   for (let i = 0; i < 6; i++) {
     const r = (k: number) => hash(0x4752, i, k) / 0x100000000;
-    const blade = new THREE.PlaneGeometry(0.06, 0.6 + 0.4 * r(1), 1, 2).translate(0, 0.3 + 0.2 * r(1), 0);
+    const blade = new THREE.PlaneGeometry(0.06, 0.6 + 0.4 * r(1), 1, 2).translate(
+      0,
+      0.3 + 0.2 * r(1),
+      0,
+    );
     const pos = blade.getAttribute('position') as THREE.BufferAttribute;
     for (let v = 0; v < pos.count; v++) pos.setX(v, pos.getX(v) * (1 - pos.getY(v)));
-    blade.rotateZ((r(2) - 0.5) * 0.5).rotateY(r(3) * Math.PI).translate((r(4) - 0.5) * 0.5, 0, (r(5) - 0.5) * 0.5);
+    blade
+      .rotateZ((r(2) - 0.5) * 0.5)
+      .rotateY(r(3) * Math.PI)
+      .translate((r(4) - 0.5) * 0.5, 0, (r(5) - 0.5) * 0.5);
     parts.push(blade);
   }
   return mergeGeometries(parts);
@@ -163,7 +219,11 @@ function rockGeometry(): THREE.BufferGeometry {
   const pos = g.getAttribute('position') as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {
     const v = new THREE.Vector3().fromBufferAttribute(pos, i);
-    const k = 0.78 + 0.32 * (hash(0x524b, Math.round(v.x * 40), Math.round(v.y * 40), Math.round(v.z * 40)) / 0x100000000);
+    const k =
+      0.78 +
+      0.32 *
+        (hash(0x524b, Math.round(v.x * 40), Math.round(v.y * 40), Math.round(v.z * 40)) /
+          0x100000000);
     pos.setXYZ(i, v.x * k, Math.max(-0.25, v.y * k) + 0.25, v.z * k);
   }
   g.computeVertexNormals();
@@ -173,7 +233,8 @@ function rockGeometry(): THREE.BufferGeometry {
 /** A small fish along +X, nose at x = 0.2. */
 function fishGeometry(): THREE.BufferGeometry {
   const v = [
-    0.2, 0, 0, 0, 0.055, 0, 0, -0.045, 0, 0, 0, 0.028, 0, 0, -0.028, -0.16, 0, 0, -0.24, 0.06, 0, -0.24, -0.06, 0,
+    0.2, 0, 0, 0, 0.055, 0, 0, -0.045, 0, 0, 0, 0.028, 0, 0, -0.028, -0.16, 0, 0, -0.24, 0.06, 0,
+    -0.24, -0.06, 0,
   ];
   const idx = [0, 1, 3, 0, 3, 2, 0, 4, 1, 0, 2, 4, 1, 5, 3, 3, 5, 2, 1, 4, 5, 4, 2, 5, 5, 6, 7];
   const g = new THREE.BufferGeometry();
@@ -219,7 +280,10 @@ function mergeGeometries(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
 export function absorb(shader: THREE.WebGLProgramParametersWithUniforms): void {
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nvarying float vLifeDepth;')
-    .replace('#include <fog_vertex>', '#include <fog_vertex>\nvLifeDepth = max( 0.0, -( transpose( mat3( viewMatrix ) ) * ( mvPosition.xyz - viewMatrix[3].xyz ) ).y );');
+    .replace(
+      '#include <fog_vertex>',
+      '#include <fog_vertex>\nvLifeDepth = max( 0.0, -( transpose( mat3( viewMatrix ) ) * ( mvPosition.xyz - viewMatrix[3].xyz ) ).y );',
+    );
   shader.fragmentShader = shader.fragmentShader
     .replace('#include <common>', '#include <common>\nvarying float vLifeDepth;')
     .replace(
@@ -228,10 +292,19 @@ export function absorb(shader: THREE.WebGLProgramParametersWithUniforms): void {
     );
 }
 
-interface Shared { uTime: THREE.IUniform<number>; uWhale: THREE.IUniform<THREE.Vector3>; uFar: THREE.IUniform<number> }
+interface Shared {
+  uTime: THREE.IUniform<number>;
+  uWhale: THREE.IUniform<THREE.Vector3>;
+  uFar: THREE.IUniform<number>;
+}
 
 /** Lambert with the scenery fade, plus a current-driven sway that grows with height (`sway` metres at the top). */
-function lifeMaterial(shared: Shared, color: number, sway: number, options: THREE.MeshLambertMaterialParameters = {}): THREE.MeshLambertMaterial {
+function lifeMaterial(
+  shared: Shared,
+  color: number,
+  sway: number,
+  options: THREE.MeshLambertMaterialParameters = {},
+): THREE.MeshLambertMaterial {
   const material = new THREE.MeshLambertMaterial({ color, ...options });
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, shared);
@@ -263,23 +336,51 @@ function lifeMaterial(shared: Shared, color: number, sway: number, options: THRE
 export interface UnderwaterLife {
   group: THREE.Group;
   /** Stream cells around the camera; `draw` false only warms caches. */
-  update: (time: number, camWorldX: number, camWorldZ: number, whaleRender: THREE.Vector3, origin: FloatingOrigin, draw: boolean) => void;
+  update: (
+    time: number,
+    camWorldX: number,
+    camWorldZ: number,
+    whaleRender: THREE.Vector3,
+    origin: FloatingOrigin,
+    draw: boolean,
+  ) => void;
   stats: () => { cells: number; instances: number; schools: number };
   dispose: () => void;
 }
 
-export function createUnderwaterLife(seed: number, floorAt: Floor, tierName: QualityTier, layer: number): UnderwaterLife {
+export function createUnderwaterLife(
+  seed: number,
+  floorAt: Floor,
+  tierName: QualityTier,
+  layer: number,
+): UnderwaterLife {
   const tier = TIER[tierName];
   const habitat = createHabitat(seed);
-  const shared: Shared = { uTime: { value: 0 }, uWhale: { value: new THREE.Vector3() }, uFar: { value: tier.radius } };
+  const shared: Shared = {
+    uTime: { value: 0 },
+    uWhale: { value: new THREE.Vector3() },
+    uFar: { value: tier.radius },
+  };
   const group = new THREE.Group();
   group.name = 'underwater-life';
   group.visible = false;
 
   const kinds = {
-    kelp: { geometry: kelpGeometry(), material: lifeMaterial(shared, 0x6b6a2c, 0.9, { side: THREE.DoubleSide }), capacity: 900 },
-    grass: { geometry: grassGeometry(), material: lifeMaterial(shared, 0x5e7a3a, 0.12, { side: THREE.DoubleSide }), capacity: 2600 },
-    rock: { geometry: rockGeometry(), material: lifeMaterial(shared, 0xffffff, 0, { flatShading: true }), capacity: 900 },
+    kelp: {
+      geometry: kelpGeometry(),
+      material: lifeMaterial(shared, 0x6b6a2c, 0.9, { side: THREE.DoubleSide }),
+      capacity: 900,
+    },
+    grass: {
+      geometry: grassGeometry(),
+      material: lifeMaterial(shared, 0x5e7a3a, 0.12, { side: THREE.DoubleSide }),
+      capacity: 2600,
+    },
+    rock: {
+      geometry: rockGeometry(),
+      material: lifeMaterial(shared, 0xffffff, 0, { flatShading: true }),
+      capacity: 900,
+    },
   };
   const meshes = {} as Record<LifeKind, THREE.InstancedMesh>;
   for (const kind of ['kelp', 'grass', 'rock'] as const) {
@@ -294,7 +395,10 @@ export function createUnderwaterLife(seed: number, floorAt: Floor, tierName: Qua
   }
   // Rock greys and muted coral tints (display colours; three converts them).
   const tints = [0x5f645c, 0x9c6a60, 0xa3854f, 0x7a6286].map((hex) => new THREE.Color(hex));
-  meshes.rock.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(kinds.rock.capacity * 3), 3);
+  meshes.rock.instanceColor = new THREE.InstancedBufferAttribute(
+    new Float32Array(kinds.rock.capacity * 3),
+    3,
+  );
 
   let dirty = false;
   const streamer: ChunkStreamer<LifeInstance[]> = createChunkStreamer({
@@ -448,7 +552,13 @@ export function createUnderwaterLife(seed: number, floorAt: Floor, tierName: Qua
         const a = r(2) * Math.PI * 2;
         const d = Math.cbrt(r(3));
         const ring = Math.sqrt(1 - u * u);
-        aFish.setXYZW(n, ring * Math.cos(a) * d * 1.4, u * d * 0.6, ring * Math.sin(a) * d, r(4) * 100);
+        aFish.setXYZW(
+          n,
+          ring * Math.cos(a) * d * 1.4,
+          u * d * 0.6,
+          ring * Math.sin(a) * d,
+          r(4) * 100,
+        );
         n++;
       }
     }

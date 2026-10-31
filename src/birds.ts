@@ -14,7 +14,8 @@ const MIN_HEIGHT = 5;
 const MAX_HEIGHT = 70;
 const MAX_BIRDS = 24;
 /** Species of a bird by its fixed roll, for a share of gulls, terns, albatrosses (the rest). */
-const speciesFor = (roll: number, mix: readonly [number, number, number]): number => (roll < mix[0] ? 0 : roll < mix[0] + mix[1] ? 1 : 2);
+const speciesFor = (roll: number, mix: readonly [number, number, number]): number =>
+  roll < mix[0] ? 0 : roll < mix[0] + mix[1] ? 1 : 2;
 
 /** Seconds a bird takes to appear or vanish when the tier changes or its flock comes and goes. */
 const FADE_SECONDS = 1;
@@ -25,11 +26,26 @@ const ABEAM: readonly [number, number] = [50, 210];
 const GONE_BEHIND = 380;
 const PAUSE: readonly [number, number] = [4, 24];
 
-type Bird = Boid & { roll: number; phase: number; heading: number; bank: number; lod: number; tint: THREE.Color; fade: number };
+type Bird = Boid & {
+  roll: number;
+  phase: number;
+  heading: number;
+  bank: number;
+  lod: number;
+  tint: THREE.Color;
+  fade: number;
+};
 
 export interface Birds {
   group: THREE.Group;
-  update: (time: number, centerX?: number, centerZ?: number, dt?: number, camera?: { x: number; y: number; z: number }, calm?: boolean) => void;
+  update: (
+    time: number,
+    centerX?: number,
+    centerZ?: number,
+    dt?: number,
+    camera?: { x: number; y: number; z: number },
+    calm?: boolean,
+  ) => void;
   setTier: (tier: QualityTier) => void;
   /** Share of gulls, terns and albatrosses (a region's mix); birds change species out of sight. */
   setMix: (mix: readonly [number, number, number]) => void;
@@ -50,7 +66,9 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
   const time = { value: 0 };
   const flap = { value: 1 };
   const material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  material.onBeforeCompile = (shader) => { patchBirdShader(shader, time, flap); };
+  material.onBeforeCompile = (shader) => {
+    patchBirdShader(shader, time, flap);
+  };
 
   const geometries: THREE.BufferGeometry[] = [];
   // meshes[species][lod]
@@ -82,8 +100,12 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
     const tint = new THREE.Color().setScalar(0.92 + rng() * 0.08);
     birds.push({
       roll,
-      x: 0, y: 0, z: 0,
-      vx: Math.sin(heading) * speed, vy: 0, vz: Math.cos(heading) * speed,
+      x: 0,
+      y: 0,
+      z: 0,
+      vx: Math.sin(heading) * speed,
+      vy: 0,
+      vz: Math.cos(heading) * speed,
       group: species,
       size,
       phase: rng() * Math.PI * 2,
@@ -105,7 +127,8 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
   // Where each species' flock circles, and whether it is in the sky now.
   const flocks = SPECIES.map(() => ({ x: 0, z: 0, present: false, wait: 0 }));
   const flockRng = fork(seed, 7001);
-  const span = (range: readonly [number, number]): number => range[0] + (range[1] - range[0]) * flockRng();
+  const span = (range: readonly [number, number]): number =>
+    range[0] + (range[1] - range[0]) * flockRng();
   const whale = { x: 0, z: 0, dx: 0, dz: -1, set: false };
   const speeds = SPECIES.map((species) => species.speed);
 
@@ -144,7 +167,11 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
       }
       flocks.forEach((flock, i) => {
         const behind = (whale.x - flock.x) * whale.dx + (whale.z - flock.z) * whale.dz;
-        if (flock.present && (behind > GONE_BEHIND || Math.hypot(whale.x - flock.x, whale.z - flock.z) > AHEAD[1] * 1.6)) {
+        if (
+          flock.present &&
+          (behind > GONE_BEHIND ||
+            Math.hypot(whale.x - flock.x, whale.z - flock.z) > AHEAD[1] * 1.6)
+        ) {
           flock.present = false;
           flock.wait = span(PAUSE);
         }
@@ -181,7 +208,8 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
         // A bird whose species the region no longer wants fades out, changes unseen and returns.
         const wanted = speciesFor(bird.roll, mix);
         if (bird.fade === 0) bird.group = wanted;
-        const target = i < active && bird.group === wanted && item(flocks, bird.group).present ? 1 : 0;
+        const target =
+          i < active && bird.group === wanted && item(flocks, bird.group).present ? 1 : 0;
         if (first) {
           // Spread a fresh flock around its leader on first sight.
           place(bird, i);
@@ -190,7 +218,8 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
           // A bird that returns after a tier change joins its leader again rather than from where it left.
           if (bird.fade === 0) place(bird, i);
           const move = step / FADE_SECONDS;
-          bird.fade = target > bird.fade ? Math.min(1, bird.fade + move) : Math.max(0, bird.fade - move);
+          bird.fade =
+            target > bird.fade ? Math.min(1, bird.fade + move) : Math.max(0, bird.fade - move);
         }
         if (bird.fade > 0) live.push(bird);
       });
@@ -207,7 +236,9 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
         bird.heading = heading;
         const targetBank = step > 0 ? Math.max(-0.5, Math.min(0.5, (turn / step) * -1.2)) : 0;
         bird.bank = damp(bird.bank, targetBank, 2, step);
-        const distance = camera ? Math.hypot(bird.x - camera.x, bird.y - camera.y, bird.z - camera.z) : 0;
+        const distance = camera
+          ? Math.hypot(bird.x - camera.x, bird.y - camera.y, bird.z - camera.z)
+          : 0;
         bird.lod = selectLod(bird.lod, distance, LOD_BOUNDS);
 
         const { mesh, flapAttr } = item(item(meshes, species), bird.lod);
@@ -228,7 +259,8 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
       }
       draws = 0;
       triangles = 0;
-      meshes.forEach((row, s) => { row.forEach(({ mesh, flapAttr }, l) => {
+      meshes.forEach((row, s) => {
+        row.forEach(({ mesh, flapAttr }, l) => {
           const n = item(counts, s)[l] ?? 0;
           mesh.visible = n > 0;
           if (n > 0) {
@@ -238,8 +270,8 @@ export function createBirds(seed: number, tier: QualityTier = 'high'): Birds {
             draws++;
             triangles += n * (item(trianglesOf, s)[l] ?? 0);
           }
-        }); },
-      );
+        });
+      });
     },
     setTier(next) {
       active = detailFor(next).birds;

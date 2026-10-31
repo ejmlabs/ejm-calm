@@ -19,13 +19,15 @@ interface CalmReview {
 }
 
 async function settle(page: Page, seconds = 3) {
-  await page.waitForFunction(
-    () => (window as unknown as { __calmReview?: CalmReview }).__calmReview?.stats,
-    null,
-    { timeout: 20000 },
-  ).catch(() => {
-    // Settling is best effort: the shot is taken either way.
-  });
+  await page
+    .waitForFunction(
+      () => (window as unknown as { __calmReview?: CalmReview }).__calmReview?.stats,
+      null,
+      { timeout: 20000 },
+    )
+    .catch(() => {
+      // Settling is best effort: the shot is taken either way.
+    });
   await page.waitForTimeout(seconds * 1000);
 }
 
@@ -53,7 +55,13 @@ async function capture(
 await withBrowser(async (browser, base) => {
   for (const seed of seeds) {
     for (const device of [MOBILE, DESKTOP]) {
-      await capture(browser, base, device, seed, `${directory}${device.name}-seed${String(seed)}.png`);
+      await capture(
+        browser,
+        base,
+        device,
+        seed,
+        `${directory}${device.name}-seed${String(seed)}.png`,
+      );
     }
   }
 
@@ -117,12 +125,20 @@ await withBrowser(async (browser, base) => {
 
   // Chase camera under water: start a deep dive and let the camera follow it down.
   for (const device of [MOBILE, DESKTOP]) {
-    await capture(browser, base, device, 42, `${directory}${device.name}-dive.png`, { debug: '1', frame: 'finish' }, async (page) => {
-      await page.evaluate(() => {
-        (window as unknown as { __calmReview?: CalmReview }).__calmReview?.forceDeepDive?.(0.35);
-      });
-      await page.waitForTimeout(5000);
-    });
+    await capture(
+      browser,
+      base,
+      device,
+      42,
+      `${directory}${device.name}-dive.png`,
+      { debug: '1', frame: 'finish' },
+      async (page) => {
+        await page.evaluate(() => {
+          (window as unknown as { __calmReview?: CalmReview }).__calmReview?.forceDeepDive?.(0.35);
+        });
+        await page.waitForTimeout(5000);
+      },
+    );
   }
 
   // Convenience aliases for the seed-42 heroes.
