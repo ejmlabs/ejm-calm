@@ -3,15 +3,23 @@ import { Water } from 'three/addons/objects/Water.js';
 import { makeNoise4D, fbm4 } from './noise.js';
 import { hash } from './rng.js';
 import type { ShelfMap } from './land.js';
-import { SEA_WAVES, packWaves, seaLevel } from './swell.js';
+import { SEA_WAVES, SWELL_WAVES, WIND_WAVES, packWaves, seaLevel } from './swell.js';
 import { radianceFor } from './tone.js';
 import { patchShader, type ShaderPatch } from './shader-patch.js';
+import { GLSL_TILED_NOISE } from './underwater-glsl.js';
+import { item } from './item.js';
 
 /** Reflected land sits a touch darker than the land itself. */
 const REFLECTION_GAIN = 0.85;
 /** Sun glitter in scene light at a clear noon: the sparkle of single facets, and the sheen of the path they make. */
 const GLITTER = 70;
 const SHEEN = 1.6;
+/** The foam's lattice, in the wind's frame, repeats every this many metres (a power of two, so every octave tiles). */
+export const FOAM_PERIOD = 1024;
+/** Foam drifts downwind at half the speed of the long roller: crests run on through it and leave it behind them. */
+export const FOAM_DRIFT = 0.5 * item(WIND_WAVES, 0).speed;
+/** Where the long roller, which runs downwind, sits among the packed waves. */
+const ROLLER = SWELL_WAVES.length * 4;
 
 export interface OceanHandle {
   water: Water;
@@ -149,8 +157,18 @@ export function createOcean(
   const maps = { near: options.shelves?.near, far: options.shelves?.far };
   const origin = { x: 0, z: 0 };
   let light = 1;
+  let foamClock = 0;
+
+  /** Lays the foam's lattice on the world: the origin and the drift, reduced to the period in float64 like the ripples. */
+  function anchorFoam(): void {
+    if (!sea) return;
+    const wind = sea.foamWind.value;
+    const wrap = (v: number) => v - Math.floor(v / FOAM_PERIOD) * FOAM_PERIOD;
+    sea.foamShift.value.set(wrap(wind.x * origin.x + wind.y * origin.z - FOAM_DRIFT * foamClock), wrap(wind.x * origin.z - wind.y * origin.x));
+  }
 
   function place(): void {
+    anchorFoam();
     if (!look) return;
     // Ripple texture offsets for the origin, reduced to their period in float64 so the GPU never sees large numbers.
     const fract = (v: number) => v - Math.floor(v);
@@ -192,6 +210,10 @@ export function createOcean(
       sea.rippleGain.value = 1.5 + 1.6 * wind;
       base.distortionScale.value = 4.2 + 3.5 * wind;
       sea.foamLight.value = light;
+      // The long roller runs downwind, and foam drifts with it.
+      sea.foamWind.value.set(waves[ROLLER] ?? 1, waves[ROLLER + 1] ?? 0).normalize();
+      foamClock = clock;
+      anchorFoam();
     },
     setWhale(x: number, y: number, z: number, heading: number) {
       look?.whaleBody.value.set(x, z, heading, y);
@@ -319,6 +341,48 @@ export const SEA_GLSL = `
 `;
 
 /**
+ * Foam texture at a point of the foam's lattice (the wind's frame, metres), seen through a pixel `reach` metres across
+ * and along the wind: octaves of value noise from 32 m across the wind down to 0.25 m, streaked downwind at the larger
+ * scales and bent by a slow warp so the streaks wander. An octave fades out once a pixel spans it and the rest are
+ * rescaled to keep their contrast, so distance thins the foam to its coarse patches and streaks instead of averaging it
+ * into a smooth sheet. Returns the texture (mean 0, spread near 1), the same for its octaves of 8 m and under, which
+ * breaks up a patch however coarse the rest is, and how much of the spread a pixel can still resolve (0 to about 0.9).
+ * `foamGusts` is the wind's wider patchiness, mean 0 and within about 0.5, which stays whatever the pixel spans: swell
+ * faces seen edge on have no texture to resolve, yet must not read as one flat grey.
+ */
+const FOAM_GLSL = `
+  ${GLSL_TILED_NOISE}
+  vec3 foamTexture( vec2 at, vec2 reach ) {
+    vec2 bend = vec2( 128.0, 32.0 );
+    at += 10.0 * ( vec2( tiledNoise( at / bend + 1.7, ${FOAM_PERIOD.toFixed(1)} / bend ), tiledNoise( at / bend.yx + 8.1, ${FOAM_PERIOD.toFixed(1)} / bend.yx ) ) - 0.5 );
+    vec2 sum = vec2( 0.0 );
+    vec2 variance = vec2( 0.0 );
+    float cell = 32.0;
+    float gain = 1.0;
+    for ( int i = 0; i < 8; i++ ) {
+      vec2 size = cell * vec2( cell > 3.0 ? 8.0 : ( cell > 1.5 ? 4.0 : ( cell > 0.9 ? 2.0 : 1.0 ) ), 1.0 );
+      vec2 spanned = smoothstep( 0.5, 1.5, reach / size );
+      float shown = gain * ( 1.0 - spanned.x ) * ( 1.0 - spanned.y );
+      if ( shown > 0.0 ) {
+        float octave = shown * ( tiledNoise( at / size + float( i ) * 7.31, ${FOAM_PERIOD.toFixed(1)} / size ) - 0.5 );
+        vec2 part = vec2( 1.0, cell < 9.0 ? 1.0 : 0.0 );
+        sum += part * octave;
+        variance += part * shown * shown / 12.0;
+      }
+      cell *= 0.5;
+      gain *= 0.9;
+    }
+    vec2 spread = inversesqrt( variance + 0.015 );
+    return vec3( sum * spread, variance.x / ( variance.x + 0.015 ) );
+  }
+  float foamGusts( vec2 at ) {
+    vec2 wide = vec2( 128.0, 32.0 );
+    vec2 fine = vec2( 64.0, 16.0 );
+    return 0.6 * tiledNoise( at / wide + 4.1, ${FOAM_PERIOD.toFixed(1)} / wide ) + 0.4 * tiledNoise( at / fine + 9.7, ${FOAM_PERIOD.toFixed(1)} / fine ) - 0.5;
+  }
+`;
+
+/**
  * The swell on the water: the vertices rise with it while the rings are fine enough to draw a wave (each fades by its
  * wavelength), the ripples tilt with its slope out to the horizon, and rough crests break white.
  */
@@ -363,14 +427,22 @@ const seaFragmentPatches: ShaderPatch[] = [
   {
     find: 'reflectionSample = mix( reflectionSample, reflectionHaze, reflectionLift * reflectionDark );',
     replace: `reflectionSample = mix( reflectionSample, reflectionHaze, reflectionLift * reflectionDark );
-      reflectionSample = mix( reflectionSample, reflectionHaze, 0.85 * smoothstep( 0.15, 0.85, seaLevel ) );`,
+      // Rough water mirrors a blur of the sky: swell faces turned toward the eye catch the higher, darker sky and faces
+      // turned away the bright horizon, so each swell reads as light and shade instead of one flat grey. The eye mostly
+      // sees faces turned toward it, so the tone pivots on their usual tilt (0.1) and the sea keeps its overall brightness.
+      float roughSky = smoothstep( 0.15, 0.85, seaLevel );
+      float facing = dot( -sea.xy, normalize( eyeDirection.xz ) );
+      reflectionSample = mix( reflectionSample, reflectionHaze * mix( 1.0, clamp( 1.0 - 2.0 * ( facing - 0.1 ), 0.75, 1.35 ), roughSky ), 0.85 * roughSky );`,
   },
   { find: 'vec4 getNoise( vec2 uv ) {', replace: `uniform float rippleGain;
 				uniform float seaLevel;
 				uniform float foamLight;
 				uniform float seaTop;
 				uniform float glitter;
+				uniform vec2 foamWind;
+				uniform vec2 foamShift;
 				${SEA_GLSL}
+				${FOAM_GLSL}
 				vec4 getNoise( vec2 uv ) {` },
   {
     find: 'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
@@ -393,17 +465,27 @@ const seaFragmentPatches: ShaderPatch[] = [
   },
   {
     find: 'vec3 outgoingLight = albedo;',
-    replace: `{
-        // Whitecaps gather on rough crests and break into lace and streaks along the ripples, never a flat sheet;
-        // a gale streaks foam between them.
-        float crest = sea.z / max( seaTop, 0.05 );
-        float ripples = 0.5 * ( noise.x + noise.z );
-        float lace = smoothstep( -0.2, 0.5, ripples + 0.4 * crest );
-        float cap = smoothstep( 0.55, 0.95, crest + 0.3 * ripples ) * smoothstep( 0.35, 0.8, seaLevel );
-        float streak = 0.35 * smoothstep( 0.75, 1.0, seaLevel ) * smoothstep( 0.25, 0.75, ripples );
-        // Kept near the eye, where the ripples still break it up: further out it would lie in smooth sheets.
-        float foam = ( cap * lace + streak * ( 1.0 - cap ) ) * ( 1.0 - smoothstep( 40.0, 450.0, seaDist ) );
-        albedo = mix( albedo, vec3( 0.78, 0.84, 0.86 ) * ( 0.12 + 0.88 * foamLight ), clamp( foam, 0.0, 0.65 ) );
+    replace: `if ( seaLevel > 0.3 ) {
+        // Whitecaps break on rough crests as lace and patches, streaked downwind. Their texture sits on a lattice fixed to
+        // the world (foamShift), not on the ripples, which a distant pixel averages into a flat sheet.
+        vec2 foamAt = vec2( dot( worldPosition.xz, foamWind ), dot( worldPosition.xz, vec2( -foamWind.y, foamWind.x ) ) ) + foamShift;
+        // A pixel on a swell face seen edge on spans tens of metres: past a few metres more would only be averaged flat, so
+        // the patches stay and shimmer instead, and the foam thins out with distance.
+        vec3 grain = foamTexture( foamAt, min( fwidth( foamAt ), vec2( 4.0 ) ) );
+        float lace = grain.x;
+        float fine = grain.y;
+        float rough = smoothstep( 0.3, 0.8, seaLevel );
+        float resolved = smoothstep( 0.15, 0.6, grain.z ) * ( 1.0 - smoothstep( 300.0, 1000.0, seaDist ) );
+        float edge = mix( 1.0, 0.35, rough );
+        float caps = smoothstep( edge, edge + 0.6, 0.8 * sea.z / max( seaTop, 0.05 ) + 0.45 * lace + 0.4 * fine ) * rough * resolved;
+        // A gale also thins foam out over the water between the caps.
+        float film = 0.3 * smoothstep( 0.6, 1.0, seaLevel ) * smoothstep( -0.3, 0.9, lace ) * resolved;
+        float foam = 1.0 - ( 1.0 - caps ) * ( 1.0 - film );
+        // Thick foam is whiter than thin.
+        vec3 foamColor = vec3( 0.78, 0.84, 0.86 ) * ( 0.12 + 0.88 * foamLight ) * ( 0.5 + 0.5 * smoothstep( -1.5, 2.0, fine ) );
+        // Gusts roughen the water in patches, which lighten and darken what it mirrors.
+        albedo *= 1.0 + 0.8 * reflectance * rough * foamGusts( foamAt );
+        albedo = mix( albedo, foamColor, 0.85 * foam );
       }
       vec3 outgoingLight = albedo;`,
   },
@@ -429,6 +511,8 @@ function applySea(material: THREE.ShaderMaterial, growth: number, waves: Float32
     rippleGain: { value: 1.5 },
     foamLight: { value: 1 },
     glitter: { value: 1 },
+    foamWind: { value: new THREE.Vector2(1, 0) },
+    foamShift: { value: new THREE.Vector2() },
   };
   material.vertexShader = vertex;
   material.fragmentShader = fragment;

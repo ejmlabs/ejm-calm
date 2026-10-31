@@ -2,8 +2,16 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { Water } from 'three/addons/objects/Water.js';
-import { createOcean } from '../src/ocean.js';
+import { FOAM_DRIFT, FOAM_PERIOD, createOcean } from '../src/ocean.js';
 import { patchShader } from '../src/shader-patch.js';
+import { setSea as setSwell } from '../src/swell.js';
+
+/** A Vector2 uniform of the water material, checked. */
+function vector2(material: THREE.ShaderMaterial, name: string): THREE.Vector2 {
+  const value: unknown = material.uniforms[name]?.value;
+  if (!(value instanceof THREE.Vector2)) throw new Error(`${name} is not a Vector2 uniform`);
+  return value;
+}
 
 /** A Vector4 uniform of the water material, checked. */
 function vector4(material: THREE.ShaderMaterial, name: string): THREE.Vector4 {
@@ -63,4 +71,50 @@ test('ripples and shelf maps stay fixed to the world when the origin moves', () 
   assert.equal(ocean.water.position.x, 300);
   assert.equal(ocean.water.position.z, -700);
   ocean.dispose();
+});
+
+test('the foam lattice stays fixed to the world across recentres, and moves with the sea clock alone', () => {
+  const windAngle = 1.1;
+  setSwell(0.9, windAngle);
+  const ocean = createOcean(1, new THREE.Vector3(0, 1, 0), { textureSize: 4 });
+  const material = ocean.water.material;
+  for (const name of ['foamTexture', 'uniform vec2 foamShift;', 'fwidth( foamAt )']) assert.ok(material.fragmentShader.includes(name), name);
+  const wind = vector2(material, 'foamWind');
+  const shift = vector2(material, 'foamShift');
+  const wrap = (v: number) => v - Math.floor(v / FOAM_PERIOD) * FOAM_PERIOD;
+  /** Where a world point sits on the lattice, from the render position the shader is given. */
+  const lattice = (wx: number, wz: number, origin: { x: number; z: number }) => {
+    const x = wx - origin.x;
+    const z = wz - origin.z;
+    return { along: wrap(wind.x * x + wind.y * z + shift.x), across: wrap(wind.x * z - wind.y * x + shift.y) };
+  };
+  /** Distance between two lattice coordinates, round the period. */
+  const gap = (a: number, b: number) => Math.abs(wrap(a - b + FOAM_PERIOD / 2) - FOAM_PERIOD / 2);
+
+  ocean.setSea(10, 1, 5);
+  assert.ok(Math.abs(wind.x - Math.cos(windAngle)) < 1e-6 && Math.abs(wind.y - Math.sin(windAngle)) < 1e-6);
+  const home = lattice(1234.5, -987.25, { x: 0, z: 0 });
+  for (const origin of [{ x: 2048, z: -1024 }, { x: -512, z: 8192 }]) {
+    // Right after the move, before the next frame sets the sea, and again after it.
+    ocean.setOrigin(origin.x, origin.z);
+    for (let frame = 0; frame < 2; frame++) {
+      const moved = lattice(1234.5, -987.25, origin);
+      assert.ok(gap(moved.along, home.along) < 1e-6 && gap(moved.across, home.across) < 1e-6);
+      ocean.setSea(10, 1, 5);
+    }
+  }
+  for (const v of shift.toArray()) assert.ok(v >= 0 && v < FOAM_PERIOD);
+
+  // Wall time does not move it (the swell's clock stops under reduced motion); the clock carries it downwind.
+  const still = shift.clone();
+  ocean.update(5, new THREE.Vector3(0, 1, 0));
+  ocean.setSea(10, 1, 5);
+  assert.ok(shift.equals(still));
+  const origin = { x: -512, z: 8192 };
+  const before = lattice(0, 0, origin);
+  ocean.setSea(14, 1, 5);
+  const after = lattice(0, 0, origin);
+  assert.ok(gap(after.along, before.along - FOAM_DRIFT * 4) < 1e-6 && gap(after.across, before.across) < 1e-6);
+  ocean.dispose();
+  setSwell(0, 0);
 });
