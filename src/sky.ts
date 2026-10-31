@@ -98,11 +98,12 @@ const AMBIENT = { color: 0x6a8498, intensity: 0.4 };
 
 /** What each time of day sets; `tools/haze-measure.ts` checks each `haze` against the sky the rest of it makes. */
 export const presets: Record<DayPhase, Preset> = {
-  // Lower turbidity/mie keep the sky horizon from blooming into a cream band.
+  // Low turbidity and mie keep the sky horizon from blooming into a cream band; little rayleigh and a wide mie lobe
+  // keep the air clear (the sun's glow adds to both). Away from the sun, where the camera looks, `cloudPatches` warms it.
   golden: {
-    elevation: 7, azimuth: 185, turbidity: 4.2, rayleigh: 1.8, mie: 0.003, exposure: 0.5, mieG: 0.8,
-    haze: [0x554644, 0x5c5347, 0x536253, 0x3a5e63, 0x274f66], hazeDensity: 0.00044,
-    horizon: [0.42, 0.4, 0.38], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 0.62, shallow: 0.55, level: 1,
+    elevation: 7, azimuth: 185, turbidity: 3, rayleigh: 0.55, mie: 0.003, exposure: 0.54, mieG: 0.5,
+    haze: [0xb1675a, 0xa47461, 0x7e7871, 0x4c667b, 0x2b5075], hazeDensity: 0.00044,
+    horizon: [0.8, 0.42, 0.3], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 0.62, shallow: 0.55, level: 1,
   },
   morning: {
     elevation: 22, azimuth: 140, turbidity: 2.6, rayleigh: 1.4, mie: 0.003, exposure: 0.48, mieG: 0.78,
@@ -115,9 +116,9 @@ export const presets: Record<DayPhase, Preset> = {
     horizon: [0.38, 0.48, 0.58], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 1, shallow: 1, level: 1,
   },
   dusk: {
-    elevation: 4, azimuth: 250, turbidity: 5.5, rayleigh: 2.2, mie: 0.0035, exposure: 0.45, mieG: 0.8,
-    haze: [0x4b4041, 0x554a43, 0x515a4b, 0x3e5c5a, 0x2b5261], hazeDensity: 0.0005,
-    horizon: [0.42, 0.4, 0.38], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 0.5, shallow: 0.55, level: 1,
+    elevation: 4, azimuth: 250, turbidity: 3, rayleigh: 0.6, mie: 0.003, exposure: 0.45, mieG: 0.5,
+    haze: [0x6e2721, 0x6e3525, 0x544132, 0x313c41, 0x1a2f43], hazeDensity: 0.0005,
+    horizon: [0.5, 0.15, 0.05], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 0.5, shallow: 0.55, level: 1,
   },
   // The sun well below the horizon: the sky keeps a faint blue glow, the moon is only a cool fill light.
   night: {
@@ -170,9 +171,26 @@ function horizonFor(preset: Preset, elevation: number): THREE.Color {
   return color.lerp(new THREE.Color(0x163e54), preset.level >= 1 ? 0.42 : 0.2);
 }
 
-/** Moves the sky's clouds along a wind vector instead of a fixed diagonal, and lets weather grey and darken the sky. */
+/**
+ * The model scatters light once, so away from a low sun its horizon goes from brown through olive to blue, a murky
+ * green-teal with nothing of the sunset in it. A low sun in fact reddens the air along the whole horizon, so the
+ * glow multiplies the sky by a warm tint that thins upward within a few degrees: orange at the horizon, lilac-grey
+ * above it, then the model's own blue. The tint is per channel and falls off with the sine of the elevation.
+ */
+const BELT_TINT = [2.8, 0.9, 0.75] as const;
+const BELT_FALLOFF = 6.4;
+const glsl = (value: number) => value.toFixed(2);
+
+/** Moves the sky's clouds along a wind vector instead of a fixed diagonal, lets weather grey and darken the sky, and warms its horizon at sunset. */
 export const cloudPatches: ShaderPatch[] = [
-  { find: 'uniform float time;', replace: 'uniform float time;\n\t\tuniform vec2 cloudWind;\n\t\tuniform float skyDim;\n\t\tuniform float skyGrey;' },
+  { find: 'uniform float time;', replace: 'uniform float time;\n\t\tuniform vec2 cloudWind;\n\t\tuniform float skyDim;\n\t\tuniform float skyGrey;\n\t\tuniform float skyGlow;' },
+  {
+    find: 'vec3 texColor = ( Lin + L0 ) * 0.04 + sundiscColor + vec3( 0.0, 0.0003, 0.00075 );',
+    // The sun disc stays out of the belt: it already sits near the top of what a half float holds.
+    replace: `vec3 texColor = ( Lin + L0 ) * 0.04 + vec3( 0.0, 0.0003, 0.00075 );
+\t\t\ttexColor *= 1.0 + skyGlow * exp( -max( direction.y, 0.0 ) * ${glsl(BELT_FALLOFF)} ) * ( vec3( ${BELT_TINT.map(glsl).join(', ')} ) - 1.0 );
+\t\t\ttexColor += sundiscColor;`,
+  },
   { find: 'cloudUV += time * cloudSpeed;', replace: 'cloudUV += time * cloudSpeed * cloudWind;' },
   // Storm cloud is dark underneath.
   { find: 'cloudColor *= max( dayFactor, 0.03 );', replace: 'cloudColor *= max( dayFactor, 0.03 ) * skyDim;' },
@@ -242,6 +260,7 @@ export function createSky(
     sky.material.uniforms['cloudWind'] = { value: new THREE.Vector2(Math.cos(windAngle), Math.sin(windAngle)) };
     sky.material.uniforms['skyDim'] = { value: 1 };
     sky.material.uniforms['skyGrey'] = { value: 0 };
+    sky.material.uniforms['skyGlow'] = { value: 0 };
     sky.material.needsUpdate = true;
   }
   const uniforms = sky.material.uniforms;
@@ -390,6 +409,7 @@ export function createSky(
     item(uniforms, 'mieCoefficient').value = blend.mie + 0.001 * glow;
     if (uniforms['skyDim']) uniforms['skyDim'].value = (1 - 0.9 * weather.dark) * (1 + FLASH_LIFT * weather.flash);
     if (uniforms['skyGrey']) uniforms['skyGrey'].value = 0.85 * weather.grey;
+    if (uniforms['skyGlow']) uniforms['skyGlow'].value = glow;
     item(uniforms, 'mieDirectionalG').value = blend.mieG;
     if (uniforms['cloudCoverage']) uniforms['cloudCoverage'].value = weather.coverage;
     if (uniforms['cloudDensity']) uniforms['cloudDensity'].value = weather.density;
@@ -417,12 +437,10 @@ export function createSky(
     ambient.intensity = lightBase.ambient.intensity;
     ambient.color.copy(lightBase.ambient.color);
 
-    // Haze: the sky's own colours, greyer under cloud.
-    // Haze: the sky's own colours, greyer under cloud, darker in a storm, warmer low down at sunset.
+    // Haze: the sky's own colours (the sunset's warmth is in the measured ones), greyer under cloud, darker in a storm.
     const shade = 1 - 0.5 * weather.dark;
     for (let k = 0; k < hazeGradient.length; k++) {
-      const color = greyen(item(hazeGradient, k).copy(item(ca.haze, k)).lerp(item(cb.haze, k), t), weather.grey).multiplyScalar(shade);
-      warm(color, glow * (1 - k / hazeGradient.length));
+      greyen(item(hazeGradient, k).copy(item(ca.haze, k)).lerp(item(cb.haze, k), t), weather.grey).multiplyScalar(shade);
     }
     horizonColor.copy(ca.horizon).lerp(cb.horizon, t);
     warm(greyen(horizonColor, weather.grey).multiplyScalar(shade), glow * 0.45);
