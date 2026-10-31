@@ -11,7 +11,8 @@ export interface ShipHandle {
   lanterns: readonly THREE.Vector3[];
   /** Hull length and beam in the ship's own frame, for the foam round it. */
   size: { length: number; beam: number };
-  update: (dt: number, time: number, shore: Shore) => void;
+  /** Moves the ship; `billow` also sways its sails (a rewrite of every sail vertex, so only where it can be seen). */
+  update: (dt: number, time: number, shore: Shore, billow?: boolean) => void;
   dispose: () => void;
 }
 
@@ -258,7 +259,7 @@ export function createShip(spec: ShipSpec, options: ShipOptions = {}): ShipHandl
     spec,
     lanterns: rig.lanterns,
     size: rig.size,
-    update(dt: number, time: number, shore: Shore) {
+    update(dt: number, time: number, shore: Shore, billow = true) {
       heading += dt * 0.015 * (spec.kind === 'sloop' ? 1 : 0.7);
       const speed = drift * dt;
       x += Math.sin(heading) * speed;
@@ -285,6 +286,7 @@ export function createShip(spec: ShipSpec, options: ShipOptions = {}): ShipHandl
       group.rotation.z = roll;
       group.rotation.x = pitch;
 
+      if (!billow) return;
       const { rest, push, weight, phase } = rig;
       for (let v = 0; v < weight.length; v++) {
         const wave = Math.sin(time * 1.6 + (phase[v] ?? 0)) * 0.06 * (weight[v] ?? 0);

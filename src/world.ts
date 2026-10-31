@@ -12,6 +12,7 @@ import { damp } from './math.js';
 import { blendLook } from './regions.js';
 import { OPENING_NAV_RADIUS, PLAN_REACH } from './whale-course.js';
 import { createWalkers } from './walkers.js';
+import { createSliceCost } from './slice-cost.js';
 import type { DetailBudget } from './quality.js';
 
 export interface WorldOptions {
@@ -59,7 +60,10 @@ export interface World {
   dispose: () => void;
 }
 
-/** All streaming work on the main thread (tiles, ships, navigation, shelf bakes) stays near this per frame. */
+/**
+ * All streaming work on the main thread (tiles, ships, navigation, shelf bakes) stays near this per frame. A loop of
+ * slices stops once the time left would not hold another slice of its job (`slice-cost.ts`).
+ */
 const BUDGET_MS = 2.5;
 /** Navigation tiles and ship cells are centred this many seconds ahead along the whale's motion (capped in metres). */
 const LEAD = 20;
@@ -133,6 +137,10 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
   let farAt = { x: 0, z: 0 };
   let farId = 0;
   let farWaiting = false;
+  const bakeCost = createSliceCost();
+  let frameStart = 0;
+  /** What is left of this frame's budget. */
+  const left = () => BUDGET_MS - (performance.now() - frameStart);
   let worker: Worker | null = null;
   if (options.worker && typeof Worker !== 'undefined') {
     try {
@@ -159,8 +167,20 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
   const farSteps = (cx: number, cz: number) => farShelfSteps(land, FAR_SIZE, FAR_EXTENT, cx, cz);
 
   function* nearSteps(cx: number, cz: number): Generator<void, ShelfMap> {
-    while (!land.nav.prefetch(cx, cz, 1600 * Math.SQRT2, BUDGET_MS)) yield;
+    // No time of its own: a call builds one slice (so each step is one), and the frame's loop spends the budget.
+    while (!land.nav.prefetch(cx, cz, 1600 * Math.SQRT2, 0)) yield;
     return yield* navShelfSteps(land, cx, cz);
+  }
+
+  /** A bake's slices until the frame's budget cannot hold another; its map once done. */
+  function advance(job: Generator<void, ShelfMap>): ShelfMap | undefined {
+    while (bakeCost.fits(left())) {
+      const t = performance.now();
+      const next = job.next();
+      bakeCost.note(performance.now() - t);
+      if (next.done) return next.value;
+    }
+    return undefined;
   }
 
   const snapShelf = (v: number) => Math.round(v / SHELF_SNAP) * SHELF_SNAP;
@@ -217,7 +237,7 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     ships: { active: ships.active, setVisible: ships.setVisible },
     update(wx, wz, camera, dt, time) {
       const start = performance.now();
-      const left = () => BUDGET_MS - (performance.now() - start);
+      frameStart = start;
       if (dt > 0) {
         const rx = (wx - (whale[0] ?? 0)) / dt;
         const rz = (wz - (whale[1] ?? 0)) / dt;
@@ -245,22 +265,15 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
       ships.update(dt, time, wx, wz, land, ax, az);
       bakeShelves(ax, az);
 
-      if (nearJob) {
-        while (left() > 0) {
-          const next = nearJob.next();
-          if (next.done) {
-            ocean.setShelves({ near: next.value });
-            nearJob = null;
-            break;
-          }
-        }
+      const near = nearJob && advance(nearJob);
+      if (near) {
+        ocean.setShelves({ near });
+        nearJob = null;
       }
-      while (farJob && left() > 0) {
-        const next = farJob.next();
-        if (next.done) {
-          ocean.setShelves({ far: next.value });
-          farJob = null;
-        }
+      const far = farJob && advance(farJob);
+      if (far) {
+        ocean.setShelves({ far });
+        farJob = null;
       }
       if (left() > 0) land.nav.prefetch(ax, az, NAV_RADIUS, left());
 

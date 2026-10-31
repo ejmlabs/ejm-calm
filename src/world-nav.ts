@@ -1,5 +1,6 @@
 import type { Shore } from './shore.js';
 import { trimOldest } from './bounded.js';
+import { createSliceCost } from './slice-cost.js';
 
 /**
  * Navigation field valid anywhere: the signed coast distance on a fixed world
@@ -14,7 +15,10 @@ export type NavField = Shore & {
   distanceAt: (x: number, z: number) => number;
   /** Whether the tile holding (x, z) is built (reading it would not stall). */
   ready: (x: number, z: number) => boolean;
-  /** Builds missing tiles within `radius` of (x, z), nearest first, for at most `budgetMs`; true once all are built. */
+  /**
+   * Builds missing tiles within `radius` of (x, z), nearest first, in slices, and stops once the time left in `budgetMs`
+   * would not hold another; a call builds at least one slice. True once all are built.
+   */
   prefetch: (x: number, z: number, radius: number, budgetMs: number) => boolean;
   readonly min: number;
   readonly cell: number;
@@ -45,6 +49,7 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
   /** Lines of the distance transform per slice of a tile build (about a fifth of a millisecond). */
   const TILE_LINES = 32;
   const now = options.now ?? (() => performance.now());
+  const cost = createSliceCost();
   const saturation = P * cell;
   const span = T + 1;
   const W = T + 2 * P + 1;
@@ -220,7 +225,14 @@ export function createNavField(maskAt: (x: number, z: number) => number, options
     },
     prefetch(x, z, radius, budgetMs) {
       const start = now();
-      const over = () => now() - start > budgetMs;
+      let last = start;
+      // Asked after every slice: notes what it took, and says whether the time left would not hold another.
+      const over = () => {
+        const t = now();
+        cost.note(t - last);
+        last = t;
+        return !cost.fits(budgetMs - (t - start));
+      };
       const size = T * cell;
       const fx = (x - min) / size;
       const fz = (z - min) / size;

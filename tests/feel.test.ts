@@ -338,6 +338,21 @@ test('ships are two meshes each (hull and rig, and the sails), shaped, and sway 
   }
 });
 
+test('a ship told not to billow still moves but leaves its sails as they were', () => {
+  const stub = { clearance: () => 1000, away: () => ({ x: 1, z: 0 }) };
+  const ship = createShip(item(layoutWorld(42).ships, 0));
+  const sails = () => (item(ship.group.children, 1) as THREE.Mesh).geometry.getAttribute('position').array.slice();
+  ship.update(1 / 30, 0, stub);
+  const before = sails();
+  const at = ship.group.position.clone();
+  ship.update(1 / 30, 1.3, stub, false);
+  assert.deepEqual(sails(), before);
+  assert.ok(!ship.group.position.equals(at), 'the hull still rides the swell');
+  ship.update(1 / 30, 1.3, stub);
+  assert.notDeepEqual(sails(), before, 'the sails sway when asked to');
+  ship.dispose();
+});
+
 test('ships have foam always and lanterns only in the dark, in two draws for all of them', () => {
   const stub = { clearance: () => 1000, away: () => ({ x: 1, z: 0 }) };
   const ships = layoutWorld(42).ships.map((spec) => createShip(spec));

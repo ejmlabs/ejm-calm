@@ -4,7 +4,8 @@ import { chunkCoord, chunkKey, chunksAround, createChunkStreamer, parseChunkKey,
 import { createWorldOrigin, recenterDelta, RECENTER_RADIUS, ORIGIN_SNAP } from '../src/world-origin.js';
 import { createLand, type Land } from '../src/land.js';
 import { layoutWorld } from '../src/terrain.js';
-import { shipSpecsForCell } from '../src/world-ships.js';
+import { createShipStream, shipSpecsForCell } from '../src/world-ships.js';
+import type { ShipSpec } from '../src/terrain.js';
 import * as THREE from 'three';
 import { createLandStream, selectTiles } from '../src/landmesh.js';
 import { createWorld } from '../src/world.js';
@@ -191,6 +192,46 @@ test('nav tiles are independent of visit order', () => {
   b.prefetch(8000, -6000, 1200, Infinity);
   const second = [...points].reverse().map(([x, z]) => b.distanceAt(x, z)).reverse();
   assert.deepEqual(first, second);
+});
+
+test('a nav prefetch call ends at its budget, not a slice past it', () => {
+  const land = createLand(11, { viewYaw: 0.4 });
+  // The clock moves only with work: a mask sample costs 4 us, so a row of a 64-sample navigation block costs 0.26 ms.
+  let clock = 0;
+  const mask = (x: number, z: number) => {
+    clock += 0.004;
+    return land.maskAt(x, z);
+  };
+  const field = createNavField(mask, { min: -1600, cell: 10, now: () => clock });
+  const budget = 1;
+  let calls = 0;
+  for (let done = false; !done; calls++) {
+    const before = clock;
+    done = field.prefetch(8000, -6000, 700, budget);
+    assert.ok(clock - before <= budget, `a call spent ${(clock - before).toFixed(2)} ms of ${String(budget)} ms`);
+    assert.ok(calls < 100000, 'prefetch finishes');
+  }
+  assert.ok(calls > 10, 'a small budget spreads the work over many calls');
+});
+
+test('only ships within a few hundred metres of the whale sway their sails', () => {
+  const ship = (id: number, x: number): ShipSpec => ({ id, x, z: 0, heading: 0.3, scale: 1, kind: 'sloop', seed: id });
+  const near = ship(1, 150);
+  const far = ship(2, 900);
+  const stream = createShipStream({ seed: 1, maskAt: () => 1, startSpecs: [near, far], parent: new THREE.Group(), cap: 8, shoreReady: () => false });
+  const open = { clearance: () => 1000, away: () => ({ x: 1, z: 0 }) };
+  const sails = (spec: ShipSpec) => {
+    const handle = stream.all().find((h) => h.spec.id === spec.id);
+    assert.ok(handle, `ship ${String(spec.id)} is afloat`);
+    return (item(handle.group.children, 1) as THREE.Mesh).geometry.getAttribute('position').array.slice();
+  };
+  stream.update(1 / 30, 1, 0, 0, open);
+  const before = [near, far].map(sails);
+  stream.update(1 / 30, 2.2, 0, 0, open);
+  assert.notDeepEqual(sails(near), item(before, 0), 'the near ship\'s cloth moves');
+  assert.deepEqual(sails(far), item(before, 1), 'the far ship\'s cloth is left alone');
+  assert.equal(stream.stats().visible, 2, 'both ships are still drawn');
+  stream.dispose();
 });
 
 test('land tiles and ship cells are pure functions of seed and key', () => {
