@@ -1,0 +1,16 @@
+name: Human-admitted PR checks
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, labeled]
+permissions: {}
+jobs:
+  governance:
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+      actions: write
+    uses: ejmlabs/.github/.github/workflows/governance.yml@ad376de0af9e7fb55c517f87ad0c08dc744a7863
+    secrets:
+      EJM_HARNESS_TOKEN: ${{ secrets.EJM_HARNESS_TOKEN }}

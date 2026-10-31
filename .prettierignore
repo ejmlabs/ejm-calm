@@ -6,5 +6,7 @@ eslint.strict.mjs
 *.json
 *.jsonc
 *.yaml
+# The workflow callers must equal the shared canonical text byte for byte.
+*.yml
 *.html
 *.css
