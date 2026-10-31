@@ -267,27 +267,27 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
     if (idle) idle(upgrade, { timeout: 4000 });
     else setTimeout(upgrade, 1500);
   }
-  // Wet skin: a thin clear coat carries the sky's sheen over the dark back, and a soft sheen
-  // lifts the silhouette at grazing angles so the body still reads at dusk and at night.
-  // Phones keep the cheaper standard material.
+  // Dark wet skin. A dark body reflects the bright sky at the grazing angles the chase camera sees it from, which
+  // reads as a glassy capsule, so the reflection is held down: the physical material weakens it (specularIntensity)
+  // and keeps a faint grey sheen for the silhouette at dusk and at night; the standard material of phones cannot,
+  // so it is rougher instead. There is no envMapIntensity: a material without its own envMap takes the scene's
+  // environment at the scene's intensity.
   const surface = {
     map: skin.map,
     normalMap: skin.normalMap,
     normalScale: new THREE.Vector2(0.9, 0.9),
-    roughness: 0.42,
     metalness: 0,
-    envMapIntensity: 0.6,
   };
   const material =
     tier === 'low'
-      ? new THREE.MeshStandardMaterial(surface)
+      ? new THREE.MeshStandardMaterial({ ...surface, roughness: 0.9 })
       : new THREE.MeshPhysicalMaterial({
           ...surface,
-          clearcoat: 0.35,
-          clearcoatRoughness: 0.32,
-          sheen: 0.35,
+          roughness: 0.4,
+          specularIntensity: 0.3,
+          sheen: 0.2,
           sheenRoughness: 0.6,
-          sheenColor: new THREE.Color(0x7d93a4),
+          sheenColor: new THREE.Color(0x9aa6ae),
         });
 
   const bones = createWhaleBones();

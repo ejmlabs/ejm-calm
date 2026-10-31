@@ -12,13 +12,14 @@ export interface WhaleSkin {
   dispose: () => void;
 }
 
-// sRGB 0–1. Blue whales are blue-grey, mottled with paler grey all over, a little lighter beneath; a film of
-// diatoms tints the belly yellowish on some animals (hence "sulphur-bottom").
-const BACK = [0.25, 0.31, 0.38];
-const FLANK = [0.33, 0.4, 0.47];
-const BELLY = [0.47, 0.52, 0.57];
-const MOTTLE = [0.6, 0.66, 0.72];
-const DARK = [0.19, 0.24, 0.3];
+// sRGB 0–1. Blue whales are slate grey, mottled with paler grey all over, a little lighter beneath; a film of
+// diatoms tints the belly yellowish on some animals (hence "sulphur-bottom"). The greys carry only a trace of blue:
+// the scene's sky light is strongly blue, so a blue albedo lit by it comes out saturated navy instead of slate.
+const BACK = [0.3, 0.34, 0.37];
+const FLANK = [0.38, 0.42, 0.45];
+const BELLY = [0.54, 0.57, 0.58];
+const MOTTLE = [0.62, 0.67, 0.7];
+const DARK = [0.23, 0.26, 0.29];
 const DIATOM = [0.62, 0.58, 0.42];
 const SCAR = [0.68, 0.71, 0.73];
 const BARNACLE = [0.6, 0.59, 0.56];
