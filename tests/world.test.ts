@@ -311,14 +311,14 @@ function journey(seed: number, dt: number, seconds: number, shore: Land) {
   return { course, net, far, minClear, marks, path };
 }
 
-test('the whale cruises for 25 minutes, never beaching, for seeds 1..10', () => {
-  for (let seed = 1; seed <= 10; seed++) {
-    const land = layoutWorld(seed).land;
-    const run = journey(seed, 1 / 30, 1500, land);
-    assert.ok(run.net > 0.6 * run.path, `seed ${String(seed)} net ${run.net.toFixed(0)} m over ${run.path.toFixed(0)} m swum`);
-    assert.ok(run.far > 15000, `seed ${String(seed)} got ${run.far.toFixed(0)} m from the start`);
-    assert.ok(run.minClear >= WHALE_ISLAND_MARGIN - 1e-3, `seed ${String(seed)} came within ${run.minClear.toFixed(1)} m of land`);
-  }
+// One test per seed: the ten together took 131 s on untouched main on a four-core machine, over the old 120 s limit
+// for all of them, and a seed that hangs now fails by name.
+test.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])('the whale cruises for 25 minutes, never beaching (seed %i)', (seed) => {
+  const land = layoutWorld(seed).land;
+  const run = journey(seed, 1 / 30, 1500, land);
+  assert.ok(run.net > 0.6 * run.path, `seed ${String(seed)} net ${run.net.toFixed(0)} m over ${run.path.toFixed(0)} m swum`);
+  assert.ok(run.far > 15000, `seed ${String(seed)} got ${run.far.toFixed(0)} m from the start`);
+  assert.ok(run.minClear >= WHALE_ISLAND_MARGIN - 1e-3, `seed ${String(seed)} came within ${run.minClear.toFixed(1)} m of land`);
 }, 120000);
 
 test('the journey is deterministic and close across 30 and 60 fps', () => {
