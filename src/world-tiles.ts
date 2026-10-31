@@ -41,16 +41,23 @@ export interface TileData {
 }
 
 /**
- * A coarse tile's surface at four times its vertex density, so far ranges show their spurs, gullies, rock and snow
+ * A coarse tile's surface at twice its vertex density, so far ranges show their spurs, gullies, rock and snow
  * lines instead of the facets of their mesh: `size`² texels over the tile, texel centres at (t + 0.5) / size,
  * colour as sRGB, and the normal (xyz from 0 to 255) with a cavity term in alpha (dark in gullies, light on ridges).
  */
 export interface ShadingMaps { size: number; color: Uint8Array; normal: Uint8Array }
 
-/** Tiles from this level up (512 m and more, with vertices 21 m or more apart) carry shading maps. */
+/** Tiles from this level up (512 m and more) carry shading maps and a grid finer than the tier's (see `tileCells`). */
 export const MAP_LEVEL = 2;
-/** Shading map texels per vertex step. */
+/** Shading map texels per cell of the tier's grid. */
 const MAP_DENSITY = 4;
+/** Cells of a coarse tile's grid per cell of the tier's: ridgelines and peaks make the skyline, and show their vertices. */
+const FINER = 2;
+
+/** Cells per side of a tile at `level` when the tier's grid has `base`. */
+export function tileCells(level: number, base: number): number {
+  return level >= MAP_LEVEL ? base * FINER : base;
+}
 
 /** kind, x, y, z, yaw, range, phase, tint. */
 export const WALKER_STRIDE = 8;
@@ -134,7 +141,9 @@ const SHORE_SKIRT = 2.5;
 const B = 2;
 
 /**
- * Builds one tile of `cells`² quads at `level`, or null when it is all sea.
+ * Builds one tile at `level`, or null when it is all sea. `cells` is the tier's grid; with `fine`, coarse levels
+ * refine it (see `tileCells`). The worker builds them fine; the main thread builds the tier's own grid, which it can
+ * afford inside its frame budget and before the first frame.
  * Heights are sampled on a two-sample border so the peak limiter and normals
  * agree with the neighbouring tiles of the same level; skirts hide the cracks
  * against other levels. With `extras`, tiles at the finest levels also carry
@@ -149,8 +158,9 @@ export function buildTile(
   cells: number,
   extras?: TileLife,
   maps = false,
+  fine = true,
 ): TileData | null {
-  const N = cells;
+  const N = fine ? tileCells(level, cells) : cells;
   const size = tileSize(level);
   const step = size / N;
   const x0 = ix * size;
@@ -343,13 +353,12 @@ export function buildTile(
   }
 
   return {
-    ...out,
-    index: Uint16Array.from(index),
+    ...dropUnused(out, index),
     triangles: index.length / 3,
     objects,
     objectTriangles: (index.length - ground) / 3,
     walkers,
-    maps: maps && level >= MAP_LEVEL ? shadingMaps(land, patchNoise, x0, z0, size, N * MAP_DENSITY, forestAt) : null,
+    maps: maps && level >= MAP_LEVEL ? shadingMaps(land, patchNoise, x0, z0, size, cells * MAP_DENSITY, forestAt) : null,
   };
 }
 
@@ -413,6 +422,33 @@ function shadingMaps(
 }
 
 interface Arrays { positions: Float32Array; normals: Float32Array; colors: Float32Array; detail: Uint8Array }
+
+/**
+ * The vertices some triangle uses, in their order, and the index renumbered to them. A coastal tile skips its open-sea
+ * cells, and a fine grid would otherwise carry their vertices through the worker, memory and the GPU for nothing.
+ */
+function dropUnused(vertices: Arrays, index: readonly number[]): Arrays & { index: Uint16Array } {
+  const count = vertices.positions.length / 3;
+  const slot = new Int32Array(count).fill(-1);
+  for (const v of index) slot[v] = 0;
+  let kept = 0;
+  for (let v = 0; v < count; v++) if (slot[v] === 0) slot[v] = kept++;
+  const positions = new Float32Array(kept * 3);
+  const normals = new Float32Array(kept * 3);
+  const colors = new Float32Array(kept * 3);
+  const detail = new Uint8Array(kept * 4);
+  for (let v = 0; v < count; v++) {
+    const to = slot[v] ?? -1;
+    if (to < 0) continue;
+    for (let c = 0; c < 3; c++) {
+      positions[to * 3 + c] = vertices.positions[v * 3 + c] ?? 0;
+      normals[to * 3 + c] = vertices.normals[v * 3 + c] ?? 0;
+      colors[to * 3 + c] = vertices.colors[v * 3 + c] ?? 0;
+    }
+    for (let c = 0; c < 4; c++) detail[to * 4 + c] = vertices.detail[v * 4 + c] ?? 0;
+  }
+  return { positions, normals, colors, detail, index: Uint16Array.from(index, (v) => slot[v] ?? 0) };
+}
 
 /** Unindexed object geometry appended after the `vertices` ground vertices, flagged as objects for the shader. */
 function appendObjects(ground: Arrays, vertices: number, objects: BufferGeometry, index: number[]): Arrays {

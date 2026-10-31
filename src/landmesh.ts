@@ -14,7 +14,7 @@ import { DRAW_AS_AUTHORED_GLSL, SCENE_FROM_DISPLAY_GLSL, displayExposure } from 
 export { biomeColor } from './world-tiles.js';
 
 export interface LandStreamOptions {
-  /** Old clipmap ring segments; tiles get a quarter of that per side. */
+  /** Old clipmap ring segments; tiles get 3/16 of that per side, and the worker's coarse tiles twice as many (`tileCells`). */
   segments: number;
   sunDirection: THREE.Vector3;
   /** Sky colour at the horizon; distance haze blends land into it. */
@@ -677,11 +677,11 @@ export function createLandStream(land: Land, options: LandStreamOptions): LandSt
     walkerVersion++;
   }
 
-  /** A tile built on the main thread: bare, or with its life (no shading maps: they are worker work). */
+  /** A tile built on the main thread: bare, or with its life; on the tier's own grid and without shading maps, which are worker work. */
   function buildHere(key: string, full: boolean): TileData | null {
     const { lod, cx, cz } = parseChunkKey(key);
     if (full && objects > 0) life ??= createLandLife(land);
-    return buildTile(land, patchNoise, lod, cx, cz, cells, full && life ? { life, objects } : undefined);
+    return buildTile(land, patchNoise, lod, cx, cz, cells, full && life ? { life, objects } : undefined, false, false);
   }
 
   function remove(tile: Tile): void {

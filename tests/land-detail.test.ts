@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { layoutWorld } from '../src/terrain.js';
 import { makeNoise2D } from '../src/noise.js';
-import { buildTile, MAP_LEVEL, tileSize, treesIn } from '../src/world-tiles.js';
+import { buildTile, MAP_LEVEL, tileCells, tileSize, treesIn } from '../src/world-tiles.js';
 import { createLandLife, TOWN_CELL, TREE, WALKER_LEVELS, type Town } from '../src/land-life.js';
 import { detailFor } from '../src/quality.js';
 import type { Land } from '../src/land.js';
@@ -153,6 +153,51 @@ test('coarse tiles carry pure shading maps that leave their geometry alone', () 
   assert.ok(cavities.size >= 4, 'ridges and gullies');
   // A tile below the map level has none, even when asked.
   assert.equal(buildTile(land, makeNoise2D(42, 21), MAP_LEVEL - 1, ix, iz, CELLS, undefined, true)?.maps ?? null, null);
+});
+
+/** Heights of a tile's top vertices by world position (skirts hang below them, so the highest at a spot is the surface). */
+function surfaceHeights(tile: NonNullable<ReturnType<typeof buildTile>>, x0: number, z0: number): Map<string, number> {
+  const out = new Map<string, number>();
+  for (let v = 0; v < tile.positions.length; v += 3) {
+    const key = `${(x0 + (tile.positions[v] ?? 0)).toFixed(2)}:${(z0 + (tile.positions[v + 2] ?? 0)).toFixed(2)}`;
+    out.set(key, Math.max(out.get(key) ?? -Infinity, tile.positions[v + 1] ?? 0));
+  }
+  return out;
+}
+
+test('coarse tiles carry a finer grid than the tier, with no vertex their triangles leave unused', () => {
+  const { land, town } = townTile(42);
+  assert.equal(tileCells(MAP_LEVEL - 1, CELLS), CELLS);
+  assert.equal(tileCells(MAP_LEVEL, CELLS), CELLS * 2);
+  for (const level of [MAP_LEVEL, MAP_LEVEL + 2]) {
+    const [ix, iz] = [Math.floor(town.x / tileSize(level)), Math.floor(town.z / tileSize(level))];
+    const fine = buildTile(land, makeNoise2D(42, 21), level, ix, iz, CELLS);
+    const plain = buildTile(land, makeNoise2D(42, 21), level, ix, iz, CELLS, undefined, false, false);
+    assert.ok(fine && plain);
+    assert.ok(fine.triangles > plain.triangles * 2, `level ${String(level)}: ${String(plain.triangles)} → ${String(fine.triangles)} triangles`);
+    for (const tile of [fine, plain]) assert.equal(new Set(tile.index).size, tile.positions.length / 3, 'every vertex is drawn');
+  }
+});
+
+test('the first fine level continues the lattice of the last plain one, so their seam has no step', () => {
+  const { land, town } = townTile(42);
+  const noise = makeNoise2D(42, 21);
+  const level = MAP_LEVEL - 1;
+  assert.equal(tileSize(level) / tileCells(level, CELLS), tileSize(level + 1) / tileCells(level + 1, CELLS));
+  const [ix, iz] = [Math.floor(town.x / tileSize(level)), Math.floor(town.z / tileSize(level))];
+  const near = buildTile(land, noise, level, ix, iz, CELLS);
+  const far = buildTile(land, noise, level + 1, Math.floor(ix / 2), Math.floor(iz / 2), CELLS);
+  assert.ok(near && far);
+  const nearHeights = surfaceHeights(near, ix * tileSize(level), iz * tileSize(level));
+  const farHeights = surfaceHeights(far, Math.floor(ix / 2) * tileSize(level + 1), Math.floor(iz / 2) * tileSize(level + 1));
+  let shared = 0;
+  for (const [key, height] of nearHeights) {
+    const other = farHeights.get(key);
+    if (other === undefined) continue;
+    shared++;
+    assert.ok(Math.abs(other - height) < 1e-3, `${key}: ${String(height)} against ${String(other)}`);
+  }
+  assert.ok(shared > 100, `${String(shared)} shared vertices`);
 });
 
 test('people stand in the tile of their town, on its finest levels only', () => {

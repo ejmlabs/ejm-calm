@@ -69,6 +69,10 @@ structure.
 - The finest land tile is 128 m and each coarser level doubles it (`src/chunks.ts`). Cells load
   nearest first, ties broken on coordinates, and unload beyond a wider ring so a boundary never
   thrashes.
+- Tiles of 512 m and more are built by the worker on a grid twice as fine as the tier's, so ridgelines
+  and peaks keep their shape against the sky (`tileCells` in `src/world-tiles.ts`). The main thread builds
+  the tier's own grid (first frame, no worker), which it can afford inside its frame budget. Keep the
+  first fine level on the lattice of the last plain one, so their seam has no step.
 - Streaming spends at most `BUDGET_MS` (2.5 ms) a frame in `src/world.ts`. Tiles ahead are built
   before the view needs them at the top speed (28 m/s), and the view never shows a hole in the
   land inside the haze.

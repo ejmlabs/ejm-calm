@@ -148,8 +148,9 @@ await withBrowser(async (browser, base) => {
     }
   }
 
-  // Land detail: trees, rocks and houses within their triangles (25,000 on low, 40,000 on medium, 60,000 on high), people and
-  // animals within the tier's cap in at most two draws, on a close coast with a town; still under reduced motion.
+  // Land detail: the land within its triangles, objects included (130,000 on low, 160,000 on medium, 210,000 on high), trees, rocks
+  // and houses within theirs (25,000 on low, 40,000 on medium, 60,000 on high), people and animals within the tier's cap in at
+  // most two draws, on a close coast with a town; still under reduced motion.
   for (const [device, reducedMotion] of [[DESKTOP, 'no-preference'], [MOBILE, 'no-preference'], [DESKTOP, 'reduce']] as const) {
     const { page, context, errors } = await openCalm(browser, base, device, { query: { debug: '1' }, reducedMotion });
     try {
@@ -164,7 +165,9 @@ await withBrowser(async (browser, base) => {
       const s = (await review('stats()')) as Record<string, number | string>;
       const tier = s['tier'] as 'low' | 'medium' | 'high';
       const triangles = { low: 25000, medium: 40000, high: 60000 }[tier];
+      const landTriangles = { low: 130000, medium: 160000, high: 210000 }[tier];
       const walkers = detailFor(tier).walkers;
+      assert.ok((s['landTriangles'] as number) <= landTriangles, `${device.name} ${tier}: ${String(s['landTriangles'])} land triangles (limit ${String(landTriangles)})`);
       assert.ok((s['landObjects'] as number) > 0, 'trees, rocks and houses on the land');
       assert.ok((s['objectTriangles'] as number) <= triangles, `${device.name} ${tier}: ${String(s['objectTriangles'])} object triangles (limit ${String(triangles)})`);
       assert.ok((s['walkers'] as number) > 0 && (s['walkers'] as number) <= walkers, `${device.name} ${tier}: ${String(s['walkers'])} walkers (cap ${String(walkers)})`);
