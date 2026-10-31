@@ -68,18 +68,20 @@ const hex = (value: number): Rgb => [
   toLinear((value & 255) / 255),
 ];
 
-const WET_SAND = hex(0xa8946c);
-const SAND = hex(0xd6c49a);
-const GRASS = hex(0x6f8f3e);
-const MEADOW = hex(0x8c9a50);
-const FOREST = hex(0x3a5a2c);
-const DARK_FOREST = hex(0x2c4626);
-const SCRUB = hex(0x6f7046);
-const ROCK = hex(0x7a7266);
-const CLIFF = hex(0x6d665c);
-const CLIFF_PALE = hex(0x8c8274);
-const SNOW = hex(0xf2f5f8);
-const DRY = hex(0x9c9758);
+// A natural palette: sage and olive grass, straw, deep forest, grey-brown rock, as the land reads in photographs
+// under a sea sky (lime greens read as a game).
+const WET_SAND = hex(0x9c8d6e);
+const SAND = hex(0xd3c4a2);
+const GRASS = hex(0x667a44);
+const MEADOW = hex(0x848a58);
+const FOREST = hex(0x34492c);
+const DARK_FOREST = hex(0x263a24);
+const SCRUB = hex(0x6b694e);
+const ROCK = hex(0x78726a);
+const CLIFF = hex(0x6a645c);
+const CLIFF_PALE = hex(0x8e877c);
+const SNOW = hex(0xf0f3f6);
+const DRY = hex(0x9e9268);
 
 function mix(out: Color, to: Rgb, t: number): void {
   const u = clamp(t, 0, 1);
@@ -111,7 +113,7 @@ export function biomeColor(height: number, slopeY: number, patch: number, out: C
   mix(out, ROCK, smoothstep(460, 720, h + patch * 70));
   const steep = 1 - smoothstep(0.42, 0.66, slopeY);
   // Sea cliffs show layered rock bands rather than one flat tone.
-  const strata = 0.5 + 0.35 * Math.sin(height * 0.3 + patch * 2.5);
+  const strata = 0.5 + 0.18 * Math.sin(height * 0.3 + patch * 2.5);
   const cliffRgb: Color = [CLIFF[0], CLIFF[1], CLIFF[2]];
   mix(cliffRgb, CLIFF_PALE, strata);
   mix(out, height < 90 ? cliffRgb : ROCK, steep);

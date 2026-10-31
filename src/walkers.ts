@@ -4,6 +4,7 @@ import { WALKER } from './land-life.js';
 import { landShadingGLSL, type LandStream } from './landmesh.js';
 import { WALKER_STRIDE } from './world-tiles.js';
 import { item } from './item.js';
+import { DRAW_AS_AUTHORED_GLSL } from './tone.js';
 
 /**
  * People and animals on the land: one instanced draw for people and one for
@@ -110,7 +111,7 @@ varying vec3 vNormal;
 varying vec3 vWorld;
 void main() {
   gl_FragColor = vec4( landShade( vColor, normalize( vNormal ), vWorld ), 1.0 );
-  #include <colorspace_fragment>
+  ${DRAW_AS_AUTHORED_GLSL}
 }`;
 
 /** Instances are re-sorted by distance once the camera has moved this far. */
@@ -131,7 +132,6 @@ export function createWalkers(stream: LandStream, initialCap: number): Walkers {
       uniforms: { ...stream.uniforms, clock },
       vertexColors: true,
       fog: false,
-      toneMapped: false,
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.frustumCulled = false;

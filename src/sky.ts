@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { fork } from './rng.js';
 import { clamp, lerp, smoothstep } from './math.js';
-import { patchShader, type ShaderPatch } from './ocean.js';
+import { patchShader, type ShaderPatch } from './shader-patch.js';
 import type { WeatherLook } from './weather.js';
 import { item } from './item.js';
+import { drawAsAuthored } from './tone.js';
 
 export type TimeOfDay = 'golden' | 'morning' | 'afternoon' | 'dusk';
 /** The day runs through these in order; night comes after dusk and gives way to morning. */
@@ -89,7 +90,9 @@ interface Preset {
   level: number;
 }
 
-const SUN = { color: 0xfff1d6, intensity: 2.0 };
+/** The sun's light at a clear noon. */
+export const SUN_INTENSITY = 2;
+const SUN = { color: 0xfff1d6, intensity: SUN_INTENSITY };
 const HEMI = { sky: 0xc0d4e8, ground: 0x2a3e4e, intensity: 0.75 };
 const AMBIENT = { color: 0x6a8498, intensity: 0.4 };
 
@@ -280,7 +283,7 @@ export function createSky(
   starMap.magFilter = THREE.LinearFilter;
   starMap.minFilter = THREE.LinearFilter;
   starMap.needsUpdate = true;
-  const starMaterial = new THREE.PointsMaterial({
+  const starMaterial = drawAsAuthored(new THREE.PointsMaterial({
     size: 1.7 * renderer.getPixelRatio(),
     alphaMap: starMap,
     sizeAttenuation: false,
@@ -289,8 +292,7 @@ export function createSky(
     opacity: 0,
     depthWrite: false,
     fog: false,
-    toneMapped: false,
-  });
+  }));
   const starPoints = new THREE.Points(starGeometry, starMaterial);
   starPoints.visible = false;
   starPoints.renderOrder = 1;

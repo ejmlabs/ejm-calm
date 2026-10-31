@@ -44,6 +44,7 @@ import { item } from './item.js';
 export type { WhalePhase } from './whale-motion.js';
 export type { WhaleBehavior } from './whale-behavior.js';
 import { context2d } from './canvas.js';
+import { drawAsAuthored } from './tone.js';
 
 export interface WhaleState {
   phase: WhalePhase;
@@ -389,9 +390,9 @@ export function createWhale(seed: number, home: { x: number; z: number }, option
       transparent: true,
       opacity: 0,
       depthWrite: false,
-      // White water should stay white; tone mapping greys it out against the sky.
-      toneMapped: kind === 'mist',
     });
+    // White water stays white, authored as it should look on screen; the mist is lit like the air.
+    if (kind !== 'mist') drawAsAuthored(mat);
     const sprite = new THREE.Sprite(mat);
     // Streaks stand on the water: anchor the sprite at its base.
     if (kind === 'crown') sprite.center.set(0.5, 0);

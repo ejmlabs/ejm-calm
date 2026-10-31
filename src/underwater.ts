@@ -4,7 +4,8 @@ import type { QualityTier } from './quality.js';
 import { clamp, lerp } from './math.js';
 import { hash } from './rng.js';
 import { WATER_LEVEL, underwaterUniforms, waterSignal, type FloatingOrigin, type WaterSignal } from './seams.js';
-import { WATER_IOR, blendFog, depthLight, radianceFor, seenLight, waterTint, type FogState } from './underwater-optics.js';
+import { WATER_IOR, blendFog, depthLight, seenLight, waterTint, type FogState } from './underwater-optics.js';
+import { DRAW_AS_AUTHORED_GLSL, SCENE_FROM_DISPLAY_GLSL, displayExposure, radianceFor } from './tone.js';
 import { createFloorPatch } from './underwater-floor.js';
 import { createSeafloor, type DepthAt, type Seafloor } from './seafloor.js';
 import { createUnderwaterLife } from './underwater-life.js';
@@ -124,10 +125,10 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   const sunGlow = new THREE.Color();
   /** What the window overhead shows, from the sky as it is now. */
   function lookUp(): void {
-    radianceFor(sky.hazeGradient[0] ?? sky.hazeColor, exposure(), renderer.toneMapping, skyHorizon);
+    radianceFor(sky.hazeGradient[0] ?? sky.hazeColor, exposure(), skyHorizon);
     zenithDisplay.copy(sky.hazeGradient[sky.hazeGradient.length - 1] ?? sky.hazeColor).lerp(zenithBlue, 0.45);
-    radianceFor(zenithDisplay, exposure(), renderer.toneMapping, skyZenith);
-    radianceFor(sunGlowDisplay, exposure(), renderer.toneMapping, sunGlow).multiplyScalar(1.4 * clamp(sky.sunDirection.y * 4, 0, 1));
+    radianceFor(zenithDisplay, exposure(), skyZenith);
+    radianceFor(sunGlowDisplay, exposure(), sunGlow).multiplyScalar(1.4 * clamp(sky.sunDirection.y * 4, 0, 1));
   }
   lookUp();
 
@@ -225,11 +226,11 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     rayData[i * 4 + 3] = r(4);
   }
   rayGeometry.setAttribute('aRay', new THREE.InstancedBufferAttribute(rayData, 4));
-  // Additive in display space: shafts only ever brighten, by a predictable amount.
+  // Authored additive in display terms: shafts only ever brighten.
   const rayColor = display(0xd8f1ea);
   const rayMaterial = new THREE.ShaderMaterial({
     name: 'underwater-rays',
-    uniforms: { ...shared, uRayColor: { value: rayColor }, uIntensity: { value: 0 } },
+    uniforms: { ...shared, uRayColor: { value: rayColor }, uIntensity: { value: 0 }, displayExposure },
     vertexShader: /* glsl */ `
       uniform vec3 uSunWater;
       uniform float uTime;
@@ -263,6 +264,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       uniform vec3 uRayColor;
       uniform float uIntensity;
       uniform float uFogDensity;
+      ${SCENE_FROM_DISPLAY_GLSL}
       varying vec3 vWorld;
       varying vec2 vShaft;
       varying float vFade;
@@ -275,9 +277,8 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
         float light = exp( -0.05 * max( 0.0, -vWorld.y ) );
         float a = across * across * along * near * fogT * light * vFade * uIntensity;
         gl_FragColor = vec4( uRayColor * a, 1.0 );
-        #include <colorspace_fragment>
+        ${DRAW_AS_AUTHORED_GLSL}
       }`,
-    toneMapped: false,
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
@@ -301,7 +302,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
   const snowGeometry = new THREE.BufferGeometry();
   snowGeometry.setAttribute('position', new THREE.BufferAttribute(snowPositions, 3));
   snowGeometry.setAttribute('aSeed', new THREE.BufferAttribute(snowSeeds, 1));
-  const snowColor = radianceFor(display(0xb9d9d6), exposure(), renderer.toneMapping);
+  const snowColor = radianceFor(display(0xb9d9d6), exposure());
   const snowMaterial = new THREE.ShaderMaterial({
     name: 'underwater-particles',
     uniforms: { ...shared, uScale: { value: 400 }, uColor: { value: snowColor } },
@@ -356,10 +357,10 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     budget: tier.budget,
     caustics: tier.caustics,
     shared,
-    sand: radianceFor(display(0xc9b48a), exposure(), renderer.toneMapping),
-    sandDark: radianceFor(display(0x8f8466), exposure(), renderer.toneMapping),
-    rock: radianceFor(display(0x5d6660), exposure(), renderer.toneMapping),
-    caustic: radianceFor(display(0xfff6e2), exposure(), renderer.toneMapping),
+    sand: radianceFor(display(0xc9b48a), exposure()),
+    sandDark: radianceFor(display(0x8f8466), exposure()),
+    rock: radianceFor(display(0x5d6660), exposure()),
+    caustic: radianceFor(display(0xfff6e2), exposure()),
   });
   layered(floor.mesh);
 
@@ -367,7 +368,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
 
   const life = createUnderwaterLife(seed, seafloor.heightAt, options.tier, UNDERWATER_LAYER);
   group.add(life.group);
-  const swarms = createSwarms(seed, seafloor.heightAt, options.tier, UNDERWATER_LAYER, shared, (hex) => radianceFor(display(hex), exposure(), renderer.toneMapping));
+  const swarms = createSwarms(seed, seafloor.heightAt, options.tier, UNDERWATER_LAYER, shared, (hex) => radianceFor(display(hex), exposure()));
   group.add(swarms.group);
   const whaleRender = new THREE.Vector3();
   let pointScale = 400;
@@ -383,6 +384,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       uAir: { value: new THREE.Color() },
       uWaterAlpha: { value: 0 },
       uAirAlpha: { value: 0 },
+      displayExposure,
     },
     vertexShader: /* glsl */ `
       uniform mat4 uNearToWorld;
@@ -399,6 +401,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       uniform float uWaterAlpha;
       uniform float uAirAlpha;
       varying vec3 vNear;
+      ${SCENE_FROM_DISPLAY_GLSL}
       void main() {
         // The waterline where the swell crosses the lens, a few centimetres high.
         vec2 p = vNear.xz + uPattern;
@@ -410,12 +413,11 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
         vec3 color = mix( mix( uAir, uWater, under ), uWater * 0.45, meniscus * 0.8 );
         float alpha = max( mix( uAirAlpha, uWaterAlpha, under ), meniscus * 0.75 );
         gl_FragColor = vec4( color, alpha );
-        #include <colorspace_fragment>
+        ${DRAW_AS_AUTHORED_GLSL}
       }`,
     transparent: true,
     depthTest: false,
     depthWrite: false,
-    toneMapped: false,
   });
   const overlay = layered(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), overlayMaterial));
   overlay.renderOrder = 1000;
@@ -493,7 +495,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
       tintDepth = depth;
       tintLight = daylight;
       waterTint(Math.max(0, depth), daylight, tint);
-      radianceFor(tint.color, exposure(), renderer.toneMapping, below.color);
+      radianceFor(tint.color, exposure(), below.color);
       below.density = tint.density;
     }
     // Whatever the camera sees through the lens is on its own side of the surface: hold the
@@ -503,7 +505,7 @@ export function createUnderwater(scene: THREE.Scene, renderer: THREE.WebGLRender
     blendFog(above, tint, murk, blended);
     if (!blended.color.equals(lastBlend)) {
       lastBlend.copy(blended.color);
-      radianceFor(blended.color, exposure(), renderer.toneMapping, fogRadiance);
+      radianceFor(blended.color, exposure(), fogRadiance);
     }
     if (fog) {
       fog.color.copy(blended.color);

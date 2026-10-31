@@ -4,6 +4,14 @@ import { makeNoise4D, fbm4 } from './noise.js';
 import { hash } from './rng.js';
 import type { ShelfMap } from './land.js';
 import { SEA_WAVES, packWaves, seaLevel } from './swell.js';
+import { radianceFor } from './tone.js';
+import { patchShader, type ShaderPatch } from './shader-patch.js';
+
+/** Reflected land sits a touch darker than the land itself. */
+const REFLECTION_GAIN = 0.85;
+/** Sun glitter in scene light at a clear noon: the sparkle of single facets, and the sheen of the path they make. */
+const GLITTER = 70;
+const SHEEN = 1.6;
 
 export interface OceanHandle {
   water: Water;
@@ -12,8 +20,12 @@ export interface OceanHandle {
   update: (dt: number, sunDirection: THREE.Vector3, camera?: THREE.Camera) => void;
   /** The water's base colour (a region's look). */
   setWaterColor: (color: THREE.Color) => void;
-  /** The light of the day: haze colour that lifts dark reflections, and brightness (0 dark to 1 day) of the water, the shallows and the sun's glint. */
-  setSky: (haze: THREE.Color, light: number, shallowLight: number) => void;
+  /**
+   * The light of the day: the haze colour (display) that lifts dark reflections, at the output's exposure; brightness
+   * (0 dark to 1 day) of the water and of the shallows; and the sun's own strength (0 hidden to 1 clear), which
+   * sets its glitter.
+   */
+  setSky: (sky: { haze: THREE.Color; exposure: number; light: number; shallowLight: number; sun: number }) => void;
   /** World X/Z of render (0, 0); keeps ripples and shelf maps on the world after a recentre. */
   setOrigin: (x: number, z: number) => void;
   /** Swaps in shelf maps baked elsewhere in the world (maps are in world coordinates). */
@@ -96,14 +108,6 @@ export function createOcean(
     textureSize?: number;
     waterColor?: number;
     shelves?: { near: ShelfMap; far: ShelfMap; light?: number };
-    /** Horizon haze colour; scattered light lifts dark reflections toward it. */
-    reflectionHaze?: THREE.Color;
-    /**
-     * Gain for dark reflected land. The land is drawn without tone mapping but
-     * its reflection passes through the water's tone mapping, so it needs about
-     * 1 / exposure to match.
-     */
-    reflectionGain?: number;
   } = {},
 ): OceanHandle {
   const textureSize = options.textureSize ?? 256;
@@ -139,7 +143,7 @@ export function createOcean(
   };
   Object.assign(material.uniforms, base);
 
-  const look = applyWaterLook(material, options.shelves, options.reflectionHaze, options.reflectionGain ?? 1);
+  const look = applyWaterLook(material, options.shelves);
   const waves = new Float32Array(SEA_WAVES * 4);
   const sea = applySea(material, typeof geometry.userData['growth'] === 'number' ? geometry.userData['growth'] : 0, waves);
   const maps = { near: options.shelves?.near, far: options.shelves?.far };
@@ -195,11 +199,12 @@ export function createOcean(
     setWaterColor(color: THREE.Color) {
       base.waterColor.value.copy(color).multiplyScalar(light);
     },
-    setSky(haze: THREE.Color, level: number, shallowLight: number) {
-      light = level;
-      look?.reflectionHaze.value.copy(haze);
-      if (look?.shelf) look.shelf.shallowLight.value = (options.shelves?.light ?? 1) * shallowLight;
-      base.sunColor.value.set(0xe8dcc0).multiplyScalar(level);
+    setSky(sky) {
+      light = sky.light;
+      if (look) radianceFor(sky.haze, sky.exposure, look.reflectionHaze.value);
+      if (look?.shelf) look.shelf.shallowLight.value = (options.shelves?.light ?? 1) * sky.shallowLight;
+      base.sunColor.value.set(0xe8dcc0).multiplyScalar(sky.light);
+      if (sea) sea.glitter.value = sky.sun;
     },
     setOrigin(x: number, z: number) {
       origin.x = x;
@@ -356,14 +361,15 @@ const seaFragmentPatches: ShaderPatch[] = [
     replace: 'vec2 distortion = surfaceNormal.xz * ( 0.0016 + min( 1.3 / distance, 0.012 ) ) * distortionScale * vec2( 1.0, 1.7 ) * ( 1.0 + 2.0 * seaLevel );',
   },
   {
-    find: 'reflectionSample = mix( reflectionSample, reflectionHaze * reflectionGain, reflectionLift * reflectionDark );',
-    replace: `reflectionSample = mix( reflectionSample, reflectionHaze * reflectionGain, reflectionLift * reflectionDark );
+    find: 'reflectionSample = mix( reflectionSample, reflectionHaze, reflectionLift * reflectionDark );',
+    replace: `reflectionSample = mix( reflectionSample, reflectionHaze, reflectionLift * reflectionDark );
       reflectionSample = mix( reflectionSample, reflectionHaze, 0.85 * smoothstep( 0.15, 0.85, seaLevel ) );`,
   },
   { find: 'vec4 getNoise( vec2 uv ) {', replace: `uniform float rippleGain;
 				uniform float seaLevel;
 				uniform float foamLight;
 				uniform float seaTop;
+				uniform float glitter;
 				${SEA_GLSL}
 				vec4 getNoise( vec2 uv ) {` },
   {
@@ -376,12 +382,28 @@ const seaFragmentPatches: ShaderPatch[] = [
   {
     find: 'vec3 outgoingLight = albedo;',
     replace: `{
-        // Whitecaps: rough crests break, ragged by the ripples; wind streaks the foam between them in a gale.
-        float crest = sea.z / max( seaTop, 0.05 ) + 0.3 * noise.x;
-        float foam = smoothstep( 0.2, 0.75, crest ) * smoothstep( 0.35, 0.8, seaLevel );
-        foam += 0.3 * smoothstep( 0.75, 1.0, seaLevel ) * smoothstep( 0.4, 1.0, noise.z * 0.5 + crest * 0.5 );
-        foam *= 1.0 - smoothstep( 250.0, 1800.0, seaDist );
-        albedo = mix( albedo, vec3( 0.78, 0.84, 0.86 ) * ( 0.12 + 0.88 * foamLight ), clamp( foam * foam * 1.4, 0.0, 0.7 ) );
+        // Sun glitter: ripple facets that mirror the sun flash past the white point, a sheen gathers them into a path,
+        // and the bloom carries both. Cloud over the sun and the night take it away.
+        vec3 toSun = normalize( sunDirection + eyeDirection );
+        float facet = max( 0.0, dot( surfaceNormal, toSun ) );
+        float low = smoothstep( -0.02, 0.08, sunDirection.y );
+        albedo += sunColor * glitter * low * ( ${GLITTER.toFixed(1)} * pow( facet, 1400.0 ) + ${SHEEN.toFixed(1)} * pow( facet, 160.0 ) );
+      }
+      vec3 outgoingLight = albedo;`,
+  },
+  {
+    find: 'vec3 outgoingLight = albedo;',
+    replace: `{
+        // Whitecaps gather on rough crests and break into lace and streaks along the ripples, never a flat sheet;
+        // a gale streaks foam between them.
+        float crest = sea.z / max( seaTop, 0.05 );
+        float ripples = 0.5 * ( noise.x + noise.z );
+        float lace = smoothstep( -0.2, 0.5, ripples + 0.4 * crest );
+        float cap = smoothstep( 0.55, 0.95, crest + 0.3 * ripples ) * smoothstep( 0.35, 0.8, seaLevel );
+        float streak = 0.35 * smoothstep( 0.75, 1.0, seaLevel ) * smoothstep( 0.25, 0.75, ripples );
+        // Kept near the eye, where the ripples still break it up: further out it would lie in smooth sheets.
+        float foam = ( cap * lace + streak * ( 1.0 - cap ) ) * ( 1.0 - smoothstep( 40.0, 450.0, seaDist ) );
+        albedo = mix( albedo, vec3( 0.78, 0.84, 0.86 ) * ( 0.12 + 0.88 * foamLight ), clamp( foam, 0.0, 0.65 ) );
       }
       vec3 outgoingLight = albedo;`,
   },
@@ -406,27 +428,13 @@ function applySea(material: THREE.ShaderMaterial, growth: number, waves: Float32
     seaTop: { value: 0 },
     rippleGain: { value: 1.5 },
     foamLight: { value: 1 },
+    glitter: { value: 1 },
   };
   material.vertexShader = vertex;
   material.fragmentShader = fragment;
   Object.assign(material.uniforms, sea);
   material.needsUpdate = true;
   return sea;
-}
-
-export interface ShaderPatch { find: string; replace: string }
-
-/**
- * Applies every patch to a shader source, or returns null if any target text is
- * missing, so a three.js upgrade can never leave a half-patched shader.
- */
-export function patchShader(source: string, patches: readonly ShaderPatch[]): string | null {
-  let out = source;
-  for (const patch of patches) {
-    if (!out.includes(patch.find)) return null;
-    out = out.replace(patch.find, () => patch.replace);
-  }
-  return out;
 }
 
 /** Calm, slightly rough water: reflections streak and lift toward the haze instead of mirroring dark land. */
@@ -443,8 +451,7 @@ const reflectionPatches: ShaderPatch[] = [
     find: 'uniform vec3 waterColor;',
     replace: `uniform vec3 waterColor;
       uniform vec3 reflectionHaze;
-      uniform float reflectionLift;
-      uniform float reflectionGain;`,
+      uniform float reflectionLift;`,
   },
   {
     find: 'vec2 distortion = surfaceNormal.xz * ( 0.001 + 1.0 / distance ) * distortionScale;',
@@ -458,8 +465,8 @@ const reflectionPatches: ShaderPatch[] = [
       // Skylight scattered off the ripples lifts dark reflected land; bright sky stays as it is.
       float reflectionLuma = dot( reflectionSample, vec3( 0.2126, 0.7152, 0.0722 ) );
       float reflectionDark = 1.0 - smoothstep( 0.05, 0.6, reflectionLuma );
-      reflectionSample *= mix( 1.0, reflectionGain, reflectionDark );
-      reflectionSample = mix( reflectionSample, reflectionHaze * reflectionGain, reflectionLift * reflectionDark );`,
+      reflectionSample *= mix( 1.0, ${REFLECTION_GAIN.toFixed(2)}, reflectionDark );
+      reflectionSample = mix( reflectionSample, reflectionHaze, reflectionLift * reflectionDark );`,
   },
 ];
 
@@ -533,12 +540,11 @@ function shelfPatches(): ShaderPatch[] {
       // strong where the view is steep, gone at grazing angles and with distance.
       // The camera sits a few metres up, so everything past ~100 m crowds into a thin band
       // above the horizon: keep a soft, capped grazing wash there so it never reads as a stripe.
-      float facing = mix( 0.15, 1.0, smoothstep( 0.002, 0.04, eyeDirection.y ) );
-      float nearby = 1.0 - smoothstep( 300.0, 1400.0, distance );
-      float shelfMix = ( shallow * 0.9 + slope * 0.35 ) * facing * nearby * ( 1.0 - reflectance * 0.6 );
-      shelfMix = min( shelfMix, mix( 0.25, 0.8, smoothstep( 0.002, 0.04, eyeDirection.y ) ) );
-      // HDR so the turquoise survives the scene's low exposure.
-      vec3 under = mix( shelfColor, shallowColor, shallow ) * shallowLight * 2.1;
+      float steep = smoothstep( 0.004, 0.08, eyeDirection.y );
+      float nearby = 1.0 - smoothstep( 150.0, 900.0, distance );
+      float shelfMix = ( shallow * 0.9 + slope * 0.2 ) * steep * nearby * ( 1.0 - reflectance * 0.6 );
+      // Light up through the shallows, in scene light so the turquoise survives the scene's low exposure.
+      vec3 under = mix( shelfColor, shallowColor, shallow ) * shallowLight * 1.5;
       albedo = mix( albedo, under, clamp( shelfMix, 0.0, 0.8 ) );
       vec3 outgoingLight = albedo;`,
     },
@@ -553,8 +559,6 @@ function shelfPatches(): ShaderPatch[] {
 function applyWaterLook(
   material: THREE.ShaderMaterial,
   shelves: { near: ShelfMap; far: ShelfMap; light?: number } | undefined,
-  haze: THREE.Color | undefined,
-  gain: number,
 ) {
   const patched = patchShader(material.fragmentShader, [...reflectionPatches, ...(shelves ? shelfPatches() : []), ...whalePatches]);
   if (patched === null) {
@@ -568,9 +572,9 @@ function applyWaterLook(
     rippleShiftB: { value: new THREE.Vector4() },
     // Far below the floor until the first setWhale, so nothing shows.
     whaleBody: { value: new THREE.Vector4(0, 0, 0, -1e4) },
-    reflectionHaze: { value: (haze ?? new THREE.Color(0x8a9aa4)).clone() },
+    // The haze in scene light, set with the sky each frame.
+    reflectionHaze: { value: new THREE.Color() },
     reflectionLift: { value: 0.25 },
-    reflectionGain: { value: Number.isFinite(gain) ? Math.min(3, Math.max(1, gain)) : 1 },
     shelf: shelves
       ? {
           shelfNear: { value: shelfTexture(shelves.near) },

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { resolveSeed, seedURL, nextSeed } from './seed.js';
 import { createQuality, detailFor, updateQuality } from './quality.js';
 import { layoutWorld } from './terrain.js';
-import { createSky, HAZE_ANGLES } from './sky.js';
+import { createSky, HAZE_ANGLES, SUN_INTENSITY } from './sky.js';
 import { createWhale, skinMs, type WhalePhase } from './whale.js';
 import { PHASE_LEN } from './whale-motion.js';
 import { createWorld } from './world.js';
@@ -30,6 +30,8 @@ import { createWeatherFx } from './weather-fx.js';
 import { createLandLife, HERD_CELL, TOWN_CELL } from './land-life.js';
 import { PACES, type Pace } from './pace.js';
 import { createViewControls } from './view-controls.js';
+import { createFinish, finishSupported } from './finish.js';
+import { displayExposure } from './tone.js';
 import { item } from './item.js';
 
 interface CalmReview {
@@ -183,13 +185,18 @@ if (!canvasEl) {
 }
 const canvas = canvasEl;
 
+// The finish (src/finish.ts) draws the scene multisampled in half floats; a browser without them draws straight to the canvas.
+const finished = finishSupported();
 const renderer = new THREE.WebGLRenderer({
   canvas,
-  antialias: false,
+  antialias: finished,
   alpha: false,
   powerPreference: 'low-power',
+  outputBufferType: finished ? THREE.HalfFloatType : THREE.UnsignedByteType,
 });
 renderer.setClearColor(0x7a9bb0, 1);
+// Counted per frame (`stats()`): the water's mirror and the finish render inside the frame and would reset them.
+renderer.info.autoReset = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setPixelRatio(quality.ratio);
 renderer.autoClear = true;
@@ -225,6 +232,7 @@ const swellSample = { height: 0, slopeX: 0, slopeZ: 0 };
 const surface = (x: number, z: number) => swellAt(x, z, swellClock, swellSample).height;
 const fishTime = { value: 0 };
 let fishShowcase: ReturnType<typeof createFishShowcase> | null = null;
+let finish: ReturnType<typeof createFinish> | null = null;
 
 try {
   const buildStart = performance.now();
@@ -245,13 +253,12 @@ try {
     hazeGradient: { angles: HAZE_ANGLES, colors: sky.hazeGradient },
     // The sky sets how much light the shallows get as the day goes (a low sun lights them less).
     shallowLight: 1,
-    // Slightly under 1 / exposure: reflections sit a touch darker than the land itself.
-    reflectionGain: 0.8 / renderer.toneMappingExposure,
     waterSize: quality.waterSize,
     landSegments: quality.landSegments,
     detail: detailFor(quality.tier),
     mobile,
     worker: true,
+    dissolve: finished ? 'coverage' : 'dither',
   });
   // Real ocean depth: the shelf, slope and abyssal plain by distance from the coast.
   seafloor = createSeafloor(seed, world.land, world.land.depthAt);
@@ -284,6 +291,7 @@ try {
   // Review only (`?debug=1&fish=1`): every fish species in a small school ahead of the camera.
   if (debug && params.get('fish') === '1') fishShowcase = createFishShowcase(fishTime, UNDERWATER_LAYER);
   if (fishShowcase) scene.add(fishShowcase.group);
+  finish = finished ? createFinish(renderer) : null;
   buildMs = performance.now() - buildStart;
 } catch (error) {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
@@ -406,9 +414,12 @@ function tick(now: number): void {
   sky.setWeather(weatherLook);
   sky.setFog(regionLook.fogTint, regionLook.fogMix, regionLook.fogDensity);
   sky.update(dt, motion.matches ? 0.5 : 1);
-  world.ocean.setSky(sky.hazeColor, sky.level, sky.shallowLight);
+  // The sky sets the exposure; display-authored materials and the bloom follow it.
+  displayExposure.value = renderer.toneMappingExposure;
+  finish?.update(renderer.toneMappingExposure);
+  world.ocean.setSky({ haze: sky.hazeColor, exposure: renderer.toneMappingExposure, light: sky.level, shallowLight: sky.shallowLight, sun: sky.sun.intensity / SUN_INTENSITY });
   world.ocean.setWaterColor(regionLook.water);
-  world.landStream.setSky(sky.sunDirection, sky.hazeGradient, sky.hazeDensity, sky.level);
+  world.landStream.setSky(sky.sunDirection, sky.sun.color, sky.hazeGradient, sky.hazeDensity, sky.level);
   world.landStream.setLook(regionLook.hazeDensity * weatherLook.haze, regionLook.land);
   wake.setLight(sky.daylight);
   birds.setMix(regionLook.birds);
@@ -460,6 +471,7 @@ function tick(now: number): void {
   fishTime.value = time;
   fishShowcase?.follow(camera);
   audio.update(dt, { camera, signal, whale: whale.state, ships: world.ships.active(), shore: world.shore, origin: world.origin, weather: weatherLook });
+  renderer.info.reset();
   renderer.render(scene, camera);
   if (!firstFrame) {
     // The first frame of the sea, for load-time checks.
@@ -714,6 +726,7 @@ if (debug) {
         speed: whale.state.speed,
         behavior: whale.state.behavior,
         exposure: renderer.toneMappingExposure,
+        finish: finish !== null,
         dayPhase: sky.phase().name,
         stars: sky.stars,
         day: sky.phase().day,
@@ -736,7 +749,7 @@ if (debug) {
         envRefreshes: sky.environment().count,
         route: indicator.visible ? indicator.text : '',
         swellClock,
-        // Last rendered frame (three resets these per render).
+        // The last frame, mirror and finish included.
         draws: renderer.info.render.calls,
         triangles: renderer.info.render.triangles,
         submersion: underwater.signal.submersion,
@@ -783,5 +796,6 @@ window.addEventListener('pagehide', () => {
   birds.dispose();
   underwater.dispose();
   fishShowcase?.dispose();
+  finish?.dispose();
   renderer.dispose();
 });

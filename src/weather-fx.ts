@@ -3,6 +3,7 @@ import { fork } from './rng.js';
 import { SEA_GLSL } from './ocean.js';
 import { SEA_WAVES } from './swell.js';
 import type { QualityTier } from './quality.js';
+import { DRAW_AS_AUTHORED_GLSL, SCENE_FROM_DISPLAY_GLSL, displayExposure } from './tone.js';
 
 /** Rain streaks and spray per tier: the most that can show, at full rain and the roughest sea. */
 export const FX_COUNTS: Record<QualityTier, { rain: number; spray: number }> = {
@@ -93,6 +94,7 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
     uVelocity: { value: new THREE.Vector3(0, -FALL, 0) },
     uAmount: { value: 0 },
     uLight: { value: 1 },
+    displayExposure,
   };
   const rainMaterial = new THREE.ShaderMaterial({
     name: 'rain',
@@ -118,8 +120,12 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
     fragmentShader: /* glsl */ `
       uniform float uLight;
       varying float vAlpha;
+      ${SCENE_FROM_DISPLAY_GLSL}
       void main() {
         gl_FragColor = vec4( vec3( 0.62, 0.68, 0.74 ) * ( 0.15 + 0.85 * uLight ), vAlpha * 0.55 );
+        // Authored as sRGB values written straight to the screen.
+        gl_FragColor = sRGBTransferEOTF( gl_FragColor );
+        ${DRAW_AS_AUTHORED_GLSL}
       }`,
     transparent: true,
     depthWrite: false,
@@ -140,6 +146,7 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
     uWind: { value: new THREE.Vector2(1, 0) },
     uSea: { value: 0 },
     uLight: { value: 1 },
+    displayExposure,
     uScale: { value: 400 },
     seaWaves: { value: waves },
   };
@@ -174,10 +181,14 @@ export function createWeatherFx(seed: number, tier: QualityTier, waves: Float32A
     fragmentShader: /* glsl */ `
       uniform float uLight;
       varying float vAlpha;
+      ${SCENE_FROM_DISPLAY_GLSL}
       void main() {
         vec2 c = gl_PointCoord * 2.0 - 1.0;
         float disc = max( 0.0, 1.0 - dot( c, c ) );
         gl_FragColor = vec4( vec3( 0.86, 0.9, 0.92 ) * ( 0.12 + 0.88 * uLight ), disc * disc * vAlpha * 0.5 );
+        // Authored as sRGB values written straight to the screen.
+        gl_FragColor = sRGBTransferEOTF( gl_FragColor );
+        ${DRAW_AS_AUTHORED_GLSL}
       }`,
     transparent: true,
     depthWrite: false,

@@ -26,6 +26,10 @@ structure.
   from `context2d` (`src/canvas.ts`).
 - Shader uniforms the code sets each frame are typed objects the module keeps and assigns into
   the material (as `src/ocean.ts` and `src/sky.ts` do), never `material.uniforms['x'].value`.
+- Every material draws scene light; the output applies three's ACES curve once, after the bloom
+  and grade (`src/finish.ts`). A material authored in display colours ends its shader with
+  `DRAW_AS_AUTHORED_GLSL` or goes through `drawAsAuthored` (`src/tone.ts`), never
+  `toneMapped: false`; `tests/tone.test.ts` checks. CPU colours convert with `radianceFor`.
 
 ## Seeded determinism
 

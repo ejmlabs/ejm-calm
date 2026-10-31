@@ -2,7 +2,8 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { Water } from 'three/addons/objects/Water.js';
-import { createOcean, patchShader } from '../src/ocean.js';
+import { createOcean } from '../src/ocean.js';
+import { patchShader } from '../src/shader-patch.js';
 
 /** A Vector4 uniform of the water material, checked. */
 function vector4(material: THREE.ShaderMaterial, name: string): THREE.Vector4 {
@@ -26,7 +27,7 @@ test('the bundled three.js Water shader takes every patch', () => {
   const ocean = createOcean(1, new THREE.Vector3(0, 1, 0), { textureSize: 4, shelves: { near: shelf, far: shelf } });
   const material = ocean.water.material;
   assert.notEqual(material.fragmentShader, stock);
-  for (const declaration of ['uniform vec3 reflectionHaze;', 'uniform float reflectionLift;', 'uniform float reflectionGain;', 'uniform sampler2D shelfNear;']) {
+  for (const declaration of ['uniform vec3 reflectionHaze;', 'uniform float reflectionLift;', 'uniform sampler2D shelfNear;']) {
     assert.ok(material.fragmentShader.includes(declaration), declaration);
   }
   assert.ok(material.fragmentShader.includes('shelfMix'));

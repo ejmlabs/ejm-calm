@@ -428,7 +428,6 @@ test('a fast world update stays within its frame budget and keeps ships and navi
     hazeDensity: 0.00026,
     hazeGradient: { angles: [0, 90], colors: [gray, gray] },
     shallowLight: 1,
-    reflectionGain: 1,
     waterSize: 64,
     landSegments: 48,
     detail: detailFor('high'),

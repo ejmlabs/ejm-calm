@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { WorldLayout } from './terrain.js';
 import { farShelf, farShelfSteps, navShelfSteps, nearShelf, type Land, type ShelfMap } from './land.js';
 import { createOcean, type OceanHandle } from './ocean.js';
-import { createLandStream, type LandStream } from './landmesh.js';
+import { createLandStream, type Dissolve, type LandStream } from './landmesh.js';
 import { createShipStream } from './world-ships.js';
 import { createWorldOrigin, type WorldOrigin } from './world-origin.js';
 import type { Shore } from './shore.js';
@@ -21,7 +21,6 @@ export interface WorldOptions {
   hazeGradient: { angles: number[]; colors: THREE.Color[] };
   /** Low sun lights the shallows less. */
   shallowLight: number;
-  reflectionGain: number;
   waterSize: number;
   landSegments: number;
   /** Life on the land and its surface detail, by quality tier. */
@@ -30,6 +29,8 @@ export interface WorldOptions {
   mobile: boolean;
   /** Build land tiles and far shelf maps in a worker (browser). */
   worker?: boolean;
+  /** How fading land tiles dissolve (see `LandStreamOptions`); a dither unless the frame is multisampled. */
+  dissolve?: Dissolve | undefined;
 }
 
 export interface World {
@@ -91,8 +92,6 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     textureSize: options.waterSize,
     waterColor: 0x1c5470,
     shelves: { near: nearShelf(land), far: farShelf(land), light: options.shallowLight },
-    reflectionHaze: options.hazeColor,
-    reflectionGain: options.reflectionGain,
   });
   scene.add(ocean.mesh);
 
@@ -105,6 +104,7 @@ export function createWorld(seed: number, layout: WorldLayout, scene: THREE.Scen
     worker: options.worker,
     objects: options.detail.objects,
     microNormal: options.detail.microNormal,
+    dissolve: options.dissolve,
   });
   root.add(landStream.group);
   const walkers = createWalkers(landStream, options.detail.walkers);

@@ -7,7 +7,7 @@ import { createBirds } from '../src/birds.js';
 import { FOV, FOV_LIFT, FollowCamera, LEAN_MAX, PULL_BACK, pullBackAt } from '../src/camera.js';
 import { swellAt, swellRate, SWELL_SPEED_GAIN } from '../src/swell.js';
 import { cloudPatches } from '../src/sky.js';
-import { patchShader } from '../src/ocean.js';
+import { patchShader } from '../src/shader-patch.js';
 import { layoutWorld } from '../src/terrain.js';
 import { createShip } from '../src/ships.js';
 import { createShipFx } from '../src/ship-fx.js';

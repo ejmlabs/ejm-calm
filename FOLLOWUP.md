@@ -7,7 +7,7 @@
 - Land is shaded per fragment from the live sun direction, haze colours and a day brightness, so it follows the day cycle; the vertex colours carry the palette only.
 - Mobile breach/spout camera still does not reliably fill 35–50% of screen width; needs a bbox-centred look and a screen-width check.
 - Land haze colours are measured per time-of-day preset (sky just above the horizon); if the sky presets change, re-measure them.
-- Shallow-water tint is subtle from boat height; a higher camera shows it more.
+- Shallows fade out between 150 and 900 m and at grazing angles, so from boat height the turquoise shows only near a shore; a higher camera shows more.
 - Sail billow is visible up close; at distance a tall ship can still read as one pale panel.
 - Saved camera pitch/distance can override the portrait defaults after a refresh.
 - Real-device figures are still owed for the migration: the p99 stream frame (spec: under 3 ms on a phone-class device), the environment map refresh frame (spec: at most 8 ms over the average on the desktop profile), and frame time at cruise on a phone. Software GL numbers are recorded in `openspec/changes/add-ocean-migration/tasks.md` and are not those.
@@ -18,4 +18,8 @@
 - Rocks and islets stand one per 2 km cell, only where the sea is open (no natural coast within a kilometre), so something passes every couple of minutes without narrowing a way through; they add land tiles with meshes (about 200 land tiles at once on seed 42, against about 70 before the change began).
 - Distant ranges now shade from per-tile maps, but their skylines are still the mesh's straight segments (vertices 85 m apart on a 2 km tile). A finer grid for the coarse levels only, measured on a real GPU, would break the skyline too.
 - First-frame time on the load-time profile is dominated by shader linking in software GL (about 1 to 3 s of it on this machine, on main as well), and wall-clock medians on a shared, busy machine swing by a second between runs of the same build. Real GPUs link far faster. The page links the materials first drawn after the opening frame by drawing them once before it; where the parallel shader compile extension exists (not in the software GL used here), three.js's `compileAsync` could do that off the main thread instead. The water mirror's variant of the land dissolve still links on first use (about 70 ms here).
-- Hatched patches show at some shallow shores and tile edges near the camera, before and after the land detail; they come from the tile dissolve or the shallow-water blend, not from the land objects.
+- With the HDR finish, land tiles cross-fade by sample coverage; the hatched dissolve remains only where the browser draws without multisampling.
+- Golden hour on some seeds (42, 7) has a green-teal sky from the sky model's presets; changing a preset means re-measuring its land haze colours (above).
+- From the chase camera the whale's back can read glassy blue in clear afternoon light (the clear coat reflecting the sky); as on main.
+- The HDR finish (4x multisampled half-float scene, bloom, grade, `src/finish.ts`) has no device figures yet: frame time on a phone and on a desktop GPU is owed. Shots and the smoke ran in software GL only.
+- Browsers without multisampled half-float targets draw without the finish (no bloom, grade or antialiasing). No such device was at hand to look at.

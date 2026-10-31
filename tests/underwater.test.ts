@@ -6,17 +6,16 @@ import {
   VISIBLE_LIGHT,
   WATER_IOR,
   WATER_LOOK,
-  acesFilmic,
   airAngle,
   blendFog,
   criticalAngle,
   depthLight,
-  radianceFor,
   seenLight,
   surfaceLight,
   waterTint,
   type FogState,
 } from '../src/underwater-optics.js';
+import { acesFilmic, radianceFor } from '../src/tone.js';
 import { floorCentre, visualFloor } from '../src/underwater-floor.js';
 
 test('water signal is 0 above the band, 1 below, and smooth and monotonic across it', () => {
@@ -100,7 +99,7 @@ test('radiance solver round-trips display colours through ACES, including dark d
   for (const depth of [0, 4, 12, 30]) {
     const tint: FogState = { color: new THREE.Color(), density: 0 };
     waterTint(depth, 0.5, tint);
-    const radiance = radianceFor(tint.color, 0.42, THREE.ACESFilmicToneMapping);
+    const radiance = radianceFor(tint.color, 0.42);
     const back = acesFilmic(radiance, 0.42);
     for (const c of ['r', 'g', 'b'] as const) {
       assert.ok(Number.isFinite(radiance[c]) && radiance[c] >= 0);
@@ -110,8 +109,6 @@ test('radiance solver round-trips display colours through ACES, including dark d
       assert.ok(reached || floored, `${String(depth)} ${c}: ${String(back[c])} vs ${String(tint.color[c])}`);
     }
   }
-  const plain = radianceFor(new THREE.Color(0.2, 0.3, 0.4), 0.5, THREE.NoToneMapping);
-  assert.ok(Math.abs(plain.g - 0.6) < 1e-9);
 });
 
 test('seafloor patch: drawn floor never sits above the real one and centres snap deterministically', () => {

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { smoothstep } from './math.js';
 import { item } from './item.js';
+import { drawAsAuthored } from './tone.js';
 
 /** Where a wake is made: world metres, heading as the whale's (forward = (−cos h, sin h)), height of the body and speed in m/s. */
 export interface WakeSource { x: number; y: number; z: number; heading: number; speed: number }
@@ -113,16 +114,15 @@ export function createWake(options: WakeOptions = {}): Wake {
   }
   geometry.setIndex(trailIndex);
 
-  const material = new THREE.MeshBasicMaterial({
+  const material = drawAsAuthored(new THREE.MeshBasicMaterial({
     color: COLOR,
     vertexColors: true,
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
-    // White water should stay white, as the whale's own spray does.
-    toneMapped: false,
+    // White water stays white, as the whale's own spray does: authored as it should look on screen.
     fog: false,
-  });
+  }));
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.renderOrder = 2;

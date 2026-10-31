@@ -109,7 +109,8 @@ await withBrowser(async (browser, base) => {
     }
   }
 
-  // Added detail stays inside its budget (birds: at most 24 instances, 9 draws, 5,000 triangles).
+  // Added detail stays inside its budget (birds: at most 24 instances, 9 draws, 5,000 triangles), and the frame is
+  // finished (multisampled half-float scene, bloom and grade) wherever the browser can draw it.
   {
     const { page, context, errors } = await openCalm(browser, base, DESKTOP, { query: { debug: '1' } });
     try {
@@ -117,6 +118,7 @@ await withBrowser(async (browser, base) => {
       const stats = await page.evaluate(() => (window as unknown as { __calmReview: { stats: () => Record<string, number> } }).__calmReview.stats());
       assert.ok((stats['birds'] ?? 0) > 0 && (stats['birds'] ?? 0) <= 24, `birds ${String(stats['birds'])}`);
       assert.ok((stats['birdDraws'] ?? 0) <= 9 && (stats['birdTriangles'] ?? 0) <= 5000, `bird draws ${String(stats['birdDraws'])}, triangles ${String(stats['birdTriangles'])}`);
+      assert.equal(stats['finish'], true, 'the frame is finished: HDR, bloom and grade');
       assert.deepEqual(errors, []);
       console.log(`budget: ${String(stats['birds'])} birds, ${String(stats['birdDraws'])} draws, ${String(stats['birdTriangles'])} triangles`);
     } finally {
