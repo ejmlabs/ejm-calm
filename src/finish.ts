@@ -8,8 +8,9 @@ import { item } from './item.js';
 /**
  * The frame's finish, on three's HDR output (`outputBufferType` with `setEffects`): the scene draws into a 4x
  * multisampled half-float target, light past the white point blooms, a grade sets the film look, and the output
- * applies the tone curve (`src/tone.ts`) once. A browser that cannot render multisampled half floats draws straight
- * to the canvas with the same curve per material, without the bloom, the grade or the antialiasing.
+ * applies the tone curve (`src/tone.ts`) once. A browser that cannot render multisampled half floats, or renders on
+ * the CPU, draws straight to the canvas with the same curve per material, without the bloom, the grade or the
+ * antialiasing.
  */
 
 /** Display brightness (linear, 0 to 1) from which light blooms: the sun, its glitter on the water, sunlit spray. */
@@ -22,14 +23,23 @@ export const BLOOM_LEVELS = [1, 0.55, 0.3, 0.15, 0.06];
 /** How far the corners darken, as a share of the centre's light. */
 export const VIGNETTE = 0.24;
 
-/** Whether this browser draws to multisampled half-float targets, which the finish needs. */
-export function finishSupported(): boolean {
+/** Renderers that run on the CPU: the finish would cut their frame rate to about a third. */
+const SOFTWARE_GL = /swiftshader|llvmpipe|softpipe|software/i;
+
+/**
+ * Whether this browser draws to multisampled half-float targets on a GPU, which the finish needs. `onCpu` allows a
+ * CPU renderer as well (review shots and the browser smoke run on one).
+ */
+export function finishSupported(onCpu: boolean): boolean {
   const gl = document.createElement('canvas').getContext('webgl2');
   if (!gl) return false;
   try {
     if (!gl.getExtension('EXT_color_buffer_float') && !gl.getExtension('EXT_color_buffer_half_float')) return false;
     const samples: unknown = gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES);
-    return samples instanceof Int32Array && (samples[0] ?? 0) >= 4;
+    if (!(samples instanceof Int32Array) || (samples[0] ?? 0) < 4) return false;
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer: unknown = gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+    return onCpu || !(typeof renderer === 'string' && SOFTWARE_GL.test(renderer));
   } finally {
     gl.getExtension('WEBGL_lose_context')?.loseContext();
   }

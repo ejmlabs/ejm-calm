@@ -21,5 +21,5 @@
 - With the HDR finish, land tiles cross-fade by sample coverage; the hatched dissolve remains only where the browser draws without multisampling.
 - Golden hour on some seeds (42, 7) has a green-teal sky from the sky model's presets; changing a preset means re-measuring its land haze colours (above).
 - From the chase camera the whale's back can read glassy blue in clear afternoon light (the clear coat reflecting the sky); as on main.
-- The HDR finish (4x multisampled half-float scene, bloom, grade, `src/finish.ts`) has no device figures yet: frame time on a phone and on a desktop GPU is owed. Shots and the smoke ran in software GL only.
+- The HDR finish (4x multisampled half-float scene, bloom, grade, `src/finish.ts`) has no device figures yet: frame time on a phone and on a desktop GPU is owed. In software GL it took the desktop frame from a median of 417 to 1,167 ms (seed 42, a four-core container), which is why CPU renderers draw without it; that is not a device figure.
 - Browsers without multisampled half-float targets draw without the finish (no bloom, grade or antialiasing). No such device was at hand to look at.

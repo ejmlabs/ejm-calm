@@ -9,9 +9,9 @@ analytics, or runtime network requests beyond this site's static files.
 Open it on a phone and leave it beside you. Drag to look around; the camera
 eases back to a slow cinematic drift.
 
-Where the browser can draw multisampled half floats, the frame is finished in HDR: antialiased, the sun and its
-glitter on the water bloom, a light film grade, and one tone curve for everything. Elsewhere it draws directly,
-with the same colours.
+Where the browser can draw multisampled half floats on a GPU, the frame is finished in HDR: antialiased, the sun
+and its glitter on the water bloom, a light film grade, and one tone curve for everything. Elsewhere (and on CPU
+renderers such as software GL) it draws directly, with the same colours.
 
 Each `?seed=` value rebuilds the same sea: where the day begins, the whale's route and
 behaviour, the regions it crosses, ship placement, and the coasts, islets and mountains. Sound is optional and off by default.
@@ -66,7 +66,8 @@ Review hooks (`window.__calmReview`) are available only with `?debug=1`, among t
 `setDay`, `setWeather` (clear, hazy, overcast, rain, storm, fog), `setSea`
 (0 glassy to 1 rough, or null to follow the weather), `setRoute`, `jumpTo`, `life` (towns and herds nearby),
 `peak` (the highest land in a ring) and `view` (a fixed review camera). `stats()` reports `finish` (true when the
-HDR finish is on) with the draws, triangles and stream counts.
+HDR finish is on) with the frame's draws, triangles and stream counts. `?debug=1&finish=1` turns the finish on in a
+CPU renderer, which otherwise draws without it; the shot tools use it so their pictures show the GPU look.
 
 ## Static deployment
 

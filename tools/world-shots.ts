@@ -98,7 +98,7 @@ await withBrowser(async (browser, base) => {
     const start = DAY.indexOf(pickTimeOfDay(seed));
     const afternoon = ((DAY.indexOf('afternoon') - start + DAY.length) % DAY.length) / DAY.length;
     for (const device of [DESKTOP, MOBILE] as DeviceProfile[]) {
-      const { page, context, errors } = await openCalm(browser, base, device, { seed, query: { debug: '1' } });
+      const { page, context, errors } = await openCalm(browser, base, device, { seed, query: { debug: '1', finish: '1' } });
       try {
         await page.waitForTimeout(2000);
         for (const place of places) {

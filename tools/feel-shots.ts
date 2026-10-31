@@ -116,7 +116,7 @@ async function shot(page: Page, device: DeviceProfile, label: string): Promise<v
 
 await withBrowser(async (browser, base) => {
   for (const device of [DESKTOP, MOBILE]) {
-    const { page, context, errors } = await openCalm(browser, base, device, { seed, query: { debug: '1' } });
+    const { page, context, errors } = await openCalm(browser, base, device, { seed, query: { debug: '1', finish: '1' } });
     try {
       await page.waitForTimeout(3000);
       // The opening, then the whale cruising near home.

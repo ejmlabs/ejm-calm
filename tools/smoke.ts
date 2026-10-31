@@ -109,8 +109,8 @@ await withBrowser(async (browser, base) => {
     }
   }
 
-  // Added detail stays inside its budget (birds: at most 24 instances, 9 draws, 5,000 triangles), and the frame is
-  // finished (multisampled half-float scene, bloom and grade) wherever the browser can draw it.
+  // Added detail stays inside its budget (birds: at most 24 instances, 9 draws, 5,000 triangles). Software GL draws
+  // straight to the canvas, as a visitor on a CPU renderer does.
   {
     const { page, context, errors } = await openCalm(browser, base, DESKTOP, { query: { debug: '1' } });
     try {
@@ -118,9 +118,30 @@ await withBrowser(async (browser, base) => {
       const stats = await page.evaluate(() => (window as unknown as { __calmReview: { stats: () => Record<string, number> } }).__calmReview.stats());
       assert.ok((stats['birds'] ?? 0) > 0 && (stats['birds'] ?? 0) <= 24, `birds ${String(stats['birds'])}`);
       assert.ok((stats['birdDraws'] ?? 0) <= 9 && (stats['birdTriangles'] ?? 0) <= 5000, `bird draws ${String(stats['birdDraws'])}, triangles ${String(stats['birdTriangles'])}`);
-      assert.equal(stats['finish'], true, 'the frame is finished: HDR, bloom and grade');
+      assert.equal(stats['finish'], false, 'a CPU renderer draws without the finish');
       assert.deepEqual(errors, []);
       console.log(`budget: ${String(stats['birds'])} birds, ${String(stats['birdDraws'])} draws, ${String(stats['birdTriangles'])} triangles`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // The finish (multisampled half-float scene, bloom, grade), asked for on this CPU renderer as on a GPU.
+  for (const device of [DESKTOP, MOBILE]) {
+    const { page, context, errors } = await openCalm(browser, base, device, { query: { debug: '1', finish: '1' }, instrument: true });
+    try {
+      await page.waitForTimeout(2500);
+      const stats = await page.evaluate(() => (window as unknown as { __calmReview: { stats: () => Record<string, number | boolean> } }).__calmReview.stats());
+      assert.equal(stats['finish'], true, 'the finish is on');
+      const picture = await pixels(page);
+      assert.ok(picture.nonBlack > 500 && picture.max - picture.min > 25, `the finished frame shows the scene: ${JSON.stringify(picture)}`);
+      const peakDraws = await page.evaluate(() => {
+        const draws = (window as unknown as DrawWindow).__frameDraws;
+        return draws.length ? Math.max(...draws) : 0;
+      });
+      assert.ok(peakDraws < 200, `the ${device.name} draw budget holds with the finish: ${String(peakDraws)}`);
+      assert.deepEqual(errors, []);
+      console.log(`finish (${device.name}): on, ${String(peakDraws)} peak draws`);
     } finally {
       await context.close();
     }

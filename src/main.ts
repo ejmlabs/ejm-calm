@@ -185,8 +185,9 @@ if (!canvasEl) {
 }
 const canvas = canvasEl;
 
-// The finish (src/finish.ts) draws the scene multisampled in half floats; a browser without them draws straight to the canvas.
-const finished = finishSupported();
+// The finish (src/finish.ts) draws the scene multisampled in half floats; a browser without them, or on a CPU
+// renderer, draws straight to the canvas. Review (`?debug=1&finish=1`) can ask for it on a CPU renderer.
+const finished = finishSupported(debug && params.get('finish') === '1');
 const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: finished,

@@ -1,11 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: Finished frame
-Where the browser can render multisampled half-float targets, the scene SHALL draw into a 4x multisampled half-float target, light brighter than the display can show SHALL bloom, a grade SHALL apply (a touch more colour, warm light and cool shade, a soft vignette, a dither of about half an output step), and the output SHALL apply the tone curve once. Elsewhere the scene SHALL draw straight to the canvas with the same curve per material.
+Where the browser can render multisampled half-float targets on a GPU, the scene SHALL draw into a 4x multisampled half-float target, light brighter than the display can show SHALL bloom, a grade SHALL apply (a touch more colour, warm light and cool shade, a soft vignette, a dither of about half an output step), and the output SHALL apply the tone curve once. Elsewhere, and on a CPU renderer unless review asks for it, the scene SHALL draw straight to the canvas with the same curve per material.
 
 #### Scenario: Finish on
-- **WHEN** the page opens at the desktop profile in the browser smoke (software GL)
-- **THEN** `stats().finish` is true, the frame renders without errors, and peak draws stay under 200
+- **WHEN** the page opens with `?debug=1&finish=1` at the desktop and mobile profiles in the browser smoke (software GL)
+- **THEN** `stats().finish` is true, the frame shows the scene without errors, and peak draws stay under 200
+
+#### Scenario: CPU renderer
+- **WHEN** the page opens on software GL without the override
+- **THEN** `stats().finish` is false and the scene draws directly
 
 #### Scenario: Bloom follows the exposure
 - **WHEN** the output's exposure changes through the day or a lightning flash
