@@ -8,5 +8,5 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: ejmlabs/.github/.github/workflows/deploy-site.yml@ad376de0af9e7fb55c517f87ad0c08dc744a7863
+    uses: ejmlabs/.github/.github/workflows/deploy-site.yml@7b605ee2908828c84f0c4c6b2fca5f289a757d8c
     secrets: inherit
