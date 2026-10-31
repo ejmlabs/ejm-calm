@@ -2,17 +2,19 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { fork } from './rng.js';
 import { clamp, lerp, smoothstep } from './math.js';
-import { patchShader, type ShaderPatch } from './ocean.js';
+import { patchShader, type ShaderPatch } from './shader-patch.js';
 import type { WeatherLook } from './weather.js';
+import { item } from './item.js';
+import { drawAsAuthored } from './tone.js';
 
 export type TimeOfDay = 'golden' | 'morning' | 'afternoon' | 'dusk';
 /** The day runs through these in order; night comes after dusk and gives way to morning. */
 export type DayPhase = TimeOfDay | 'night';
 
 /** Light that survives the weather and the time of day: what the lights are set to, before the underwater view dims them. */
-export type LightBase = { intensity: number; color: THREE.Color };
+export interface LightBase { intensity: number; color: THREE.Color }
 
-export type SkyHandle = {
+export interface SkyHandle {
   sky: Sky;
   sun: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
@@ -63,9 +65,9 @@ export type SkyHandle = {
   /** Turns the timed refresh on (medium and high) or off (low). */
   setEnvironmentRefresh: (on: boolean) => void;
   dispose: () => void;
-};
+}
 
-type Preset = {
+interface Preset {
   elevation: number;
   azimuth: number;
   turbidity: number;
@@ -86,18 +88,22 @@ type Preset = {
   shallow: number;
   /** Brightness of the land and water. */
   level: number;
-};
+}
 
-const SUN = { color: 0xfff1d6, intensity: 2.0 };
+/** The sun's light at a clear noon. */
+export const SUN_INTENSITY = 2;
+const SUN = { color: 0xfff1d6, intensity: SUN_INTENSITY };
 const HEMI = { sky: 0xc0d4e8, ground: 0x2a3e4e, intensity: 0.75 };
 const AMBIENT = { color: 0x6a8498, intensity: 0.4 };
 
-const presets: Record<DayPhase, Preset> = {
-  // Lower turbidity/mie keep the sky horizon from blooming into a cream band.
+/** What each time of day sets; `tools/haze-measure.ts` checks each `haze` against the sky the rest of it makes. */
+export const presets: Record<DayPhase, Preset> = {
+  // Low turbidity and mie keep the sky horizon from blooming into a cream band; little rayleigh and a wide mie lobe
+  // keep the air clear (the sun's glow adds to both). Away from the sun, where the camera looks, `cloudPatches` warms it.
   golden: {
-    elevation: 7, azimuth: 185, turbidity: 4.2, rayleigh: 1.8, mie: 0.003, exposure: 0.5, mieG: 0.8,
-    haze: [0x554644, 0x5c5347, 0x536253, 0x3a5e63, 0x274f66], hazeDensity: 0.00044,
-    horizon: [0.42, 0.4, 0.38], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 0.62, shallow: 0.55, level: 1,
+    elevation: 7, azimuth: 185, turbidity: 3, rayleigh: 0.55, mie: 0.003, exposure: 0.54, mieG: 0.5,
+    haze: [0xb1675a, 0xa47461, 0x7e7871, 0x4c667b, 0x2b5075], hazeDensity: 0.00044,
+    horizon: [0.8, 0.42, 0.3], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 0.62, shallow: 0.55, level: 1,
   },
   morning: {
     elevation: 22, azimuth: 140, turbidity: 2.6, rayleigh: 1.4, mie: 0.003, exposure: 0.48, mieG: 0.78,
@@ -110,9 +116,9 @@ const presets: Record<DayPhase, Preset> = {
     horizon: [0.38, 0.48, 0.58], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 1, shallow: 1, level: 1,
   },
   dusk: {
-    elevation: 4, azimuth: 250, turbidity: 5.5, rayleigh: 2.2, mie: 0.0035, exposure: 0.45, mieG: 0.8,
-    haze: [0x4b4041, 0x554a43, 0x515a4b, 0x3e5c5a, 0x2b5261], hazeDensity: 0.0005,
-    horizon: [0.42, 0.4, 0.38], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 0.5, shallow: 0.55, level: 1,
+    elevation: 4, azimuth: 250, turbidity: 3, rayleigh: 0.6, mie: 0.003, exposure: 0.45, mieG: 0.5,
+    haze: [0x6e2721, 0x6e3525, 0x544132, 0x313c41, 0x1a2f43], hazeDensity: 0.0005,
+    horizon: [0.5, 0.15, 0.05], sun: SUN, hemi: HEMI, ambient: AMBIENT, daylight: 0.5, shallow: 0.55, level: 1,
   },
   // The sun well below the horizon: the sky keeps a faint blue glow, the moon is only a cool fill light.
   night: {
@@ -148,7 +154,7 @@ export const ENV_REFRESH = 90;
 export function pickTimeOfDay(seed: number): TimeOfDay {
   const rng = fork(seed, 'tod');
   const names: TimeOfDay[] = ['golden', 'morning', 'afternoon', 'dusk'];
-  return names[Math.floor(rng() * names.length)]!;
+  return item(names, Math.floor(rng() * names.length));
 }
 
 function sunVector(elevationDeg: number, azimuthDeg: number, target: THREE.Vector3): THREE.Vector3 {
@@ -165,9 +171,26 @@ function horizonFor(preset: Preset, elevation: number): THREE.Color {
   return color.lerp(new THREE.Color(0x163e54), preset.level >= 1 ? 0.42 : 0.2);
 }
 
-/** Moves the sky's clouds along a wind vector instead of a fixed diagonal, and lets weather grey and darken the sky. */
+/**
+ * The model scatters light once, so away from a low sun its horizon goes from brown through olive to blue, a murky
+ * green-teal with nothing of the sunset in it. A low sun in fact reddens the air along the whole horizon, so the
+ * glow multiplies the sky by a warm tint that thins upward within a few degrees: orange at the horizon, lilac-grey
+ * above it, then the model's own blue. The tint is per channel and falls off with the sine of the elevation.
+ */
+const BELT_TINT = [2.8, 0.9, 0.75] as const;
+const BELT_FALLOFF = 6.4;
+const glsl = (value: number) => value.toFixed(2);
+
+/** Moves the sky's clouds along a wind vector instead of a fixed diagonal, lets weather grey and darken the sky, and warms its horizon at sunset. */
 export const cloudPatches: ShaderPatch[] = [
-  { find: 'uniform float time;', replace: 'uniform float time;\n\t\tuniform vec2 cloudWind;\n\t\tuniform float skyDim;\n\t\tuniform float skyGrey;' },
+  { find: 'uniform float time;', replace: 'uniform float time;\n\t\tuniform vec2 cloudWind;\n\t\tuniform float skyDim;\n\t\tuniform float skyGrey;\n\t\tuniform float skyGlow;' },
+  {
+    find: 'vec3 texColor = ( Lin + L0 ) * 0.04 + sundiscColor + vec3( 0.0, 0.0003, 0.00075 );',
+    // The sun disc stays out of the belt: it already sits near the top of what a half float holds.
+    replace: `vec3 texColor = ( Lin + L0 ) * 0.04 + vec3( 0.0, 0.0003, 0.00075 );
+\t\t\ttexColor *= 1.0 + skyGlow * exp( -max( direction.y, 0.0 ) * ${glsl(BELT_FALLOFF)} ) * ( vec3( ${BELT_TINT.map(glsl).join(', ')} ) - 1.0 );
+\t\t\ttexColor += sundiscColor;`,
+  },
   { find: 'cloudUV += time * cloudSpeed;', replace: 'cloudUV += time * cloudSpeed * cloudWind;' },
   // Storm cloud is dark underneath.
   { find: 'cloudColor *= max( dayFactor, 0.03 );', replace: 'cloudColor *= max( dayFactor, 0.03 ) * skyDim;' },
@@ -198,7 +221,7 @@ function greyen(color: THREE.Color, amount: number): THREE.Color {
   return color;
 }
 
-type Blend = {
+interface Blend {
   elevation: number;
   azimuth: number;
   turbidity: number;
@@ -213,7 +236,7 @@ type Blend = {
   sun: number;
   hemi: number;
   ambient: number;
-};
+}
 
 export function createSky(
   seed: number,
@@ -237,9 +260,13 @@ export function createSky(
     sky.material.uniforms['cloudWind'] = { value: new THREE.Vector2(Math.cos(windAngle), Math.sin(windAngle)) };
     sky.material.uniforms['skyDim'] = { value: 1 };
     sky.material.uniforms['skyGrey'] = { value: 0 };
+    sky.material.uniforms['skyGlow'] = { value: 0 };
     sky.material.needsUpdate = true;
   }
   const uniforms = sky.material.uniforms;
+  // The sun's position as a typed uniform this module keeps, in place of the sky's own.
+  const sunPosition = { value: new THREE.Vector3() };
+  uniforms['sunPosition'] = sunPosition;
   if (uniforms['cloudCoverage']) uniforms['cloudCoverage'].value = baseCover;
   if (uniforms['cloudDensity']) uniforms['cloudDensity'].value = 0.15;
   if (uniforms['cloudSpeed']) uniforms['cloudSpeed'].value = patched !== null ? CLOUD_SPEED : 0.00002;
@@ -276,8 +303,8 @@ export function createSky(
   starMap.magFilter = THREE.LinearFilter;
   starMap.minFilter = THREE.LinearFilter;
   starMap.needsUpdate = true;
-  const starMaterial = new THREE.PointsMaterial({
-    size: 1.7 * (renderer.getPixelRatio?.() ?? 1),
+  const starMaterial = drawAsAuthored(new THREE.PointsMaterial({
+    size: 1.7 * renderer.getPixelRatio(),
     alphaMap: starMap,
     sizeAttenuation: false,
     vertexColors: true,
@@ -285,8 +312,7 @@ export function createSky(
     opacity: 0,
     depthWrite: false,
     fog: false,
-    toneMapped: false,
-  });
+  }));
   const starPoints = new THREE.Points(starGeometry, starMaterial);
   starPoints.visible = false;
   starPoints.renderOrder = 1;
@@ -325,7 +351,7 @@ export function createSky(
 
   const horizonColor = new THREE.Color();
   const hazeGradient = HAZE_ANGLES.map(() => new THREE.Color());
-  const hazeColor = hazeGradient[0]!;
+  const hazeColor = item(hazeGradient, 0);
   const lightBase = {
     sun: { intensity: SUN.intensity, color: new THREE.Color(SUN.color) },
     hemi: { intensity: HEMI.intensity, color: new THREE.Color(HEMI.sky) },
@@ -353,11 +379,11 @@ export function createSky(
     const index = Math.floor(wrapped);
     const next = (index + 1) % count;
     const t = smoothstep(0, 1, wrapped - index);
-    const a = presets[DAY[index]!];
-    const b = presets[DAY[next]!];
-    const ca = colors[index]!;
-    const cb = colors[next]!;
-    blend.elevation = lerp(elevationOf(DAY[index]!), elevationOf(DAY[next]!), t);
+    const a = presets[item(DAY, index)];
+    const b = presets[item(DAY, next)];
+    const ca = item(colors, index);
+    const cb = item(colors, next);
+    blend.elevation = lerp(elevationOf(item(DAY, index)), elevationOf(item(DAY, next)), t);
     // The sun keeps moving the same way round: past the last preset the morning's azimuth is a turn further on.
     blend.azimuth = lerp(a.azimuth, b.azimuth + (next === 0 ? 360 : 0), t) + jitterAzimuth;
     blend.turbidity = lerp(a.turbidity, b.turbidity, t);
@@ -378,16 +404,17 @@ export function createSky(
     // A low sun colours the sky when the cloud lets it: vivid under a broken sky, grey under overcast.
     const glow = (1 - smoothstep(2, GLOW_FROM, elevation)) * smoothstep(GLOW_UNDER, 0, elevation) * (1 - smoothstep(0.1, 0.6, weather.grey));
     handle.glow = glow;
-    uniforms['turbidity']!.value = blend.turbidity + 2 * glow;
-    uniforms['rayleigh']!.value = blend.rayleigh + 1 * glow;
-    uniforms['mieCoefficient']!.value = blend.mie + 0.001 * glow;
+    item(uniforms, 'turbidity').value = blend.turbidity + 2 * glow;
+    item(uniforms, 'rayleigh').value = blend.rayleigh + 1 * glow;
+    item(uniforms, 'mieCoefficient').value = blend.mie + 0.001 * glow;
     if (uniforms['skyDim']) uniforms['skyDim'].value = (1 - 0.9 * weather.dark) * (1 + FLASH_LIFT * weather.flash);
     if (uniforms['skyGrey']) uniforms['skyGrey'].value = 0.85 * weather.grey;
-    uniforms['mieDirectionalG']!.value = blend.mieG;
+    if (uniforms['skyGlow']) uniforms['skyGlow'].value = glow;
+    item(uniforms, 'mieDirectionalG').value = blend.mieG;
     if (uniforms['cloudCoverage']) uniforms['cloudCoverage'].value = weather.coverage;
     if (uniforms['cloudDensity']) uniforms['cloudDensity'].value = weather.density;
     sunVector(elevation, blend.azimuth, sunDirection);
-    uniforms['sunPosition']!.value.copy(sunDirection);
+    sunPosition.value.copy(sunDirection);
     sun.position.copy(sunDirection).multiplyScalar(200);
     // A storm darkens the whole view; lightning lifts it a little, softly.
     renderer.toneMappingExposure = blend.exposure * 0.88 * (1 - 0.45 * weather.dark) * (1 + 0.12 * weather.flash);
@@ -410,12 +437,10 @@ export function createSky(
     ambient.intensity = lightBase.ambient.intensity;
     ambient.color.copy(lightBase.ambient.color);
 
-    // Haze: the sky's own colours, greyer under cloud.
-    // Haze: the sky's own colours, greyer under cloud, darker in a storm, warmer low down at sunset.
+    // Haze: the sky's own colours (the sunset's warmth is in the measured ones), greyer under cloud, darker in a storm.
     const shade = 1 - 0.5 * weather.dark;
     for (let k = 0; k < hazeGradient.length; k++) {
-      const color = greyen(hazeGradient[k]!.copy(ca.haze[k]!).lerp(cb.haze[k]!, t), weather.grey).multiplyScalar(shade);
-      warm(color, glow * (1 - k / hazeGradient.length));
+      greyen(item(hazeGradient, k).copy(item(ca.haze, k)).lerp(item(cb.haze, k), t), weather.grey).multiplyScalar(shade);
     }
     horizonColor.copy(ca.horizon).lerp(cb.horizon, t);
     warm(greyen(horizonColor, weather.grey).multiplyScalar(shade), glow * 0.45);
@@ -464,7 +489,7 @@ export function createSky(
       const skyWasVisible = sky.visible;
       sky.visible = true;
       if (uniforms['showSunDisc']) uniforms['showSunDisc'].value = 0;
-      const next = pmrem.fromScene(scene as unknown as THREE.Scene, 0.04);
+      const next = pmrem.fromScene(scene, 0.04);
       if (uniforms['showSunDisc']) uniforms['showSunDisc'].value = 1;
       sky.visible = skyWasVisible;
       const previous = envTarget;
@@ -507,7 +532,7 @@ export function createSky(
     phase() {
       const count = DAY.length;
       const wrapped = ((cycle % count) + count) % count;
-      return { name: DAY[Math.round(wrapped) % count]!, day: wrapped / count };
+      return { name: item(DAY, Math.round(wrapped) % count), day: wrapped / count };
     },
     setFog(tint, mix, density) {
       regionFog.tint.copy(tint);

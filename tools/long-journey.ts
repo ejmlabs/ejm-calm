@@ -15,6 +15,7 @@ import { createWeather } from '../src/weather.js';
 import { createRegionLook } from '../src/region-look.js';
 import { swellRate } from '../src/swell.js';
 import { FollowCamera } from '../src/camera.js';
+import { last } from '../src/item.js';
 
 /**
  * A long headless journey of the whole step-3 loop without a GPU: the real whale mover over the real world,
@@ -70,8 +71,8 @@ for (const seed of seeds) {
   const peak = { tiles: 0, navTiles: 0, navBlocks: 0, shipCells: 0, ships: 0, triangles: 0 };
   let px = m.x;
   let pz = m.z;
-  let vx = 0;
-  let vz = 0;
+  let vx: number;
+  let vz: number;
   let path = 0;
   let stepX = m.x;
   let stepZ = m.z;
@@ -142,8 +143,8 @@ for (const seed of seeds) {
   }
   const net = Math.hypot(m.x - layout.whaleHome.x, m.z - layout.whaleHome.z);
   const from = Math.min(2, heaps.length - 1);
-  const growth = heaps.length > 2 ? heaps.at(-1)! - heaps[from]! : 0;
-  const slope = heaps.length > 3 ? (heaps.at(-1)! - heaps[from]!) / ((heaps.length - 1 - from) * 10) : 0;
+  const growth = heaps.length > 2 ? last(heaps) - (heaps[from] ?? 0) : 0;
+  const slope = heaps.length > 3 ? (last(heaps) - (heaps[from] ?? 0)) / ((heaps.length - 1 - from) * 10) : 0;
   console.log(
     JSON.stringify({
       seed,
