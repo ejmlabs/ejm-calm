@@ -175,7 +175,9 @@ function horizonFor(preset: Preset, elevation: number): THREE.Color {
  * The model scatters light once, so away from a low sun its horizon goes from brown through olive to blue, a murky
  * green-teal with nothing of the sunset in it. A low sun in fact reddens the air along the whole horizon, so the
  * glow multiplies the sky by a warm tint that thins upward within a few degrees: orange at the horizon, lilac-grey
- * above it, then the model's own blue. The tint is per channel and falls off with the sine of the elevation.
+ * above it, then the model's own blue. The tint is per channel and falls off with the sine of the elevation, both
+ * ways: below the horizon the sky is hidden by the sea on screen but stands in for it in the reflection environment,
+ * where a full tint lit every face that looks down or across (a breaching whale's belly) red.
  */
 const BELT_TINT = [2.8, 0.9, 0.75] as const;
 const BELT_FALLOFF = 6.4;
@@ -188,7 +190,7 @@ export const cloudPatches: ShaderPatch[] = [
     find: 'vec3 texColor = ( Lin + L0 ) * 0.04 + sundiscColor + vec3( 0.0, 0.0003, 0.00075 );',
     // The sun disc stays out of the belt: it already sits near the top of what a half float holds.
     replace: `vec3 texColor = ( Lin + L0 ) * 0.04 + vec3( 0.0, 0.0003, 0.00075 );
-\t\t\ttexColor *= 1.0 + skyGlow * exp( -max( direction.y, 0.0 ) * ${glsl(BELT_FALLOFF)} ) * ( vec3( ${BELT_TINT.map(glsl).join(', ')} ) - 1.0 );
+\t\t\ttexColor *= 1.0 + skyGlow * exp( -abs( direction.y ) * ${glsl(BELT_FALLOFF)} ) * ( vec3( ${BELT_TINT.map(glsl).join(', ')} ) - 1.0 );
 \t\t\ttexColor += sundiscColor;`,
   },
   { find: 'cloudUV += time * cloudSpeed;', replace: 'cloudUV += time * cloudSpeed * cloudWind;' },

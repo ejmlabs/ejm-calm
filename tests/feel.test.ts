@@ -138,7 +138,7 @@ test('the sky patches onto three.js: its clouds take a wind vector and a low sun
   const patched = patchShader(new Sky().material.fragmentShader, cloudPatches);
   assert.ok(patched, 'the clouds patch found its place in the sky shader');
   assert.ok(patched.includes('cloudUV += time * cloudSpeed * cloudWind;'));
-  assert.ok(patched.includes('texColor *= 1.0 + skyGlow * exp( -max( direction.y, 0.0 )'), 'the horizon belt is in the sky shader');
+  assert.ok(patched.includes('texColor *= 1.0 + skyGlow * exp( -abs( direction.y )'), 'the horizon belt is in the sky shader, thinning both ways from the horizon');
 });
 
 function chase(options: { portrait?: boolean } = {}) {
