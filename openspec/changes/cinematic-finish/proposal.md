@@ -7,10 +7,11 @@ The owner wants calm to look hand-made at a high level: a scene people leave ope
 - **A finished frame**: three's HDR output (`outputBufferType: HalfFloatType`, `setEffects`) draws the scene into a 4x multisampled half-float target, blooms what is brighter than the screen can show (the sun, its glitter on the water, lightning, sunlit spray), grades it (a touch more colour, warm light and cool shade, a soft vignette, a dither so gradients never band) and applies the tone curve once. A browser without multisampled half-float targets keeps today's direct path.
 - **One tone curve**: every material draws scene radiance. Materials authored in display colours (land, walkers, wakes, ship foam and lamps, stars, rain, spray, the whale's splash, the underwater rays and overlay) end with an exact inverse of the curve, so they still draw as authored and now bloom and grade with the rest. The water's exposure-based reflection gain goes.
 - **Water**: sun glitter, a sharp HDR sparkle of ripple facets toward the sun that blooms; shallows that fade before the horizon instead of drawing a band; storm whitecaps broken into world-anchored lace and downwind streaks, and swell faces that catch light and shade instead of one flat grey.
+- **Whale**: dark slate skin with pale mottling instead of a glassy blue capsule: no clear coat, the reflection held down (`specularIntensity` 0.3, a faint grey sheen), a greyer palette under the scene's blue light, and a rougher standard material on phones.
 - **Land**: a natural palette (sage and olive grass, straw, deep forest, grey-brown rock) in place of lime; ambient light tinted by the sky and the sun's own colour on lit slopes, so a sunset lights the ranges warm; tiles that fade in cross-fade by sample coverage instead of a cross-hatched dither.
 - **Sky**: golden hour and dusk read as sunsets instead of a murky green-teal: a warm horizon belt driven by the existing low-sun glow, clearer air for those presets, and their land haze re-measured with a new tool (`tools/haze-measure.ts`). The sun disc and its glow bloom.
 
-Out of scope: shadows, new geometry, the whale's model, the camera's framing, weather timing.
+Out of scope: shadows, the whale's model and motion, the camera's framing, weather timing.
 
 ## Capabilities
 

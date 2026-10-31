@@ -12,6 +12,7 @@
 - [x] 2.4 Land tiles dissolve by coverage wherever the frame multisamples
 - [x] 2.5 Sky: a warm horizon belt at low sun, clearer golden and dusk presets, their haze re-measured by `tools/haze-measure.ts`
 - [x] 2.6 Storm foam: a world-anchored lattice in the wind's frame, octaves fading by footprint; swell faces tinted by tilt
+- [x] 2.7 Whale: slate skin, no clear coat, reflection held down, rougher on phones; review `setDay` refreshes the reflections
 
 ## 3. Checks
 

@@ -238,7 +238,6 @@ export function createShip(spec: ShipSpec, options: ShipOptions = {}): ShipHandl
     side: THREE.DoubleSide,
     emissive: new THREE.Color(0x2a2418),
     emissiveIntensity: 0.22,
-    envMapIntensity: 0.08,
   });
   const group = new THREE.Group();
   group.add(new THREE.Mesh(rig.hull, hullMaterial), new THREE.Mesh(rig.sails, sailMaterial));

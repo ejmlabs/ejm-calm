@@ -30,6 +30,9 @@ structure.
   and grade (`src/finish.ts`). A material authored in display colours ends its shader with
   `DRAW_AS_AUTHORED_GLSL` or goes through `drawAsAuthored` (`src/tone.ts`), never
   `toneMapped: false`; `tests/tone.test.ts` checks. CPU colours convert with `radianceFor`.
+- A material without its own `envMap` reflects `scene.environment` at `scene.environmentIntensity`;
+  its `envMapIntensity` does nothing, so do not set it. Hold a reflection down with roughness or
+  `specularIntensity` (as the whale does).
 
 ## Seeded determinism
 

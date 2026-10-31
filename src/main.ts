@@ -277,7 +277,7 @@ try {
   weather = createWeather(seed, sky.clearCover);
   // A visitor who asked for the indicator sees it on the first change of region, not at once.
   indicator.setEnabled(routeOn, world.land.regions.dominantAt(layout.whaleHome.x, layout.whaleHome.z), 0, false);
-  sky.setEnvironmentRefresh(quality.tier !== 'low');
+  sky.setEnvironmentRefresh(environmentFollowsSky());
   // The whale's wake: its stern, bow and width follow the whale's size, and a deeper body still marks the water.
   wake = createWake({ surface, stern: 5 * LENGTH_SCALE, bow: 6 * LENGTH_SCALE, width: 0.8 * DEPTH_SCALE, depths: [-2.6 * DEPTH_SCALE, -0.9 * DEPTH_SCALE] });
   world.root.add(wake.group);
@@ -299,6 +299,11 @@ try {
   const message = error instanceof Error ? error.message : 'failed to build the scene';
   ui.error(message);
   throw error;
+}
+
+/** The reflection environment follows the sky's light on medium and high; phones keep the opening sky's. */
+function environmentFollowsSky(): boolean {
+  return quality.tier !== 'low';
 }
 
 function resize(): void {
@@ -404,7 +409,7 @@ function tick(now: number): void {
     birds.setTier(quality.tier);
     weatherFx.setTier(quality.tier);
     world.setWalkerCap(detailFor(quality.tier).walkers);
-    sky.setEnvironmentRefresh(quality.tier !== 'low');
+    sky.setEnvironmentRefresh(environmentFollowsSky());
     renderer.setPixelRatio(quality.ratio);
     resize();
   }
@@ -584,7 +589,10 @@ if (debug) {
       rig.setReview(null);
     },
     setDay(day: number) {
-      if (Number.isFinite(day)) sky.setDay(day);
+      if (!Number.isFinite(day)) return;
+      sky.setDay(day);
+      // A visitor's reflections would have caught up with the sky within ENV_REFRESH; a review jump catches up now.
+      if (environmentFollowsSky()) sky.refreshEnvironment();
     },
     setWeather(state: WeatherState) {
       weather.set(state);
