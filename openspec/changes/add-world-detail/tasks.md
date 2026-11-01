@@ -17,7 +17,7 @@
 
 - [ ] 3.1 Hull loft generator with per-type station curves (`src/hulls.ts`)
 - [ ] 3.2 Sloop, schooner and trawler builders producing one merged geometry each
-- [ ] 3.3 Shader sails (billow and flutter) replacing the CPU vertex loop
+- [x] 3.3 Shader sails (billow and flutter) replacing the CPU vertex loop (`patchSailShader` in `src/ships.ts`: one shared cloth angle, a per-vertex push direction, weight and phase; the sway is the one the CPU loop wrote)
 - [ ] 3.4 Wake ribbon and bow spray (`src/wake.ts`)
 - [ ] 3.5 Heave, roll, pitch from `swellAt` at three hull points
 - [ ] 3.6 Extend `ShipSpec.kind` and `shipSpecsForCell` for the new types with seeded mix; tests for determinism

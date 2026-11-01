@@ -14,7 +14,8 @@
 - [x] 2.6 Storm foam: a world-anchored lattice in the wind's frame, octaves fading by footprint; swell faces tinted by tilt
 - [x] 2.7 Whale: slate skin, no clear coat, reflection held down, rougher on phones; review `setDay` refreshes the reflections; the sky's environment fades with depth under water
 - [x] 2.8 Land grid: twice the cells from 512 m tiles up, unused vertices dropped, land triangles budgeted per tier in the smoke
-- [x] 2.9 Streaming: sails sway only within 400 m; the prefetch and the bakes stop before a slice that would pass the budget (`SliceCost`). The smoke's 300 s cruise on an idle four-core machine in software GL, three alternating runs: 7.6, 7.3 and 6.9 percent of steps over 3 ms, against 12.5, 11.2 and 12.0 at 513a04e (bar: under 10). Not device figures
+- [x] 2.9 Streaming: sails sway only within 400 m (now in the vertex shader, see 2.10); the prefetch and the bakes stop before a slice that would pass the budget (`SliceCost`). The smoke's 300 s cruise on an idle four-core machine in software GL, three alternating runs: 7.6, 7.3 and 6.9 percent of steps over 3 ms, against 12.5, 11.2 and 12.0 at 513a04e (bar: under 10). Not device figures
+- [x] 2.10 Streaming tail: ships share a template per kind and their sails sway in the vertex shader; shelf bakes yield every 64 samples; the navigation prefetch allocates nothing a call. Same tiles, ships and order (`tests/ships.test.ts`, `tests/stream-steps.test.ts`). Smoke cruise, four alternating rounds, software GL, shared four-core machine at load 11 to 23: 5.9, 6.6, 6.9 and 7.9 percent of steps over 3 ms, against 8.0, 9.4, 9.5 and 9.8 at 30869ce. Not device figures
 
 ## 3. Checks
 

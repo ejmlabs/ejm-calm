@@ -3,6 +3,7 @@ import { SHIP_LAND_MARGIN, type ShipSpec } from './terrain.js';
 import { clampClearOfLand, type Shore } from './shore.js';
 import { swellAt, type SwellSample } from './swell.js';
 import { item } from './item.js';
+import { patchShader } from './shader-patch.js';
 
 export interface ShipHandle {
   group: THREE.Group;
@@ -11,8 +12,8 @@ export interface ShipHandle {
   lanterns: readonly THREE.Vector3[];
   /** Hull length and beam in the ship's own frame, for the foam round it. */
   size: { length: number; beam: number };
-  /** Moves the ship; `billow` also sways its sails (a rewrite of every sail vertex, so only where it can be seen). */
-  update: (dt: number, time: number, shore: Shore, billow?: boolean) => void;
+  /** Moves the ship; its sails sway on the GPU off `time`. */
+  update: (dt: number, time: number, shore: Shore) => void;
   dispose: () => void;
 }
 
@@ -29,15 +30,22 @@ const DECK = new THREE.Color(0x9a7b55);
 const WOOD = new THREE.Color(0x3e3226);
 const CABIN = new THREE.Color(0x5a4a38);
 
-/** A part of a hull: geometry in its own frame, placed by a matrix, in one colour. */
+/** A part of a hull: geometry in its own frame, placed by a matrix, in one colour (null: the ship's own hull colour). */
 interface Part {
   geometry: THREE.BufferGeometry;
   matrix: THREE.Matrix4;
-  color: THREE.Color;
+  color: THREE.Color | null;
 }
 
-/** Bakes parts into one vertex-coloured, non-indexed geometry: the whole hull and rig is one draw. */
-function bake(parts: readonly Part[]): THREE.BufferGeometry {
+/** Parts baked into one non-indexed shape: the whole hull and rig is one draw. */
+interface Baked {
+  position: Float32Array;
+  normal: Float32Array;
+  /** Where each part's vertices start, then the vertex count. */
+  starts: number[];
+}
+
+function bake(parts: readonly { geometry: THREE.BufferGeometry; matrix: THREE.Matrix4 }[]): Baked {
   const flat = parts.map(({ geometry, matrix }) => {
     const g = geometry.index ? geometry.toNonIndexed() : geometry.clone();
     g.applyMatrix4(matrix);
@@ -46,22 +54,45 @@ function bake(parts: readonly Part[]): THREE.BufferGeometry {
   const count = flat.reduce((n, g) => n + g.getAttribute('position').count, 0);
   const position = new Float32Array(count * 3);
   const normal = new Float32Array(count * 3);
-  const color = new Float32Array(count * 3);
+  const starts: number[] = [];
   let at = 0;
-  flat.forEach((g, k) => {
-    const c = item(parts, k).color;
+  for (const g of flat) {
+    starts.push(at);
     position.set(g.getAttribute('position').array, at * 3);
     normal.set(g.getAttribute('normal').array, at * 3);
-    for (let v = 0; v < g.getAttribute('position').count; v++)
-      color.set([c.r, c.g, c.b], (at + v) * 3);
     at += g.getAttribute('position').count;
     g.dispose();
+  }
+  starts.push(at);
+  return { position, normal, starts };
+}
+
+/** One vertex colour per vertex: each part's vertices in the colour of that part. */
+function paint(shape: Baked, colors: readonly THREE.Color[]): Float32Array {
+  const out = new Float32Array(shape.position.length);
+  colors.forEach((c, k) => {
+    const end = item(shape.starts, k + 1);
+    for (let v = item(shape.starts, k); v < end; v++) {
+      out[v * 3] = c.r;
+      out[v * 3 + 1] = c.g;
+      out[v * 3 + 2] = c.b;
+    }
   });
-  const out = new THREE.BufferGeometry();
-  out.setAttribute('position', new THREE.BufferAttribute(position, 3));
-  out.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
-  out.setAttribute('color', new THREE.BufferAttribute(color, 3));
   return out;
+}
+
+/** One shape's geometry, over arrays the ships of a kind share (nothing writes to them) and the colours of this ship. */
+function geometryOf(
+  shape: Baked,
+  color: Float32Array,
+  extra: Record<string, THREE.BufferAttribute> = {},
+): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(shape.position, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(shape.normal, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(color, 3));
+  for (const [name, attribute] of Object.entries(extra)) geometry.setAttribute(name, attribute);
+  return geometry;
 }
 
 const at = (x: number, y: number, z: number, ry = 0, rz = 0, rx = 0): THREE.Matrix4 =>
@@ -135,25 +166,33 @@ function makeSail(
   return geo;
 }
 
-interface Rig {
-  hull: THREE.BufferGeometry;
-  sails: THREE.BufferGeometry;
-  /** Per sail vertex: its place at rest (xyz), the way it billows (xyz), and the sway weight and phase. */
-  rest: Float32Array;
-  push: Float32Array;
-  weight: Float32Array;
+/** What the ships of one kind have in common: their shape and sway, but for the colours a seed picks. */
+interface Template {
+  hull: Baked;
+  /** Per hull part: its colour, or null for the ship's own hull colour. */
+  hullColors: (THREE.Color | null)[];
+  sails: Baked;
+  /** Per sail vertex: the shade the cloth's seams and belly give it. */
+  shade: Float32Array;
+  /** Per sail vertex: the way it billows (xyz) and how far (w), and its phase in the wave. */
+  sway: Float32Array;
   phase: Float32Array;
   lanterns: THREE.Vector3[];
   size: { length: number; beam: number };
 }
 
-function buildRig(spec: ShipSpec): Rig {
-  const tall = spec.kind === 'tall';
-  const hullColor = item(HULLS, (spec.seed >>> 0) % HULLS.length);
-  const cloth = item(SAIL_CLOTH, (spec.seed >>> 3) % SAIL_CLOTH.length);
+/** Building a template is the cost of a ship (several milliseconds), so each kind's is built once, on first use. */
+const templates: Partial<Record<ShipSpec['kind'], Template>> = {};
+
+function templateFor(kind: ShipSpec['kind']): Template {
+  return (templates[kind] ??= buildTemplate(kind));
+}
+
+function buildTemplate(kind: ShipSpec['kind']): Template {
+  const tall = kind === 'tall';
   const parts: Part[] = [];
-  const hullGeo = hullGeometry(spec.kind);
-  parts.push({ geometry: hullGeo, matrix: at(0, 0, 0), color: hullColor });
+  const hullGeo = hullGeometry(kind);
+  parts.push({ geometry: hullGeo, matrix: at(0, 0, 0), color: null });
   const length = tall ? 4.4 : 3.4;
   const beam = tall ? 1.2 : 1.05;
   const GALLERY = new THREE.Color(0xd8c690);
@@ -178,7 +217,7 @@ function buildRig(spec: ShipSpec): Rig {
   parts.push({
     geometry: new THREE.BoxGeometry(0.1, 0.5, beam * 0.9),
     matrix: at(-length / 2 + 0.2, 0.82, 0),
-    color: hullColor,
+    color: null,
   });
   parts.push({
     geometry: new THREE.BoxGeometry(0.06, 0.2, beam * 0.62),
@@ -275,17 +314,14 @@ function buildRig(spec: ShipSpec): Rig {
   const hull = bake(parts);
   for (const part of parts) part.geometry.dispose();
 
-  // All the sails in one geometry, each moved into the ship's frame; the billow is a push along each sail's own normal.
-  const merged = bake(
-    sailParts.map(({ geometry, matrix }) => ({ geometry, matrix, color: cloth })),
-  );
-  const sailColor = merged.getAttribute('color');
-  let v = 0;
-  const rest = new Float32Array(merged.getAttribute('position').count * 3);
-  const push = new Float32Array(merged.getAttribute('position').count * 3);
-  const weight = new Float32Array(merged.getAttribute('position').count);
-  const phase = new Float32Array(merged.getAttribute('position').count);
+  // All the sails in one shape, each moved into the ship's frame; the billow is a push along each sail's own normal.
+  const sails = bake(sailParts);
+  const count = sails.position.length / 3;
+  const shade = new Float32Array(count);
+  const sway = new Float32Array(count * 4);
+  const phase = new Float32Array(count);
   const e = new THREE.Vector3();
+  let v = 0;
   sailParts.forEach(({ geometry, matrix }, k) => {
     const flat = geometry.index ? geometry.toNonIndexed() : geometry;
     const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
@@ -293,21 +329,12 @@ function buildRig(spec: ShipSpec): Rig {
     const gp = flat.getAttribute('position');
     const gc = flat.getAttribute('color');
     for (let i = 0; i < gp.count; i++, v++) {
-      rest[v * 3] = merged.getAttribute('position').getX(v);
-      rest[v * 3 + 1] = merged.getAttribute('position').getY(v);
-      rest[v * 3 + 2] = merged.getAttribute('position').getZ(v);
-      push[v * 3] = e.x;
-      push[v * 3 + 1] = e.y;
-      push[v * 3 + 2] = e.z;
-      weight[v] = 0.35 + Math.abs(gp.getX(i));
+      shade[v] = gc.getX(i);
+      sway[v * 4] = e.x;
+      sway[v * 4 + 1] = e.y;
+      sway[v * 4 + 2] = e.z;
+      sway[v * 4 + 3] = 0.35 + Math.abs(gp.getX(i));
       phase[v] = gp.getY(i) * 2.2 + k;
-      // The cloth's own shading rides on the cloth colour.
-      sailColor.setXYZ(
-        v,
-        sailColor.getX(v) * gc.getX(i),
-        sailColor.getY(v) * gc.getY(i),
-        sailColor.getZ(v) * gc.getZ(i),
-      );
     }
     if (flat !== geometry) flat.dispose();
     geometry.dispose();
@@ -317,7 +344,79 @@ function buildRig(spec: ShipSpec): Rig {
     new THREE.Vector3(mastXs[tall ? 1 : 0], top + 1.0, 0),
     new THREE.Vector3(-length / 2 + 0.2, 1.3, 0),
   ];
-  return { hull, sails: merged, rest, push, weight, phase, lanterns, size: { length, beam } };
+  return {
+    hull,
+    hullColors: parts.map((part) => part.color),
+    sails,
+    shade,
+    sway,
+    phase,
+    lanterns,
+    size: { length, beam },
+  };
+}
+
+/** The cloth's own shading rides on the cloth colour. */
+function clothColors(template: Template, cloth: THREE.Color): Float32Array {
+  const out = new Float32Array(template.shade.length * 3);
+  const [r, g, b] = [Math.fround(cloth.r), Math.fround(cloth.g), Math.fround(cloth.b)];
+  for (let v = 0; v < template.shade.length; v++) {
+    const shade = template.shade[v] ?? 0;
+    out[v * 3] = r * shade;
+    out[v * 3 + 1] = g * shade;
+    out[v * 3 + 2] = b * shade;
+  }
+  return out;
+}
+
+/** The cloth's wave runs in the vertex shader off this one angle, so a ship's sails cost the CPU nothing a frame. */
+const clothAngle = { value: 0 };
+/** Radians a second the cloth's wave turns, and how far (in the ship's frame) it moves a vertex of weight 1. */
+const CLOTH_RATE = 1.6;
+const CLOTH_SWAY = 0.06;
+
+/**
+ * Sways the sails in the vertex shader: each vertex rests at its geometry position and moves along its own push
+ * direction (`sway.xyz`) by `sway.w` times a wave of the shared angle and its own phase.
+ */
+export function patchSailShader(shader: {
+  uniforms: Record<string, { value: unknown }>;
+  vertexShader: string;
+}): void {
+  const vertex = patchShader(shader.vertexShader, [
+    {
+      find: '#include <common>',
+      replace:
+        '#include <common>\nattribute vec4 sway;\nattribute float swayPhase;\nuniform float clothAngle;',
+    },
+    {
+      find: '#include <begin_vertex>',
+      replace: `#include <begin_vertex>\ntransformed += sway.xyz * (sin( clothAngle + swayPhase ) * ${CLOTH_SWAY.toFixed(2)} * sway.w);`,
+    },
+  ]);
+  if (vertex === null)
+    throw new Error('the standard material has no vertex steps to sway sails in');
+  shader.vertexShader = vertex;
+  shader.uniforms['clothAngle'] = clothAngle;
+}
+
+/** A ship's geometry: the kind's shared shape and sway, in the colours its seed picks. */
+function buildRig(spec: ShipSpec) {
+  const template = templateFor(spec.kind);
+  const hullColor = item(HULLS, (spec.seed >>> 0) % HULLS.length);
+  const cloth = item(SAIL_CLOTH, (spec.seed >>> 3) % SAIL_CLOTH.length);
+  const hull = geometryOf(
+    template.hull,
+    paint(
+      template.hull,
+      template.hullColors.map((color) => color ?? hullColor),
+    ),
+  );
+  const sails = geometryOf(template.sails, clothColors(template, cloth), {
+    sway: new THREE.BufferAttribute(template.sway, 4),
+    swayPhase: new THREE.BufferAttribute(template.phase, 1),
+  });
+  return { hull, sails, lanterns: template.lanterns, size: template.size };
 }
 
 export interface ShipOptions {
@@ -346,6 +445,7 @@ export function createShip(spec: ShipSpec, options: ShipOptions = {}): ShipHandl
     emissive: new THREE.Color(0x2a2418),
     emissiveIntensity: 0.22,
   });
+  sailMaterial.onBeforeCompile = patchSailShader;
   const group = new THREE.Group();
   group.add(new THREE.Mesh(rig.hull, hullMaterial), new THREE.Mesh(rig.sails, sailMaterial));
   const size = spec.scale * SHIP_SIZE;
@@ -358,14 +458,13 @@ export function createShip(spec: ShipSpec, options: ShipOptions = {}): ShipHandl
   let heading = spec.heading;
   const drift = 0.35 + ((spec.seed % 1000) / 1000) * 0.45;
   const swell: SwellSample = { height: 0, slopeX: 0, slopeZ: 0 };
-  const sailPos = rig.sails.attributes['position'] as THREE.BufferAttribute;
 
   return {
     group,
     spec,
     lanterns: rig.lanterns,
     size: rig.size,
-    update(dt: number, time: number, shore: Shore, billow = true) {
+    update(dt: number, time: number, shore: Shore) {
       heading += dt * 0.015 * (spec.kind === 'sloop' ? 1 : 0.7);
       const speed = drift * dt;
       x += Math.sin(heading) * speed;
@@ -391,19 +490,8 @@ export function createShip(spec: ShipSpec, options: ShipOptions = {}): ShipHandl
       group.rotation.y = heading;
       group.rotation.z = roll;
       group.rotation.x = pitch;
-
-      if (!billow) return;
-      const { rest, push, weight, phase } = rig;
-      for (let v = 0; v < weight.length; v++) {
-        const wave = Math.sin(time * 1.6 + (phase[v] ?? 0)) * 0.06 * (weight[v] ?? 0);
-        sailPos.setXYZ(
-          v,
-          (rest[v * 3] ?? 0) + (push[v * 3] ?? 0) * wave,
-          (rest[v * 3 + 1] ?? 0) + (push[v * 3 + 1] ?? 0) * wave,
-          (rest[v * 3 + 2] ?? 0) + (push[v * 3 + 2] ?? 0) * wave,
-        );
-      }
-      sailPos.needsUpdate = true;
+      // Wrapped here in double precision, so the shader's sine stays exact however long the visit.
+      clothAngle.value = (time * CLOTH_RATE) % (Math.PI * 2);
     },
     dispose() {
       rig.hull.dispose();
