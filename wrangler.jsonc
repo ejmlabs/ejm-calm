@@ -11,5 +11,14 @@
   },
   "routes": [
     { "pattern": "calm.ejmlabs.com", "custom_domain": true }
-  ]
+  ],
+  // Each merge to main deploys here first (`wrangler deploy --env staging`), then to production.
+  "env": {
+    "staging": {
+      "name": "calm-staging",
+      "routes": [
+        { "pattern": "staging.calm.ejmlabs.com", "custom_domain": true }
+      ]
+    }
+  }
 }

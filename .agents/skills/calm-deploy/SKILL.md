@@ -1,14 +1,29 @@
 ---
 name: calm-deploy
-description: Use when you build, deploy, roll back or verify calm.ejmlabs.com, or change wrangler.jsonc, public/_headers, the CSP in index.html or tools/serve.ts, or what the build puts in dist.
+description: Use when you build, deploy, roll back or verify calm.ejmlabs.com or staging.calm.ejmlabs.com, or change wrangler.jsonc, public/_headers, the CSP in index.html or tools/serve.ts, or what the build puts in dist.
 ---
 
 # Deploying calm.ejmlabs.com
 
-calm is a static site: Vite builds `dist`, and the Worker `calm` serves it as static assets at
-calm.ejmlabs.com. What is live must be a merged main commit, built in a clean clone, checked,
-and seen working in a headed browser. This adds the calm specifics to `ejmlabs-cloudflare`;
-read it and its deploy and verify references first.
+calm is a static site: Vite builds `dist`, and a Worker serves it as static assets. A merge to
+main deploys it through the shared ejmlabs pipeline, staging first, then production. How that
+pipeline runs, what it refuses, how to follow a run and what to do when one fails are in
+[ci-deploys.md](../ejmlabs-cloudflare/references/ci-deploys.md); read it and the rest of
+`ejmlabs-cloudflare` first. This skill holds only calm's facts.
+
+## Site facts
+
+| | Staging | Production |
+| --- | --- | --- |
+| Host | staging.calm.ejmlabs.com | calm.ejmlabs.com |
+| Worker | `calm-staging` | `calm` |
+| Config | `env.staging` in `wrangler.jsonc` | top level of `wrangler.jsonc` |
+
+- The pipeline builds with `npm ci --ignore-scripts` and `npm run build` (the `ejm-calm` entry in
+  `SITES` in `scripts/deploy.py` of `ejmlabs/.github`) and publishes `dist`.
+- `wrangler.jsonc` names the account. Staging keeps its own Worker name and route; without them
+  `--env staging` would deploy onto the production domain, and the pipeline refuses that.
+- Never run `wrangler deploy` from a workstation while `.github/workflows/deploy.yml` exists.
 
 ## Headers and CSP
 
@@ -24,58 +39,39 @@ read it and its deploy and verify references first.
   `_headers` and the icons; `tests/deploy.test.ts` fails on anything else, on source maps or
   TypeScript, and on inline scripts.
 
-## Build in a scratch directory
+## Before the merge
 
-Deploy only from main after the PR merged with the local gate passed. Deploys are part of
-finish through ship here; this repository does not mark them approval-gated. Never build from
-a local checkout: it is often on a feature branch with uncommitted work. `MERGE_SHA` is the full
-merge commit: `gh pr view N --json mergeCommit --jq .mergeCommit.oid`.
+On the PR head, after the gate ([calm-verify](../calm-verify/SKILL.md)), read the published list
+and dry-run both environments:
 
 ```sh
-work=$(mktemp -d)   # or the session scratch directory
-git clone https://github.com/ejmlabs/ejm-calm.git "$work/ejm-calm"
-git -C "$work/ejm-calm" checkout --detach MERGE_SHA
-cd "$work/ejm-calm"
-npm ci --ignore-scripts
-npm test
-npm run test:browser        # typechecks, builds dist, runs the browser smoke
-find dist -type f | sort    # read the list before you deploy it
-```
-
-Stop at the first failure.
-
-## Deploy
-
-From the scratch clone's root, where `wrangler.jsonc` is:
-
-```sh
+npm run build
+find dist -type f | sort
 export WRANGLER_SEND_METRICS=false
-npx wrangler --version                                # the pinned wrangler
-npx wrangler deployments list --config wrangler.jsonc # record the live version id
-npx wrangler deploy --config wrangler.jsonc --dry-run
-npx wrangler deploy --config wrangler.jsonc
+npx --no-install wrangler deploy --config wrangler.jsonc --env "" --dry-run
+npx --no-install wrangler deploy --config wrangler.jsonc --env staging --dry-run
 ```
 
-- `package.json` pins wrangler and `wrangler.jsonc` names the account. If `deployments list`
-  does not show the live `calm` Worker, stop and ask the user.
-- Record the `Current Version ID` wrangler prints. If wrangler asks to replace a DNS record or
-  is not logged in, stop and hand the user the command (see `ejmlabs-cloudflare`).
+A dry run checks the config and the packaging only.
 
 ## Verify live
 
+Check staging when its job finishes, then production when its job finishes.
+
 - Bot protection answers curl and headless Chrome on the page with a 403 challenge, which is
   neither a pass nor a failure. Check the page in a headed browser.
-- Open `https://calm.ejmlabs.com/?seed=42` at phone and desktop sizes: the scene draws, the
-  seed stays in the URL, New seed, Share, Sound and About work, and the console shows nothing
-  but the known beacon CSP errors.
+- Open `/?seed=42` at phone and desktop sizes: the scene draws, the seed stays in the URL,
+  New seed, Share, Sound and About work, and the console shows nothing but the known beacon CSP
+  errors.
 - A missing path such as `/nope` returns `404.html` with status 404.
 - Compare live headers with `dist/_headers`, for the page and one file under `/assets/`.
   In the headed page:
   `Object.fromEntries((await fetch(location.pathname, { cache: 'no-store' })).headers)`.
-- Report the merge SHA, the wrangler version, the previous and new version ids, the checks
-  and their results, and what you saw live, in which browser.
+- Report the merge SHA, the run URL, the `Current Version ID` of each deploy job, and what you
+  saw live on each host, in which browser.
 
 ## Roll back
 
-`npx wrangler rollback VERSION_ID --config wrangler.jsonc --message "..."` restores the last
-verified version. Then land a revert on main and deploy it, so main matches live.
+Follow the rollback in [ci-deploys.md](../ejmlabs-cloudflare/references/ci-deploys.md):
+`npx wrangler rollback VERSION_ID --config wrangler.jsonc --message "..."` for production, with
+`--env staging` for staging, then land a revert on main, which deploys through the pipeline.

@@ -80,7 +80,9 @@ their pictures show the GPU look on a CPU renderer.
 icons, `LICENSE`, `THIRD_PARTY_NOTICES`, and `public/_headers`). Cloudflare
 Pages-style `_headers` sets CSP, framing, sniffing, referrer, and immutable
 caching for `/assets/*`. `wrangler.jsonc` serves `dist/` as static assets at
-calm.ejmlabs.com, with `404.html` for missing paths.
+calm.ejmlabs.com, with `404.html` for missing paths. Each merge to main deploys through the shared
+ejmlabs pipeline: staging.calm.ejmlabs.com first, then calm.ejmlabs.com
+([calm-deploy](.agents/skills/calm-deploy/SKILL.md)).
 
 Serve the `dist/` tree as produced. No server functions, external assets,
 import maps, or runtime package resolution are required.
