@@ -489,6 +489,9 @@ function tick(now: number): void {
     light: sky.level,
     shallowLight: sky.shallowLight,
     sun: sky.sun.intensity / SUN_INTENSITY,
+    moonDirection: sky.moonDirection,
+    moon: sky.moon,
+    night: sky.night,
   });
   world.ocean.setWaterColor(regionLook.water);
   world.landStream.setSky(
@@ -893,6 +896,8 @@ if (debug) {
         day: sky.phase().day,
         sunElevation: (Math.asin(sky.sunDirection.y) * 180) / Math.PI,
         sun: [sky.sunDirection.x, sky.sunDirection.y, sky.sunDirection.z],
+        moon: [sky.moonDirection.x, sky.moonDirection.y, sky.moonDirection.z],
+        moonShine: sky.moon,
         weather: weather.target(),
         cloudCover: weather.look.coverage,
         sea: weather.look.sea,

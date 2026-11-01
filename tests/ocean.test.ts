@@ -63,6 +63,57 @@ test('the bundled three.js Water shader takes every patch', () => {
   ocean.dispose();
 });
 
+test('the moon makes its own glitter, from its own direction, by the strength the sky gives it', () => {
+  const ocean = createOcean(1, new THREE.Vector3(0, 1, 0), { textureSize: 4 });
+  const material = ocean.water.material;
+  for (const name of ['uniform float moonGlitter;', 'uniform vec3 moonDirection;', 'moonFacet'])
+    assert.ok(material.fragmentShader.includes(name), name);
+  const moonDirection = new THREE.Vector3(0.6, 0.2, -0.77).normalize();
+  ocean.setSky({
+    haze: new THREE.Color(0.1, 0.2, 0.3),
+    exposure: 0.5,
+    light: 0.16,
+    shallowLight: 0.1,
+    sun: 0,
+    moonDirection,
+    moon: 0.75,
+    night: 1,
+  });
+  assert.equal(material.uniforms['moonGlitter']?.value, 0.75);
+  const sent: unknown = material.uniforms['moonDirection']?.value;
+  assert.ok(sent instanceof THREE.Vector3 && sent.equals(moonDirection));
+  assert.notEqual(sent, moonDirection, 'the water keeps its own copy');
+  ocean.dispose();
+});
+
+test('the water takes more of its own colour at night than the light of the day alone gives it, and no more by day', () => {
+  const ocean = createOcean(1, new THREE.Vector3(0, 1, 0), { textureSize: 4 });
+  const sky = {
+    haze: new THREE.Color(0.1, 0.2, 0.3),
+    exposure: 0.5,
+    shallowLight: 0.1,
+    sun: 0,
+    moonDirection: new THREE.Vector3(0, -1, 0),
+    moon: 0,
+  };
+  const colour = new THREE.Color(0.2, 0.4, 0.6);
+  const body = () => {
+    const value: unknown = ocean.water.material.uniforms['waterColor']?.value;
+    if (!(value instanceof THREE.Color)) throw new Error('waterColor is not a Color uniform');
+    return value.g;
+  };
+  ocean.setSky({ ...sky, light: 1, night: 0 });
+  ocean.setWaterColor(colour);
+  assert.ok(Math.abs(body() - 0.4) < 1e-9, 'by day the water is its colour');
+  ocean.setSky({ ...sky, light: 0.16, night: 0 });
+  ocean.setWaterColor(colour);
+  const dim = body();
+  ocean.setSky({ ...sky, light: 0.16, night: 1 });
+  ocean.setWaterColor(colour);
+  assert.ok(body() > dim * 1.5, `${String(body())} against ${String(dim)}`);
+  ocean.dispose();
+});
+
 test('ripples and shelf maps stay fixed to the world when the origin moves', () => {
   const near = { data: new Uint8Array(16), size: 4, min: -150, extent: 300 };
   const far = { data: new Uint8Array(16), size: 4, min: 900, minZ: -600, extent: 1200 };

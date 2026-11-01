@@ -36,6 +36,8 @@ type Stats = Record<string, unknown> & {
   fogDensity: number;
   chunksPending: number;
   whaleHeading: number;
+  whale: number[];
+  moon: number[];
 };
 
 interface CalmReview {
@@ -44,6 +46,7 @@ interface CalmReview {
   setWeather: (state: 'clear' | 'hazy' | 'overcast') => void;
   setRoute: (on: boolean) => void;
   jumpTo: (x: number, z: number) => void;
+  view: (from: [number, number, number] | null, to?: [number, number, number]) => void;
   stats: () => Stats;
 }
 
@@ -85,6 +88,22 @@ function regionCentres(): { id: number; x: number; z: number }[] {
   return out;
 }
 
+/** The review camera 7 m up on the sea, looking toward the moon from 4 degrees above the horizon, so its disc and its glint path both show. */
+async function lookAtMoon(page: Page): Promise<void> {
+  const { whale, moon } = await stats(page);
+  const [mx = 0, , mz = 1] = moon;
+  const flat = Math.hypot(mx, mz);
+  const [wx = 0, , wz = 0] = whale;
+  const ahead = 1000;
+  const rise = Math.tan((4 * Math.PI) / 180);
+  await call(
+    page,
+    'view',
+    [wx, 7, wz],
+    [wx + (mx / flat) * ahead, 7 + ahead * rise, wz + (mz / flat) * ahead],
+  );
+}
+
 const log: Record<string, unknown>[] = [];
 const problems: string[] = [];
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -94,8 +113,7 @@ async function cruise(page: Page): Promise<Stats> {
   let s = await stats(page);
   for (
     let i = 0;
-    i < 40 &&
-    !(s.behavior === 'travel' && s.speed > 14 && ((s['whale'] as number[])[1] ?? 0) > -1.5);
+    i < 40 && !(s.behavior === 'travel' && s.speed > 14 && (s.whale[1] ?? 0) > -1.5);
     i++
   ) {
     await call(page, 'travel', 4);
@@ -168,6 +186,11 @@ await withBrowser(async (browser, base) => {
       await call(page, 'setDay', dayFor('night'));
       await page.waitForTimeout(2500);
       await shot(page, device, 'opening-night');
+      // The moon is only a chance in the chase view: look for it, and for its path on the sea.
+      await lookAtMoon(page);
+      await page.waitForTimeout(2500);
+      await shot(page, device, 'opening-night-moon');
+      await call(page, 'view', null);
       await call(page, 'setDay', 0);
       await page.waitForTimeout(1500);
       await cruise(page);

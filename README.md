@@ -2,7 +2,7 @@
 
 A calm, beautiful, seeded ocean scene from **ejmlabs, an open source lab**.
 A whale swims on a long migration across open ocean between continents, past islands and archipelagos, under a slow
-day of changing light and weather, with stars at night; it breathes and breaches, sailboats drift, and hazy coastlines
+day of changing light and weather, with stars and a moon at night; it breathes and breaches, sailboats drift, and hazy coastlines
 come and go. Everything is generated locally from one number. No accounts, tracking,
 analytics, or runtime network requests beyond this site's static files.
 
@@ -54,7 +54,7 @@ checks use Playwright Core and the system Chrome executable.
 `npx tsx tools/long-journey.ts 2 42 7` swims
 two hours headless on seeds 42 and 7 and reports stalls and heap; `npx tsx tools/seed-sweep.ts 1 50 60` swims an hour on each of seeds 1 to 50 (or a list: `42,7,1234 -`) and fails any under 0.5 net over path or with ten minutes under 2 km (it also reports the seeds that dip under 1.5 km in five, how much of the hour a natural coast is within 6 km and the longest open stretch); `npx tsx tools/world-map.ts 42 map.png` draws a seed's world from above (land, regions, the migration lane, optionally the whale's track); `npx tsx tools/frame-cost.ts`
 times what the journey's feel adds per frame in Node; `npx tsx tools/feel-shots.ts <dir>` captures
-the regions, times of day, weather and indicator, `npx tsx tools/land-shots.ts <dir>` the land by day,
+the regions, times of day (the night, and the moon with its path on the sea), weather and indicator, `npx tsx tools/land-shots.ts <dir>` the land by day,
 dusk and night, the highest range in sight, and a close coast with a town and a herd, and
 `npx tsx tools/world-shots.ts <dir>` the open ocean, a continent's coast and an archipelago along the migration (after a build).
 `npx tsx tools/haze-measure.ts [seed]` (after a build) reads the sky's colour at each haze angle straight away from the
@@ -70,7 +70,7 @@ Review hooks (`window.__calmReview`) are available only with `?debug=1`, among t
 `setDay` (which also brings the reflections up to the new sky on medium and high), `setWeather` (clear, hazy, overcast, rain, storm, fog), `setSea`
 (0 glassy to 1 rough, or null to follow the weather), `setRoute`, `jumpTo`, `life` (towns and herds nearby),
 `peak` (the highest land in a ring) and `view` (a fixed review camera). `stats()` reports `frame` (`finish`,
-`multisampled` or `plain`) with the frame's draws, triangles and stream counts. `?debug=1&frame=finish` (or
+`multisampled` or `plain`) with the frame's draws, triangles and stream counts, and `sun` and `moon` (where they are, as unit vectors). `?debug=1&frame=finish` (or
 `multisampled`, `plain`) asks for a frame wherever the browser can draw it; the shot tools ask for the finish so
 their pictures show the GPU look on a CPU renderer.
 

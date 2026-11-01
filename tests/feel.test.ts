@@ -213,6 +213,13 @@ test('the sky patches onto three.js: its clouds take a wind vector and a low sun
     patched.includes('texColor *= 1.0 + skyGlow * exp( -abs( direction.y )'),
     'the horizon belt is in the sky shader, thinning both ways from the horizon',
   );
+  for (const night of [
+    'uniform float skyNight;',
+    'uniform float skyMoon;',
+    'nightHorizon',
+    'moonDirection',
+  ])
+    assert.ok(patched.includes(night), `${night} is in the sky shader`);
 });
 
 function chase(options: { portrait?: boolean } = {}) {
