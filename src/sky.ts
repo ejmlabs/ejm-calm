@@ -5,7 +5,7 @@ import { clamp, lerp, smoothstep } from './math.js';
 import { patchShader, type ShaderPatch } from './shader-patch.js';
 import type { WeatherLook } from './weather.js';
 import { item } from './item.js';
-import { drawAsAuthored } from './tone.js';
+import { drawAsAuthored, radianceFor } from './tone.js';
 
 export type TimeOfDay = 'golden' | 'morning' | 'afternoon' | 'dusk';
 /** The day runs through these in order; night comes after dusk and gives way to morning. */
@@ -46,6 +46,12 @@ export interface SkyHandle {
   level: number;
   /** How strongly the stars show now, 0 (day, thick cloud) to 1. */
   stars: number;
+  /** How far the night's own light has come in, 0 (a sun above the horizon) to 1 (deep night): the sky's glow and the sea's response to it. */
+  night: number;
+  /** Where the moon is, updated in place: opposite the sun, turned round by the seed's own angle, so it follows the sun's slow path through the night. */
+  moonDirection: THREE.Vector3;
+  /** How brightly the moon shines now, 0 (below the horizon, or veiled by cloud) to 1. */
+  moon: number;
   /** Strength of the reflection environment above water now, as `scene.environmentIntensity` (the underwater view dims it). */
   environmentLevel: number;
   /** The seed's own cloud cover under a clear sky. */
@@ -177,7 +183,8 @@ export const presets: Record<DayPhase, Preset> = {
     shallow: 0.55,
     level: 1,
   },
-  // The sun well below the horizon: the sky keeps a faint blue glow, the moon is only a cool fill light.
+  // The sun well below the horizon: the model gives the sky nothing, so its glow is `NIGHT_SKY`'s own (which `haze`
+  // measures), and the moon's light is only a cool fill (the moon itself is a disc and a path on the sea).
   night: {
     elevation: -13,
     azimuth: 300,
@@ -186,14 +193,14 @@ export const presets: Record<DayPhase, Preset> = {
     mie: 0.003,
     exposure: 0.55,
     mieG: 0.78,
-    haze: [0x0b1220, 0x0b1424, 0x0b1626, 0x0a1628, 0x09142a],
+    haze: [0x1c2a43, 0x172439, 0x121b2c, 0x0c131e, 0x090e17],
     hazeDensity: 0.00036,
     horizon: [0.045, 0.065, 0.1],
     sun: { color: 0x9db4e0, intensity: 0 },
     hemi: { sky: 0x3a5078, ground: 0x0c1620, intensity: 0.42 },
     ambient: { color: 0x2c4262, intensity: 0.3 },
     daylight: 0.12,
-    shallow: 0.2,
+    shallow: 0.08,
     level: 0.16,
   },
 };
@@ -209,6 +216,13 @@ export const HAZE_ANGLES = [0.3, 2, 5, 10, 16];
 /** Stars: fade in as the sun sets below this elevation (degrees), full below the second. */
 export const STARS_FROM = 3;
 export const STARS_FULL = -8;
+/**
+ * The night's own light takes over from the sky model, whose twilight is gone once the sun is 2 degrees down: it comes
+ * in with the sun below the first elevation (degrees) and is full below the second. A dusk preset (2 degrees up at
+ * the lowest, a little under it with the day's slow wobble) is clear of it.
+ */
+export const NIGHT_FROM = 1;
+export const NIGHT_FULL = -8;
 const STAR_COUNT = 900;
 /** Sunset and sunrise glow with the sun between these elevations (degrees), strongest just above the horizon. */
 export const GLOW_FROM = 18;
@@ -253,18 +267,55 @@ const BELT_TINT = [2.8, 0.9, 0.75] as const;
 const BELT_FALLOFF = 6.4;
 const glsl = (value: number) => value.toFixed(2);
 
+/**
+ * The clear night sky as it should look on screen (sRGB): the model gives it almost nothing, so a glow of its own lies
+ * along the horizon and thins to the zenith (thinning with the sine of the elevation, as the belt does), and is
+ * stronger toward where the sun went down. The sea mirrors it, the land hazes toward it and it lights the reflection
+ * environment. A cloud or a storm dims it as it does the rest of the sky. `towardSun` is the share of the glow left
+ * round the horizon on the side away from the sun.
+ */
+const NIGHT_SKY = { horizon: 0x283b5a, zenith: 0x050910, falloff: 9, towardSun: 0.7 } as const;
+
+/**
+ * The moon, full and a little larger than the real one (degrees of radius), is the sun's opposite turned round by a
+ * seed's own angle between these bounds (degrees), so it never sits in the sky the land's haze is measured against.
+ * It clears the horizon as the sun goes under and shines in full once it is `MOON_RISE` degrees up. Its colour is the
+ * display colour it should have: a cool white under the bloom's threshold, because a warm white at full brightness
+ * drew a red halo through the bloom; the disc has a faint halo of its own.
+ */
+export const MOON_RADIUS = 0.9;
+export const MOON_TURN: readonly [number, number] = [25, 55];
+export const MOON_RISE = 3;
+const MOON_COLOR = 0xe6ebf5;
+
 /** Moves the sky's clouds along a wind vector instead of a fixed diagonal, lets weather grey and darken the sky, and warms its horizon at sunset. */
 export const cloudPatches: ShaderPatch[] = [
   {
     find: 'uniform float time;',
     replace:
-      'uniform float time;\n\t\tuniform vec2 cloudWind;\n\t\tuniform float skyDim;\n\t\tuniform float skyGrey;\n\t\tuniform float skyGlow;',
+      'uniform float time;\n\t\tuniform vec2 cloudWind;\n\t\tuniform float skyDim;\n\t\tuniform float skyGrey;\n\t\tuniform float skyGlow;\n\t\tuniform float skyNight;\n\t\tuniform vec3 nightHorizon;\n\t\tuniform vec3 nightZenith;\n\t\tuniform float skyMoon;\n\t\tuniform vec3 moonDirection;\n\t\tuniform vec3 moonColor;',
   },
   {
     find: 'vec3 texColor = ( Lin + L0 ) * 0.04 + sundiscColor + vec3( 0.0, 0.0003, 0.00075 );',
     // The sun disc stays out of the belt: it already sits near the top of what a half float holds.
     replace: `vec3 texColor = ( Lin + L0 ) * 0.04 + vec3( 0.0, 0.0003, 0.00075 );
 \t\t\ttexColor *= 1.0 + skyGlow * exp( -abs( direction.y ) * ${glsl(BELT_FALLOFF)} ) * ( vec3( ${BELT_TINT.map(glsl).join(', ')} ) - 1.0 );
+\t\t\t{
+\t\t\t\tvec2 around = direction.xz / max( length( direction.xz ), 1e-4 );
+\t\t\t\tfloat towardSun = 0.5 + 0.5 * dot( around, normalize( vSunDirection.xz ) );
+\t\t\t\tvec3 glow = nightHorizon * mix( ${glsl(NIGHT_SKY.towardSun)}, 1.0, towardSun );
+\t\t\t\ttexColor += skyNight * mix( nightZenith, glow, exp( -abs( direction.y ) * ${glsl(NIGHT_SKY.falloff)} ) );
+\t\t\t}
+\t\t\tif ( skyMoon > 0.0 ) {
+\t\t\t\t// A few maria and a darker limb, drawn in the disc's own plane.
+\t\t\t\tfloat away = 1.0 - dot( direction, moonDirection );
+\t\t\t\tfloat radius2 = ${(0.5 * ((MOON_RADIUS * Math.PI) / 180) ** 2).toExponential(4)};
+\t\t\t\tfloat disc = 1.0 - smoothstep( 0.85 * radius2, 1.15 * radius2, away );
+\t\t\t\tvec3 across = normalize( cross( vec3( 0.0, 1.0, 0.0 ), moonDirection ) );
+\t\t\t\tvec2 onDisc = vec2( dot( direction, across ), dot( direction, cross( moonDirection, across ) ) ) / ${((MOON_RADIUS * Math.PI) / 180).toFixed(5)};
+\t\t\t\tfloat marks = 0.74 + 0.26 * smoothstep( -0.35, 0.45, noise( onDisc * 2.4 + 5.0 ) );
+\t\t\t\ttexColor += skyMoon * ( moonColor * disc * marks * ( 1.0 - 0.22 * dot( onDisc, onDisc ) ) + moonColor * ( 0.05 * exp( -away * 2600.0 ) + 0.012 * exp( -away * 320.0 ) ) );
+\t\t\t}
 \t\t\ttexColor += sundiscColor;`,
   },
   { find: 'cloudUV += time * cloudSpeed;', replace: 'cloudUV += time * cloudSpeed * cloudWind;' },
@@ -334,6 +385,21 @@ export function createSky(
   // Cloud drift: a wind direction of the seed's own.
   const windAngle = rng() * Math.PI * 2;
 
+  // The night glow and the moon in scene light: set each frame from their display colours at the frame's exposure.
+  const nightHorizon = { value: new THREE.Color() };
+  const nightZenith = { value: new THREE.Color() };
+  const moonColor = { value: new THREE.Color() };
+  const nightSky = {
+    horizon: new THREE.Color().setHex(NIGHT_SKY.horizon, THREE.SRGBColorSpace),
+    zenith: new THREE.Color().setHex(NIGHT_SKY.zenith, THREE.SRGBColorSpace),
+    moon: new THREE.Color().setHex(MOON_COLOR, THREE.SRGBColorSpace),
+  };
+  // The moon's own stream: which side of the sun's opposite it keeps, and how far round.
+  const moonRng = fork(seed, 'moon');
+  const moonTurn = (moonRng() < 0.5 ? -1 : 1) * lerp(MOON_TURN[0], MOON_TURN[1], moonRng());
+  const moonDirection = new THREE.Vector3(0, -1, 0);
+  const skyMoon = { value: 0 };
+
   const sky = new Sky();
   sky.scale.setScalar(12000);
   const patched = patchShader(sky.material.fragmentShader, cloudPatches);
@@ -345,6 +411,12 @@ export function createSky(
     sky.material.uniforms['skyDim'] = { value: 1 };
     sky.material.uniforms['skyGrey'] = { value: 0 };
     sky.material.uniforms['skyGlow'] = { value: 0 };
+    sky.material.uniforms['skyNight'] = { value: 0 };
+    sky.material.uniforms['nightHorizon'] = nightHorizon;
+    sky.material.uniforms['nightZenith'] = nightZenith;
+    sky.material.uniforms['skyMoon'] = skyMoon;
+    sky.material.uniforms['moonDirection'] = { value: moonDirection };
+    sky.material.uniforms['moonColor'] = moonColor;
     sky.material.needsUpdate = true;
   }
   const uniforms = sky.material.uniforms;
@@ -535,11 +607,21 @@ export function createSky(
     if (uniforms['cloudCoverage']) uniforms['cloudCoverage'].value = weather.coverage;
     if (uniforms['cloudDensity']) uniforms['cloudDensity'].value = weather.density;
     sunVector(elevation, blend.azimuth, sunDirection);
+    sunVector(-elevation, blend.azimuth + 180 + moonTurn, moonDirection);
+    // The moon is up while the sun is down, and a cloud that veils the sun veils it too.
+    handle.moon = smoothstep(0, MOON_RISE, -elevation) * weather.sun;
+    skyMoon.value = handle.moon;
     sunPosition.value.copy(sunDirection);
     sun.position.copy(sunDirection).multiplyScalar(200);
     // A storm darkens the whole view; lightning lifts it a little, softly.
     renderer.toneMappingExposure =
       blend.exposure * 0.88 * (1 - 0.45 * weather.dark) * (1 + 0.12 * weather.flash);
+    // The night's glow comes in as the model's twilight goes out.
+    handle.night = 1 - smoothstep(NIGHT_FULL, NIGHT_FROM, elevation);
+    if (uniforms['skyNight']) uniforms['skyNight'].value = handle.night;
+    radianceFor(nightSky.horizon, renderer.toneMappingExposure, nightHorizon.value);
+    radianceFor(nightSky.zenith, renderer.toneMappingExposure, nightZenith.value);
+    radianceFor(nightSky.moon, renderer.toneMappingExposure, moonColor.value);
 
     // A veiled sun gives less light; the sky gives a little more of its own.
     const veil = 1 - weather.sun;
@@ -619,6 +701,7 @@ export function createSky(
       const skyWasVisible = sky.visible;
       sky.visible = true;
       if (uniforms['showSunDisc']) uniforms['showSunDisc'].value = 0;
+      skyMoon.value = 0;
       // An environment that is kept lights every time of day after it, so it leaves out the sunset's few minutes.
       const glow = uniforms['skyGlow'] as THREE.IUniform<number> | undefined;
       const glowNow = glow?.value ?? 0;
@@ -626,6 +709,7 @@ export function createSky(
       const next = pmrem.fromScene(scene, 0.04);
       if (glow) glow.value = glowNow;
       envLevel = handle.level;
+      skyMoon.value = handle.moon;
       if (uniforms['showSunDisc']) uniforms['showSunDisc'].value = 1;
       sky.visible = skyWasVisible;
       const previous = envTarget;
@@ -666,6 +750,9 @@ export function createSky(
     shallowLight: presets[timeOfDay].shallow,
     level: 1,
     stars: 0,
+    night: 0,
+    moonDirection,
+    moon: 0,
     environmentLevel: 1,
     clearCover: baseCover,
     windAngle,

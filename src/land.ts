@@ -581,10 +581,21 @@ function shelfFromDistance(
   return { data, size, min, extent };
 }
 
+/** Runs a bake's slices to the end now (the stepped forms exist for the streaming budget). */
+function finish<T>(steps: Generator<void, T>): T {
+  for (;;) {
+    const next = steps.next();
+    if (next.done) return next.value;
+  }
+}
+
+/** Samples a bake slice takes before it yields: a fraction of a millisecond, so a loop of slices can stop at its budget. */
+const SLICE_SAMPLES = 64;
+
 export function nearShelf(land: Land): ShelfMap {
   const g = land.grid;
   const shelf = shelfFromDistance(g.distance, g.size, g.min, g.cell * (g.size - 1));
-  addSandBanks(land, shelf, g.min, g.min, g.cell);
+  finish(addSandBanksSteps(land, shelf, g.min, g.min, g.cell));
   return shelf;
 }
 
@@ -595,14 +606,10 @@ export function farShelf(
   cx = 0,
   cz = 0,
 ): ShelfMap {
-  const steps = farShelfSteps(land, size, extent, cx, cz);
-  for (;;) {
-    const next = steps.next();
-    if (next.done) return next.value;
-  }
+  return finish(farShelfSteps(land, size, extent, cx, cz));
 }
 
-/** farShelf in slices of a few rows. */
+/** farShelf in slices of `SLICE_SAMPLES` mask samples. */
 export function* farShelfSteps(
   land: Pick<Land, 'maskAt'>,
   size = 384,
@@ -613,12 +620,13 @@ export function* farShelfSteps(
   // Too coarse for an exact distance field: estimate it from the coast mask slope.
   const distance = new Float32Array(size * size);
   const cell = (extent * 2) / (size - 1);
-  for (let iz = 0; iz < size; iz++) {
-    for (let ix = 0; ix < size; ix++) {
-      const m = land.maskAt(cx - extent + ix * cell, cz - extent + iz * cell);
-      distance[iz * size + ix] = m > 0 ? 0 : -m / 0.0025;
-    }
-    if (iz % 6 === 5) yield;
+  for (let i = 0; i < size * size; i++) {
+    const m = land.maskAt(
+      cx - extent + (i % size) * cell,
+      cz - extent + Math.floor(i / size) * cell,
+    );
+    distance[i] = m > 0 ? 0 : -m / 0.0025;
+    if (i % SLICE_SAMPLES === SLICE_SAMPLES - 1) yield;
   }
   return { ...shelfFromDistance(distance, size, cx - extent, extent * 2), minZ: cz - extent };
 }
@@ -628,14 +636,10 @@ export function* farShelfSteps(
  * lattice; the start's sand banks are added where they reach.
  */
 export function navShelf(land: Land, cx: number, cz: number, size = 320): ShelfMap {
-  const steps = navShelfSteps(land, cx, cz, size);
-  for (;;) {
-    const next = steps.next();
-    if (next.done) return next.value;
-  }
+  return finish(navShelfSteps(land, cx, cz, size));
 }
 
-/** navShelf in slices: yields every few rows so a bake never holds up a frame. */
+/** navShelf in slices of a few rows, and of the sand banks' samples, so a bake never holds up a frame. */
 export function* navShelfSteps(
   land: Land,
   cx: number,
@@ -653,18 +657,24 @@ export function* navShelfSteps(
       const distance = nav.distanceAt(nav.min + (i0 + i) * nav.cell, nav.min + (j0 + j) * nav.cell);
       data[j * size + i] = shelfTexel(distance >= open ? 1e4 : distance);
     }
-    if (j % 8 === 7) yield;
+    if (j % 4 === 3) yield;
   }
   openEdges(data, size);
   const minX = nav.min + i0 * nav.cell;
   const minZ = nav.min + j0 * nav.cell;
   const shelf: ShelfMap = { data, size, min: minX, extent: nav.cell * (size - 1), minZ };
-  addSandBanks(land, shelf, minX, minZ, nav.cell);
+  yield* addSandBanksSteps(land, shelf, minX, minZ, nav.cell);
   return shelf;
 }
 
 /** Sand banks: patches of 2–4 m water out in the start bay. */
-function addSandBanks(land: Land, shelf: ShelfMap, minX: number, minZ: number, cell: number): void {
+function* addSandBanksSteps(
+  land: Land,
+  shelf: ShelfMap,
+  minX: number,
+  minZ: number,
+  cell: number,
+): Generator<void> {
   const size = shelf.size;
   // Banks only lie within ~1.7 km of the start.
   const far = Math.hypot(
@@ -673,6 +683,7 @@ function addSandBanks(land: Land, shelf: ShelfMap, minX: number, minZ: number, c
   );
   if (far > 1700) return;
   const bank = Math.round(clamp(1 - 2 / 40, 0, 1) * 255);
+  let sampled = 0;
   for (let iz = 1; iz < size - 1; iz++) {
     for (let ix = 1; ix < size - 1; ix++) {
       const x = minX + ix * cell;
@@ -685,6 +696,7 @@ function addSandBanks(land: Land, shelf: ShelfMap, minX: number, minZ: number, c
           shelf.data[i] ?? 0,
           Math.round((shelf.data[i] ?? 0) + (bank - (shelf.data[i] ?? 0)) * t),
         );
+      if (++sampled % SLICE_SAMPLES === 0) yield;
     }
   }
 }

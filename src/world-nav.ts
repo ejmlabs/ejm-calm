@@ -26,6 +26,20 @@ export type NavField = Shore & {
   stats: () => { tiles: number; blocks: number };
 };
 
+/** What a map of the field holds for one lattice cell: its indices, which tell apart cells that share a key, and its data. */
+interface Held {
+  i: number;
+  j: number;
+  data: Float32Array;
+}
+
+/**
+ * A cell's map key: a 30-bit integer, so a lookup builds no string and boxes no number. It is unique within 16,384
+ * cells of the lattice origin (over 10,000 km at the default tile); further out two cells can share a key, and the
+ * later replaces the earlier, which is rebuilt if asked for again (tiles are pure functions of their indices).
+ */
+const keyOf = (i: number, j: number): number => ((i & 0x7fff) << 15) | (j & 0x7fff);
+
 export interface NavOptions {
   /** World X/Z of lattice index 0. */
   min: number;
@@ -58,16 +72,30 @@ export function createNavField(
   const W = T + 2 * P + 1;
 
   /** Mask samples of a T×T block of lattice points (rounded to float32 so any builder agrees). */
-  const blocks = new Map<string, Float32Array>();
-  const tiles = new Map<string, Float32Array>();
-  let pending: { key: string; bx: number; bz: number; data: Float32Array; row: number } | null =
-    null;
+  const blocks = new Map<number, Held>();
+  const tiles = new Map<number, Held>();
+  let pending: { bx: number; bz: number; data: Float32Array; row: number } | null = null;
+  /** The tile touched last: reads come in runs (a bake, a plan), and touching the newest again changes nothing. */
+  let newest: Held | null = null;
 
-  function touch<V>(map: Map<string, V>, key: string, value: V, cap: number): void {
+  function lookup(map: Map<number, Held>, i: number, j: number): Float32Array | undefined {
+    const held = map.get(keyOf(i, j));
+    return held?.i === i && held.j === j ? held.data : undefined;
+  }
+
+  function touch(map: Map<number, Held>, held: Held, cap: number): void {
+    const key = keyOf(held.i, held.j);
     map.delete(key);
-    map.set(key, value);
+    map.set(key, held);
     trimOldest(map, cap);
   }
+
+  function touchTile(tx: number, tz: number, data: Float32Array): void {
+    newest = { i: tx, j: tz, data };
+    touch(tiles, newest, maxTiles);
+  }
+
+  const hasTile = (tx: number, tz: number): boolean => lookup(tiles, tx, tz) !== undefined;
 
   function blockRows(job: NonNullable<typeof pending>, until: () => boolean): boolean {
     const x0 = job.bx * T;
@@ -86,17 +114,18 @@ export function createNavField(
   }
 
   function block(bx: number, bz: number): Float32Array {
-    const key = `${String(bx)}:${String(bz)}`;
-    const hit = blocks.get(key);
+    const hit = lookup(blocks, bx, bz);
     if (hit) {
-      touch(blocks, key, hit, maxBlocks);
+      touch(blocks, { i: bx, j: bz, data: hit }, maxBlocks);
       return hit;
     }
     const job =
-      pending?.key === key ? pending : { key, bx, bz, data: new Float32Array(T * T), row: 0 };
+      pending?.bx === bx && pending.bz === bz
+        ? pending
+        : { bx, bz, data: new Float32Array(T * T), row: 0 };
     blockRows(job, () => false);
     if (pending === job) pending = null;
-    touch(blocks, key, job.data, maxBlocks);
+    touch(blocks, { i: bx, j: bz, data: job.data }, maxBlocks);
     return job.data;
   }
 
@@ -147,15 +176,14 @@ export function createNavField(
 
   /** The tile being built a slice at a time by `prefetch`. */
   let building: {
-    key: string;
     tx: number;
     tz: number;
     steps: Generator<void, Float32Array>;
   } | null = null;
 
   function tile(tx: number, tz: number): Float32Array {
-    const key = `${String(tx)}:${String(tz)}`;
-    let t = tiles.get(key);
+    if (newest?.i === tx && newest.j === tz) return newest.data;
+    let t = lookup(tiles, tx, tz);
     if (!t) {
       // Reading a missing tile builds it now, over the scratch grids a half-built tile was using.
       building = null;
@@ -168,18 +196,18 @@ export function createNavField(
         }
       }
     }
-    touch(tiles, key, t, maxTiles);
+    touchTile(tx, tz, t);
     return t;
   }
 
   /** Builds the tile a slice at a time until `over`; true once it is built. */
   function stepTile(tx: number, tz: number, over: () => boolean): boolean {
-    const key = `${String(tx)}:${String(tz)}`;
-    if (building?.key !== key) building = { key, tx, tz, steps: buildTileSteps(tx, tz) };
+    if (building?.tx !== tx || building.tz !== tz)
+      building = { tx, tz, steps: buildTileSteps(tx, tz) };
     for (;;) {
       const next = building.steps.next();
       if (next.done) {
-        touch(tiles, key, next.value, maxTiles);
+        touchTile(tx, tz, next.value);
         building = null;
         return true;
       }
@@ -204,6 +232,53 @@ export function createNavField(
     const a = (t[k] ?? 0) + ((t[k + 1] ?? 0) - (t[k] ?? 0)) * ax;
     const b = (t[k + span] ?? 0) + ((t[k + span + 1] ?? 0) - (t[k + span] ?? 0)) * ax;
     return a + (b - a) * az;
+  }
+
+  /** A scan's unbuilt tiles as (squared distance, tz, tx) triples; kept between scans, so one that finds none allocates nothing. */
+  let missing = new Float64Array(3 * 64);
+  let missingCount = 0;
+
+  /**
+   * Notes the unbuilt tiles whose centre lies within `limit` tiles of (fx, fz), a point in tile units. Distances are
+   * squared sums, not `Math.hypot` (which boxes its arguments, a few dozen bytes for each of hundreds of tiles a scan).
+   */
+  function collectMissing(fx: number, fz: number, reach: number, limit: number): void {
+    const limitSquared = limit * limit;
+    missingCount = 0;
+    for (let tz = Math.floor(fz) - reach; tz <= Math.floor(fz) + reach; tz++) {
+      for (let tx = Math.floor(fx) - reach; tx <= Math.floor(fx) + reach; tx++) {
+        const dx = tx + 0.5 - fx;
+        const dz = tz + 0.5 - fz;
+        const dist = dx * dx + dz * dz;
+        if (dist > limitSquared || hasTile(tx, tz)) continue;
+        if (missingCount * 3 === missing.length) {
+          const grown = new Float64Array(missing.length * 2);
+          grown.set(missing);
+          missing = grown;
+        }
+        missing[missingCount * 3] = dist;
+        missing[missingCount * 3 + 1] = tz;
+        missing[missingCount * 3 + 2] = tx;
+        missingCount++;
+      }
+    }
+  }
+
+  /** Swaps the nearest of the missing tiles from position `n` on (by distance, then tz, then tx) into position `n`. */
+  function nearestToFront(n: number): void {
+    let best = n;
+    for (let k = n + 1; k < missingCount; k++) {
+      const delta = (missing[k * 3] ?? 0) - (missing[best * 3] ?? 0);
+      const dz = (missing[k * 3 + 1] ?? 0) - (missing[best * 3 + 1] ?? 0);
+      const dx = (missing[k * 3 + 2] ?? 0) - (missing[best * 3 + 2] ?? 0);
+      if (delta < 0 || (delta === 0 && (dz < 0 || (dz === 0 && dx < 0)))) best = k;
+    }
+    if (best === n) return;
+    for (let c = 0; c < 3; c++) {
+      const kept = missing[n * 3 + c] ?? 0;
+      missing[n * 3 + c] = missing[best * 3 + c] ?? 0;
+      missing[best * 3 + c] = kept;
+    }
   }
 
   function maskAway(x: number, z: number): { x: number; z: number } {
@@ -235,7 +310,7 @@ export function createNavField(
     ready(x, z) {
       const tx = Math.floor((x - min) / cell / T);
       const tz = Math.floor((z - min) / cell / T);
-      return tiles.has(`${String(tx)}:${String(tz)}`);
+      return hasTile(tx, tz);
     },
     prefetch(x, z, radius, budgetMs) {
       const start = now();
@@ -250,35 +325,28 @@ export function createNavField(
       const size = T * cell;
       const fx = (x - min) / size;
       const fz = (z - min) / size;
-      const reach = Math.ceil(radius / size);
-      const wanted: { tx: number; tz: number; d: number }[] = [];
-      for (let tz = Math.floor(fz) - reach; tz <= Math.floor(fz) + reach; tz++) {
-        for (let tx = Math.floor(fx) - reach; tx <= Math.floor(fx) + reach; tx++) {
-          const d = Math.hypot(tx + 0.5 - fx, tz + 0.5 - fz) * size;
-          if (d <= radius + size * 0.71 && !tiles.has(`${String(tx)}:${String(tz)}`))
-            wanted.push({ tx, tz, d });
-        }
-      }
-      wanted.sort((a, b) => a.d - b.d || a.tz - b.tz || a.tx - b.tx);
+      collectMissing(fx, fz, Math.ceil(radius / size), radius / size + 0.71);
       // A tile half built goes first, however the whale has moved since.
-      if (building && !tiles.has(building.key)) {
+      if (building && !hasTile(building.tx, building.tz)) {
         if (!stepTile(building.tx, building.tz, over)) return false;
       }
-      for (const { tx, tz } of wanted) {
+      for (let n = 0; n < missingCount; n++) {
+        nearestToFront(n);
+        const tx = missing[n * 3 + 2] ?? 0;
+        const tz = missing[n * 3 + 1] ?? 0;
         // Fill this tile's blocks a row at a time; the distance transform itself is cheap.
         for (let bz = tz - 1; bz <= tz + 1; bz++) {
           for (let bx = tx - 1; bx <= tx + 1; bx++) {
-            const key = `${String(bx)}:${String(bz)}`;
-            if (blocks.has(key)) continue;
-            if (pending?.key !== key)
-              pending = { key, bx, bz, data: new Float32Array(T * T), row: 0 };
+            if (lookup(blocks, bx, bz)) continue;
+            if (pending?.bx !== bx || pending.bz !== bz)
+              pending = { bx, bz, data: new Float32Array(T * T), row: 0 };
             if (!blockRows(pending, over)) return false;
-            touch(blocks, key, pending.data, maxBlocks);
+            touch(blocks, { i: bx, j: bz, data: pending.data }, maxBlocks);
             pending = null;
             if (over()) return false;
           }
         }
-        if (!tiles.has(`${String(tx)}:${String(tz)}`) && !stepTile(tx, tz, over)) return false;
+        if (!hasTile(tx, tz) && !stepTile(tx, tz, over)) return false;
         if (over()) return false;
       }
       return true;

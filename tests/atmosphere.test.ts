@@ -5,6 +5,7 @@ import {
   DAY,
   DAY_SECONDS,
   ENV_REFRESH,
+  MOON_TURN,
   createSky,
   pickTimeOfDay,
   type SkyHandle,
@@ -115,6 +116,85 @@ test('the night is dark and quiet: the sun gives no light, the sea and land dim,
   assert.ok(luma(sky.hazeColor) < noon.haze * 0.2, 'the haze darkens');
   assert.ok(sky.hemi.intensity > 0.2 && sky.ambient.intensity > 0.2, 'the moon leaves a cool fill');
   assert.ok(sky.sunDirection.y < 0);
+});
+
+/** Where in the day (a fraction of a day from the seed's own start) the named preset sits. */
+const dayOf = (seed: number, name: (typeof DAY)[number]) =>
+  ((DAY.indexOf(name) - DAY.indexOf(pickTimeOfDay(seed)) + DAY.length) % DAY.length) / DAY.length;
+/** The compass turn, in degrees, from the sun's opposite round to the moon, within (-180, 180]. */
+function moonTurn(sky: SkyHandle): number {
+  const azimuth = (v: THREE.Vector3) => (Math.atan2(v.x, v.z) * 180) / Math.PI;
+  const turn = (((azimuth(sky.moonDirection) - azimuth(sky.sunDirection) - 180) % 360) + 540) % 360;
+  return turn - 180;
+}
+
+test('the night has a glow of its own and a moon; no other time of day has either', () => {
+  for (const seed of [42, 7, 1234, 99]) {
+    const { sky } = makeSky(seed);
+    for (const name of ['morning', 'afternoon', 'golden', 'dusk'] as const) {
+      // The dusk preset is the nearest to the dark, and its sky is left as the sky model draws it.
+      sky.setDay(dayOf(seed, name));
+      assert.equal(sky.night, 0, `${name}, seed ${String(seed)}`);
+      assert.equal(sky.moon, 0, `${name}, seed ${String(seed)}`);
+    }
+    sky.setDay(dayOf(seed, 'night'));
+    assert.equal(sky.night, 1);
+    assert.equal(sky.moon, 1);
+    assert.equal(item(sky.sky.material.uniforms, 'skyNight').value, 1);
+    assert.equal(item(sky.sky.material.uniforms, 'skyMoon').value, 1);
+    sky.dispose();
+  }
+});
+
+test("the moon is the sun's opposite turned round by the seed's own angle: up while the sun is down, still under reduced motion, a pure function of the seed and the day", () => {
+  const turns = new Set<string>();
+  for (const seed of [42, 7, 1234, 99, 5, 21]) {
+    const { sky } = makeSky(seed);
+    sky.setDay(dayOf(seed, 'night'));
+    // The sun is 13 degrees down, so the moon is 13 up.
+    expect(sky.moonDirection.y).toBeCloseTo(Math.sin((13 * Math.PI) / 180), 5);
+    const turn = moonTurn(sky);
+    assert.ok(
+      Math.abs(turn) >= MOON_TURN[0] - 1e-6 && Math.abs(turn) <= MOON_TURN[1] + 1e-6,
+      `seed ${String(seed)}: the moon is ${turn.toFixed(1)} degrees from the sun's opposite`,
+    );
+    turns.add(turn.toFixed(2));
+    // Up exactly while the sun is down, the whole day round.
+    for (let step = 0; step <= 60; step++) {
+      sky.setDay(step / 60);
+      const sunUp = sky.sunDirection.y > 0.02;
+      const moonUp = sky.moonDirection.y > 0.02;
+      assert.ok(!(sunUp && moonUp), `seed ${String(seed)}, day ${(step / 60).toFixed(2)}`);
+      assert.equal(moonTurn(sky).toFixed(6), turn.toFixed(6), 'the same turn through the day');
+    }
+    // The same seed and day give the same moon.
+    sky.setDay(dayOf(seed, 'night'));
+    const again = makeSky(seed);
+    again.sky.setDay(dayOf(seed, 'night'));
+    assert.ok(again.sky.moonDirection.equals(sky.moonDirection));
+    // A frozen day (reduced motion steps by nothing) leaves it where it was.
+    const before = sky.moonDirection.clone();
+    sky.update(0, 0.5);
+    sky.update(0, 1);
+    assert.ok(sky.moonDirection.equals(before));
+    again.sky.dispose();
+    sky.dispose();
+  }
+  assert.ok(turns.size > 3, 'seeds turn it differently');
+});
+
+test('a veil of cloud over the sun veils the moon too', () => {
+  const { sky } = makeSky(42);
+  const weather = createWeather(42, sky.clearCover);
+  sky.setDay(dayOf(42, 'night'));
+  weather.set('overcast');
+  sky.setWeather(weather.look);
+  sky.update(0);
+  assert.ok(sky.moon < 0.6, `${String(sky.moon)} under overcast`);
+  weather.set('clear');
+  sky.setWeather(weather.look);
+  sky.update(0);
+  assert.equal(sky.moon, 1);
 });
 
 test("lights are written once per frame from the sky's own record, so the underwater dimming has a base to start from", () => {
@@ -263,10 +343,11 @@ test('the route indicator: off by default, in on a region change, out after six 
   route.update(1, 1, 1500);
   assert.equal(route.visible, true);
   assert.equal(route.text, 'Tropical · 1.5 km');
-  for (let t = 0; t < ROUTE_SECONDS - 2; t++) route.update(1, 1, 1600 + t * 100);
-  assert.equal(route.visible, true, 'still there before six seconds');
-  route.update(1.5, 1, 2300);
-  assert.equal(route.visible, false, 'gone after six seconds');
+  for (let t = 0; t < ROUTE_SECONDS - 1; t++) route.update(1, 1, 1600 + t * 100);
+  route.update(0.5, 1, 2200);
+  assert.equal(route.visible, true, 'still there five and a half seconds after the change');
+  route.update(1, 1, 2300);
+  assert.equal(route.visible, false, 'gone six seconds after the change');
   route.update(1, 1, 2400);
   assert.equal(route.visible, false);
   route.update(1, 2, 2400);
@@ -277,6 +358,13 @@ test('the route indicator: off by default, in on a region change, out after six 
   assert.equal(route.visible, false);
   route.setEnabled(true, 3, 120000);
   assert.equal(route.text, 'Deep blue · 120 km');
+  // A gap longer than the label's life (a stalled frame, a tab coming back) that brings a change still shows the new
+  // region its full six seconds, and the old label is gone.
+  route.update(ROUTE_SECONDS + 4, 0, 130000);
+  assert.equal(route.visible, true, 'a change after a long gap shows');
+  assert.equal(route.text, 'Temperate · 130 km');
+  route.update(ROUTE_SECONDS + 4, 0, 131000);
+  assert.equal(route.visible, false, 'and a long gap with no change ends it');
 });
 
 import { STARS_FROM, STARS_FULL } from '../src/sky.js';

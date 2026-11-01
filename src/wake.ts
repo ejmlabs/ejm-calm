@@ -50,6 +50,11 @@ const LIFT = 0.04;
 /** Seconds of age at which the trail has faded out. */
 const LIFE = 4.5;
 const PEAK = 0.24;
+/**
+ * Trail points are a step apart, a few metres at the whale's top speed. One further than this from the last (after a
+ * dive that left no wake, or a jump) starts a new pass, because a ribbon drawn across the gap is a line on the sea.
+ */
+const JOIN = 10;
 /** Columns across the trail and how strong each is: a soft ridge down the middle that melts into the sea at both edges. */
 const ACROSS = [-1, -0.5, 0, 0.5, 1] as const;
 const ACROSS_ALPHA = [0, 0.4, 1, 0.4, 0] as const;
@@ -80,13 +85,15 @@ export function createWake(options: WakeOptions = {}): Wake {
   const depths = options.depths ?? [-2.6, -0.9];
   const surface = options.surface ?? (() => 0);
 
-  // Trail points, newest first in ring order: world x, z, heading, strength, age.
+  // Trail points, newest first in ring order: world x, z, heading, strength, age, a serial for the patchiness, and
+  // whether the point starts a new pass (1) or follows the one before it (0).
   const px = new Float64Array(count);
   const pz = new Float64Array(count);
   const ph = new Float64Array(count);
   const ps = new Float64Array(count);
   const pa = new Float64Array(count);
   const pn = new Float64Array(count);
+  const pb = new Uint8Array(count);
   let serial = 0;
   let head = 0;
   let filled = 0;
@@ -161,11 +168,14 @@ export function createWake(options: WakeOptions = {}): Wake {
     for (let k = 0; k < filled; k++) {
       const i = (head - 1 - k + count * 2) % count;
       const age = pa[i] ?? 0;
+      // The two rows either side of a break fade to nothing, so no ribbon is drawn across it.
+      const inPass = (pb[i] ?? 0) === 0 && (k === 0 || (pb[(i + 1) % count] ?? 0) === 0);
       // Churned water is patchy: each point is a little stronger or weaker than its neighbours.
       // Broken foam: patches along the trail, and ragged across it.
-      const a =
-        fade(age, ps[i] ?? 0) *
-        (0.3 + 0.7 * Math.abs(Math.sin((pn[i] ?? 0) * 0.8) * Math.cos((pn[i] ?? 0) * 0.31 + 1)));
+      const a = inPass
+        ? fade(age, ps[i] ?? 0) *
+          (0.3 + 0.7 * Math.abs(Math.sin((pn[i] ?? 0) * 0.8) * Math.cos((pn[i] ?? 0) * 0.31 + 1)))
+        : 0;
       const half = width + spread * age;
       // Across the heading: the whale's right is (−fz, fx) with forward (−cos h, sin h).
       const fx = -Math.cos(ph[i] ?? 0);
@@ -243,15 +253,16 @@ export function createWake(options: WakeOptions = {}): Wake {
         pa[at] = (pa[at] ?? 0) + dt;
       }
       since += dt;
-      // A jump (a recentre of the debug travel) leaves the old trail behind: start again.
-      if (filled > 0) {
-        const last = (head - 1 + count) % count;
-        if (Math.hypot(source.x - (px[last] ?? 0), source.z - (pz[last] ?? 0)) > 120) filled = 0;
-      }
       if (since >= interval && strength > 0.02) {
         since = 0;
-        px[head] = source.x - fx * stern;
-        pz[head] = source.z - fz * stern;
+        const x = source.x - fx * stern;
+        const z = source.z - fz * stern;
+        const last = (head - 1 + count) % count;
+        // The old pass is left to fade where it lies.
+        pb[head] =
+          filled > 0 && Math.hypot(x - (px[last] ?? 0), z - (pz[last] ?? 0)) <= JOIN ? 0 : 1;
+        px[head] = x;
+        pz[head] = z;
         ph[head] = source.heading;
         ps[head] = strength;
         pa[head] = 0;
@@ -287,7 +298,9 @@ export function createWake(options: WakeOptions = {}): Wake {
         const j = (head - k + count * 2) % count;
         // The newest points are still fading in; only the fade-out ends the count.
         if ((pa[i] ?? 0) > 0.4 && fade(pa[i] ?? 0, ps[i] ?? 0) < alpha) break;
-        metres += Math.hypot((px[i] ?? 0) - (px[j] ?? 0), (pz[i] ?? 0) - (pz[j] ?? 0));
+        // Nothing is drawn across the gap between two passes.
+        if (pb[j] === 0)
+          metres += Math.hypot((px[i] ?? 0) - (px[j] ?? 0), (pz[i] ?? 0) - (pz[j] ?? 0));
       }
       return metres;
     },

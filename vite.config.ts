@@ -7,7 +7,7 @@ export default defineConfig({
     modulePreload: { polyfill: false },
     target: 'es2022',
     assetsInlineLimit: 0,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',

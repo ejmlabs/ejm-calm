@@ -489,6 +489,9 @@ function tick(now: number): void {
     light: sky.level,
     shallowLight: sky.shallowLight,
     sun: sky.sun.intensity / SUN_INTENSITY,
+    moonDirection: sky.moonDirection,
+    moon: sky.moon,
+    night: sky.night,
   });
   world.ocean.setWaterColor(regionLook.water);
   world.landStream.setSky(
@@ -517,9 +520,10 @@ function tick(now: number): void {
   shipFx.update(world.ships.active(), sky.level);
   markJourney();
   if (routeOn) {
-    // Six seconds of the clock on the wall, not of the simulation: slow frames and reduced motion do not stretch it.
+    // Six seconds of the clock on the wall, not of the simulation: slow frames and reduced motion do not stretch it,
+    // so a frame's time is not capped (a CPU renderer below one frame a second kept it up for longer).
     indicator.update(
-      Math.min(1, (now - routeClock) / 1000),
+      (now - routeClock) / 1000,
       world.land.regions.dominantAt(whale.state.x, whale.state.z),
       journey.path,
     );
@@ -893,6 +897,8 @@ if (debug) {
         day: sky.phase().day,
         sunElevation: (Math.asin(sky.sunDirection.y) * 180) / Math.PI,
         sun: [sky.sunDirection.x, sky.sunDirection.y, sky.sunDirection.z],
+        moon: [sky.moonDirection.x, sky.moonDirection.y, sky.moonDirection.z],
+        moonShine: sky.moon,
         weather: weather.target(),
         cloudCover: weather.look.coverage,
         sea: weather.look.sea,

@@ -20,8 +20,6 @@ const KEEP = 2400;
 /** Ships sink below the haze between these distances from the whale. */
 const SHOW = 1250;
 const HIDE = 1650;
-/** Sails sway only on ships this near the whale: the cloth moves under a pixel from further, and rewriting every sail vertex is the ship stream's main cost. */
-const BILLOW = 400;
 /** Metres a hidden ship sits below the surface. */
 const SINK = 8;
 const START_KEY = 'start';
@@ -219,7 +217,7 @@ export function createShipStream(options: {
         const group = ship.handle.group;
         group.visible = shown && ship.vis > 0.002;
         if (!group.visible) continue;
-        ship.handle.update(dt, time, shore, d < BILLOW);
+        ship.handle.update(dt, time, shore);
         group.position.y -= (1 - ship.vis) * SINK;
         active.push(ship.handle);
       }

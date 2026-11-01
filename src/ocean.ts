@@ -14,6 +14,11 @@ const REFLECTION_GAIN = 0.85;
 /** Sun glitter in scene light at a clear noon: the sparkle of single facets, and the sheen of the path they make. */
 const GLITTER = 70;
 const SHEEN = 1.6;
+/** The same two terms for the moon at full, in scene light: a far dimmer source, so a path of faint sparkle. */
+const MOON_GLITTER = 1;
+const MOON_SHEEN = 0.28;
+/** The sea's own colour takes this much more of the night's light at full night: the sky lights deep water a little even when the sun does not. */
+const NIGHT_WATER = 1;
 /** The foam's lattice, in the wind's frame, repeats every this many metres (a power of two, so every octave tiles). */
 export const FOAM_PERIOD = 1024;
 /** Foam drifts downwind at half the speed of the long roller: crests run on through it and leave it behind them. */
@@ -30,8 +35,9 @@ export interface OceanHandle {
   setWaterColor: (color: THREE.Color) => void;
   /**
    * The light of the day: the haze colour (display) that lifts dark reflections, at the output's exposure; brightness
-   * (0 dark to 1 day) of the water and of the shallows; and the sun's own strength (0 hidden to 1 clear), which
-   * sets its glitter.
+   * (0 dark to 1 day) of the water and of the shallows; the sun's own strength (0 hidden to 1 clear), which sets its
+   * glitter; the moon's direction and strength, which set its own; and how far the night has come (0 to 1), which
+   * lifts the water's own colour.
    */
   setSky: (sky: {
     haze: THREE.Color;
@@ -39,6 +45,9 @@ export interface OceanHandle {
     light: number;
     shallowLight: number;
     sun: number;
+    moonDirection: THREE.Vector3;
+    moon: number;
+    night: number;
   }) => void;
   /** World X/Z of render (0, 0); keeps ripples and shelf maps on the world after a recentre. */
   setOrigin: (x: number, z: number) => void;
@@ -169,6 +178,8 @@ export function createOcean(
   const maps = { near: options.shelves?.near, far: options.shelves?.far };
   const origin = { x: 0, z: 0 };
   let light = 1;
+  /** The brightness of the water's own colour: the day's light, and at night a little more. */
+  let waterLight = 1;
   let foamClock = 0;
 
   /** Lays the foam's lattice on the world: the origin and the drift, reduced to the period in float64 like the ripples. */
@@ -239,15 +250,20 @@ export function createOcean(
       look?.whaleBody.value.set(x, z, heading, y);
     },
     setWaterColor(color: THREE.Color) {
-      base.waterColor.value.copy(color).multiplyScalar(light);
+      base.waterColor.value.copy(color).multiplyScalar(waterLight);
     },
     setSky(sky) {
       light = sky.light;
+      waterLight = sky.light * (1 + NIGHT_WATER * sky.night);
       if (look) radianceFor(sky.haze, sky.exposure, look.reflectionHaze.value);
       if (look?.shelf)
         look.shelf.shallowLight.value = (options.shelves?.light ?? 1) * sky.shallowLight;
       base.sunColor.value.set(0xe8dcc0).multiplyScalar(sky.light);
-      if (sea) sea.glitter.value = sky.sun;
+      if (sea) {
+        sea.glitter.value = sky.sun;
+        sea.moonGlitter.value = sky.moon;
+        sea.moonDirection.value.copy(sky.moonDirection);
+      }
     },
     setOrigin(x: number, z: number) {
       origin.x = x;
@@ -490,6 +506,8 @@ const seaFragmentPatches: ShaderPatch[] = [
 				uniform float foamLight;
 				uniform float seaTop;
 				uniform float glitter;
+				uniform float moonGlitter;
+				uniform vec3 moonDirection;
 				uniform vec2 foamWind;
 				uniform vec2 foamShift;
 				${SEA_GLSL}
@@ -512,6 +530,12 @@ const seaFragmentPatches: ShaderPatch[] = [
         float facet = max( 0.0, dot( surfaceNormal, toSun ) );
         float low = smoothstep( -0.02, 0.08, sunDirection.y );
         albedo += sunColor * glitter * low * ( ${GLITTER.toFixed(1)} * pow( facet, 1400.0 ) + ${SHEEN.toFixed(1)} * pow( facet, 160.0 ) );
+        // The moon's, in the same way and cool in colour, from the moon's own direction; by day there is none to draw.
+        if ( moonGlitter > 0.0 ) {
+          float moonFacet = max( 0.0, dot( surfaceNormal, normalize( moonDirection + eyeDirection ) ) );
+          float moonLow = smoothstep( -0.02, 0.08, moonDirection.y );
+          albedo += vec3( 0.7, 0.82, 1.0 ) * moonGlitter * moonLow * ( ${MOON_GLITTER.toFixed(2)} * pow( moonFacet, 1400.0 ) + ${MOON_SHEEN.toFixed(2)} * pow( moonFacet, 160.0 ) );
+        }
       }
       vec3 outgoingLight = albedo;`,
   },
@@ -564,6 +588,8 @@ function applySea(material: THREE.ShaderMaterial, growth: number, waves: Float32
     rippleGain: { value: 1.5 },
     foamLight: { value: 1 },
     glitter: { value: 1 },
+    moonGlitter: { value: 0 },
+    moonDirection: { value: new THREE.Vector3(0, -1, 0) },
     foamWind: { value: new THREE.Vector2(1, 0) },
     foamShift: { value: new THREE.Vector2() },
   };

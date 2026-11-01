@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { createWake, wakeStrength } from '../src/wake.js';
+import { createWake, wakeStrength, type Wake } from '../src/wake.js';
 import { createBirds } from '../src/birds.js';
 import { FOV, FOV_LIFT, FollowCamera, LEAN_MAX, PULL_BACK, pullBackAt } from '../src/camera.js';
 import { swellAt, swellRate, SWELL_SPEED_GAIN } from '../src/swell.js';
@@ -55,12 +55,72 @@ test('a cruising whale leaves a wake at least 40 m long in one draw, and a slow 
   wake.dispose();
 });
 
-test('the wake starts afresh after a jump rather than drawing a line across the sea', () => {
+/** The longest edge (m) of any trail triangle with a corner drawn at more than `alpha`: a ribbon across a gap is a long one. */
+function longestDrawnEdge(wake: Wake, alpha = 0.002): number {
+  const [mesh] = wake.group.children as THREE.Mesh[];
+  assert.ok(mesh, 'the wake is one mesh');
+  const { index } = mesh.geometry;
+  assert.ok(index, 'the wake is indexed');
+  const position = item(mesh.geometry.attributes, 'position');
+  const color = item(mesh.geometry.attributes, 'color');
+  let longest = 0;
+  for (let t = 0; t < index.count; t += 3) {
+    const corners = [index.getX(t), index.getX(t + 1), index.getX(t + 2)];
+    if (!corners.some((v) => color.getW(v) > alpha)) continue;
+    for (const [a, b] of [
+      [0, 1],
+      [1, 2],
+      [2, 0],
+    ] as const) {
+      const from = item(corners, a);
+      const to = item(corners, b);
+      longest = Math.max(
+        longest,
+        Math.hypot(
+          position.getX(from) - position.getX(to),
+          position.getZ(from) - position.getZ(to),
+        ),
+      );
+    }
+  }
+  return longest;
+}
+
+/** A whale swimming along -x at 16 m/s for `steps` frames, at body height `y`, from `x`; returns where it got to. */
+function swimWake(wake: Wake, x: number, y: number, steps: number): number {
+  for (let i = 0; i < steps; i++) {
+    x -= 16 / 30;
+    wake.update({ x, y, z: 0, heading: 0, speed: 16 }, 1 / 30);
+  }
+  return x;
+}
+
+test('a jump starts a new pass of the wake rather than drawing a ribbon across the sea', () => {
+  for (const jump of [80, 40000]) {
+    const wake = createWake();
+    const before = swimWake(wake, 0, 0, 60);
+    assert.ok(longestDrawnEdge(wake) < 12, 'a plain trail has no long edge');
+    swimWake(wake, before - jump, 0, 30);
+    assert.ok(
+      longestDrawnEdge(wake) < 12,
+      `${longestDrawnEdge(wake).toFixed(0)} m edge after a ${String(jump)} m jump`,
+    );
+    assert.ok(wake.length(0) > 20, 'the new pass and the old one fading both stay');
+    wake.dispose();
+  }
+});
+
+test('a dive that leaves no wake splits it in two instead of bridging the gap', () => {
   const wake = createWake();
-  for (let i = 0; i < 60; i++)
-    wake.update({ x: i * 0.5, y: 0, z: 0, heading: Math.PI, speed: 20 }, 1 / 30);
-  wake.update({ x: 40000, y: 0, z: 0, heading: Math.PI, speed: 20 }, 1 / 30);
-  assert.ok(wake.length(0) < 10, `trail ${wake.length(0).toFixed(1)} m after a jump`);
+  const surfaced = swimWake(wake, 0, 0, 60);
+  const dived = swimWake(wake, surfaced, -6, 45);
+  swimWake(wake, dived, 0, 30);
+  assert.ok(
+    longestDrawnEdge(wake) < 12,
+    `${longestDrawnEdge(wake).toFixed(0)} m edge across a dive of 1.5 s`,
+  );
+  assert.ok(wake.length(0) > 20, 'both passes are still drawn');
+  wake.dispose();
 });
 
 /** Birds in render space (the group sits at the origin in tests), by reading the instance matrices. */
@@ -153,6 +213,13 @@ test('the sky patches onto three.js: its clouds take a wind vector and a low sun
     patched.includes('texColor *= 1.0 + skyGlow * exp( -abs( direction.y )'),
     'the horizon belt is in the sky shader, thinning both ways from the horizon',
   );
+  for (const night of [
+    'uniform float skyNight;',
+    'uniform float skyMoon;',
+    'nightHorizon',
+    'moonDirection',
+  ])
+    assert.ok(patched.includes(night), `${night} is in the sky shader`);
 });
 
 function chase(options: { portrait?: boolean } = {}) {
@@ -416,22 +483,6 @@ test('ships are two meshes each (hull and rig, and the sails), shaped, and sway 
       ship.dispose();
     }
   }
-});
-
-test('a ship told not to billow still moves but leaves its sails as they were', () => {
-  const stub = { clearance: () => 1000, away: () => ({ x: 1, z: 0 }) };
-  const ship = createShip(item(layoutWorld(42).ships, 0));
-  const sails = () =>
-    (item(ship.group.children, 1) as THREE.Mesh).geometry.getAttribute('position').array.slice();
-  ship.update(1 / 30, 0, stub);
-  const before = sails();
-  const at = ship.group.position.clone();
-  ship.update(1 / 30, 1.3, stub, false);
-  assert.deepEqual(sails(), before);
-  assert.ok(!ship.group.position.equals(at), 'the hull still rides the swell');
-  ship.update(1 / 30, 1.3, stub);
-  assert.notDeepEqual(sails(), before, 'the sails sway when asked to');
-  ship.dispose();
 });
 
 test('ships have foam always and lanterns only in the dark, in two draws for all of them', () => {
