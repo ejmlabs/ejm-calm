@@ -291,10 +291,32 @@ float shows( float period ) {
   return 1.0 - smoothstep( 0.2, 0.5, footprint / period );
 }
 
+// Metres one pixel climbs: rock layers change with height alone, so this is what they alias against. They are long,
+// regular bands, so they fade out sooner than the grain: whole while a period spans 12 pixels, gone at 5.
+float climb;
+float layerShows( float period ) {
+  return 1.0 - smoothstep( 0.08, 0.2, climb / period );
+}
+
 // Noise of the given period, projected from the three axes and blended by the facing (triplanar), so steep faces
 // are not smeared and no projection seams show.
 float tri( vec3 p, vec3 w, float period ) {
   return w.x * vnoise( p.zy / period ) + w.y * vnoise( p.xz / period ) + w.z * vnoise( p.xy / period );
+}
+
+// Value noise steepened so each rock bed holds its own tone, from -0.5 to 0.5.
+float bedAt( vec2 uv ) {
+  return smoothstep( 0.25, 0.75, vnoise( uv ) ) - 0.5;
+}
+
+// Rock beds about this thick (metres) as a tone from -0.5 to 0.5: 0 on flat ground, fading to 0 with distance. The
+// noise is stretched along the face, so beds thicken, thin and pinch out as they run, and is read from the two side
+// axes as the rain streaks are. A sine of height would read as zebra stripes, and alias.
+float beds( vec3 p, vec3 w, float warp, float thickness ) {
+  float up = ( p.y + warp ) / thickness;
+  float run = 1.0 / ( 14.0 * thickness );
+  float tone = w.x * bedAt( vec2( up, p.z * run ) ) + w.z * bedAt( vec2( up, p.x * run ) );
+  return tone * layerShows( thickness );
 }
 
 void main() {
@@ -319,6 +341,7 @@ void main() {
   ${bump ? `float reach = 1.0 - smoothstep( ${(bump * 0.3).toFixed(1)}, ${bump.toFixed(1)}, d );` : ''}
   // Derivatives before any branch, where they are defined for every pixel.
   footprint = length( fwidth( vWorld ) );
+  climb = fwidth( vWorld.y );
   // World position fixed to the ground, whatever the floating origin.
   vec3 p = vWorld + vec3( origin.x, 0.0, origin.y );
   // Rock detail belongs to rock: a slope only part way to a face stays grass.
@@ -342,14 +365,15 @@ void main() {
     float sand = vDetail.y;
     float forest = vDetail.z;
     float open = ( 1.0 - rock ) * ( 1.0 - sand );
-    // Rock: strata about 7 m apart with finer bedding between, wandering with a broad warp, and grit.
+    // Rock: beds of uneven thickness, broad ones that carry far and thin partings that fade first, tilting and wandering
+    // with a broad warp, and grit.
     float warp = vnoise( p.xz / 70.0 ) * 9.0 + tri( p, w, 9.0 ) * 1.6;
-    float strata = ( sin( ( p.y + warp ) * 0.9 ) * 0.5 + 0.5 ) * shows( 7.0 );
-    float bedding = ( sin( ( p.y + warp * 0.4 ) * 3.7 ) * 0.5 ) * shows( 1.7 );
+    float layering = 0.0;
+    if ( rock > 0.0 ) layering = 0.5 * beds( p, w, warp, 12.0 ) + beds( p, w, warp, 4.5 ) + 0.5 * beds( p, w, warp, 1.6 );
     float grit = ( tri( p, w, 1.7 ) - 0.5 ) * shows( 1.7 );
     float blocks = ( tri( p, w, 5.0 ) - 0.5 ) * shows( 5.0 );
-    vec3 bands = mix( vec3( 0.93, 0.92, 0.9 ), vec3( 1.04, 1.02, 0.97 ), strata );
-    albedo = mix( albedo, albedo * bands * ( 1.0 + 0.12 * bedding + 0.26 * grit + 0.18 * blocks ), rock * near );
+    vec3 bands = vec3( 0.985, 0.97, 0.935 ) + vec3( 0.11, 0.1, 0.07 ) * layering;
+    albedo = mix( albedo, albedo * bands * ( 1.0 + 0.26 * grit + 0.18 * blocks ), rock * near );
     // Wet rock and sand along the waterline, ragged at its top.
     float wet = 1.0 - smoothstep( 0.2, 1.4 + 1.2 * vnoise( p.xz / 6.0 ), h );
     albedo *= 1.0 - 0.4 * wet * max( rock, sand ) * near;
@@ -363,7 +387,7 @@ void main() {
     albedo *= 1.0 + ( 0.1 * grit + 0.05 * ripple ) * sand * near;
     ${
       bump
-        ? `height = ( rock * ( strata * 0.9 + bedding * 0.6 + grit * 0.7 + blocks * 1.2 ) + forest * crowns * 1.4 + open * ( 1.0 - forest ) * tuft * 0.3 ) * reach;`
+        ? `height = ( rock * ( layering * 0.5 + grit * 0.7 + blocks * 1.2 ) + forest * crowns * 1.4 + open * ( 1.0 - forest ) * tuft * 0.3 ) * reach;`
         : ''
     }
   }
