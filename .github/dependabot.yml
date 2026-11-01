@@ -9,6 +9,19 @@ updates:
     groups:
       compatible-updates:
         update-types: [minor, patch]
+    ignore:
+      # The shared strict lint layer (eslint.strict.mjs) names these exact versions; they move with it, in the pull
+      # request that resyncs the layer from ejmlabs/.github, never on their own.
+      - dependency-name: "eslint"
+      - dependency-name: "@eslint/js"
+      - dependency-name: "typescript-eslint"
+      - dependency-name: "typescript"
+      - dependency-name: "@tsconfig/strictest"
+      - dependency-name: "globals"
+      - dependency-name: "@eslint-community/eslint-plugin-eslint-comments"
+      # calm runs on Node 24 only (engines): its types follow that major.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
