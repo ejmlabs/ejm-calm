@@ -343,10 +343,11 @@ test('the route indicator: off by default, in on a region change, out after six 
   route.update(1, 1, 1500);
   assert.equal(route.visible, true);
   assert.equal(route.text, 'Tropical · 1.5 km');
-  for (let t = 0; t < ROUTE_SECONDS - 2; t++) route.update(1, 1, 1600 + t * 100);
-  assert.equal(route.visible, true, 'still there before six seconds');
-  route.update(1.5, 1, 2300);
-  assert.equal(route.visible, false, 'gone after six seconds');
+  for (let t = 0; t < ROUTE_SECONDS - 1; t++) route.update(1, 1, 1600 + t * 100);
+  route.update(0.5, 1, 2200);
+  assert.equal(route.visible, true, 'still there five and a half seconds after the change');
+  route.update(1, 1, 2300);
+  assert.equal(route.visible, false, 'gone six seconds after the change');
   route.update(1, 1, 2400);
   assert.equal(route.visible, false);
   route.update(1, 2, 2400);
@@ -357,6 +358,13 @@ test('the route indicator: off by default, in on a region change, out after six 
   assert.equal(route.visible, false);
   route.setEnabled(true, 3, 120000);
   assert.equal(route.text, 'Deep blue · 120 km');
+  // A gap longer than the label's life (a stalled frame, a tab coming back) that brings a change still shows the new
+  // region its full six seconds, and the old label is gone.
+  route.update(ROUTE_SECONDS + 4, 0, 130000);
+  assert.equal(route.visible, true, 'a change after a long gap shows');
+  assert.equal(route.text, 'Temperate · 130 km');
+  route.update(ROUTE_SECONDS + 4, 0, 131000);
+  assert.equal(route.visible, false, 'and a long gap with no change ends it');
 });
 
 import { STARS_FROM, STARS_FULL } from '../src/sky.js';

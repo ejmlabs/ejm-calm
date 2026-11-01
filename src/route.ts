@@ -43,14 +43,14 @@ export function createRoute(names: readonly string[]): RouteIndicator {
     },
     update(dt, current, metres) {
       if (!enabled) return;
+      // The time since the last frame runs down the label already showing, before any change: a new region always
+      // gets its full six seconds from now, however long the gap before it (a stalled frame, a tab coming back).
+      left = Math.max(0, left - dt);
       if (current !== region) {
         region = current;
         left = ROUTE_SECONDS;
       }
-      if (left > 0) {
-        left = Math.max(0, left - dt);
-        read(metres);
-      }
+      if (left > 0) read(metres);
       state.visible = left > 0;
     },
   };
